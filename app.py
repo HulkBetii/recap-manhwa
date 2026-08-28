@@ -720,7 +720,7 @@ class CrawlRequest(BaseModel):
     concurrency: int = Field(default=5, ge=1, le=5)
     image_quality: int = Field(default=20, ge=10, le=100)
     pdf_quality: int = Field(default=20, ge=10, le=100)
-    language: str = "vi"
+    language: str = "en"
     vlm_provider: Literal["gemini"] = "gemini"
     voice_id: str = "ai33pro"
     ref_audio_path: Optional[str] = None
@@ -2325,7 +2325,7 @@ async def run_crawler_task(
     concurrency: int = 5,
     image_quality: int = 80,
     pdf_quality: int = 80,
-    language: str = "vi",
+    language: str = "en",
     voice_id: str = "ai33pro",
 ):
     global crawler_running, stop_requested
@@ -2478,7 +2478,7 @@ async def run_auto_summarization_flow(
     concurrency: int = 5,
     image_quality: int = 80,
     pdf_quality: int = 80,
-    language: str = "vi",
+    language: str = "en",
 ):
     global stop_requested
     vlm_url = "https://gemini.google.com/app"
@@ -3225,7 +3225,7 @@ def generate_gemini_prompt(
     comic_title: str,
     ep: int,
     total_pages: int,
-    target_language: str = "vi",
+    target_language: str = "en",
     glossary: str = None,
 ) -> str:
     language_map = {
@@ -3280,37 +3280,32 @@ def generate_gemini_prompt(
     # ---------------------------------------------------------
     if ep == 1:
         intro_rule = f"""
-EPISODE 1 HOOK:
+EPISODE 1 HIGH-RETENTION HOOK (0–5s GOLDEN RULE):
 
-The first output line must function as a strong short-form video hook
-that introduces the core premise of "{comic_title}".
+The very first output line MUST be an intense, high-retention opening hook that instantly grips the viewer's curiosity and prevents drop-off in the first 5 seconds.
+
+Hook Formula:
+[Shocking Paradox / Dire Crisis] + [Mysterious Twist / Hidden Power / High Stakes Teaser]
+
+Examples of Top US Recap Hooks:
+- "Branded the weakest hunter on Earth and left for dead in a double dungeon, he's about to wake up with a power that defies the gods."
+- "Betrayed by the very guild he built from scratch, he was executed in silence—only to open his eyes ten years in the past."
+- "Everyone called his unique ability utterly useless, until the apocalypse arrived and turned his skill into the ultimate cheat code."
 
 Requirements:
-- Write the hook entirely in {lang_name}.
-- Keep it dramatic, clear, and easy to understand.
-- Introduce the protagonist and their initial situation.
-- Highlight the main inciting event shown or clearly established by the
-  provided material.
-- Give viewers a brief teaser of the larger premise without inventing
-  events that are not supported by reliable information.
-- Do not reveal unnecessary future plot details.
-- Do not use humor in the hook.
-- End naturally with a short transition that encourages the viewer to
-  continue watching.
-- Keep the hook concise: approximately 1–2 short sentences.
-- Assign the hook to the strongest relevant page showing the protagonist
-  or the central story premise.
-- The hook must still follow the normal output format.
+- Write in punchy, natural {lang_name} (< 18 words, 2.5s–4.0s spoken).
+- Maximum curiosity gap: make it impossible for the viewer to click away.
+- Zero throat-clearing (NEVER start with "Welcome", "Today we", or generic introductions).
+- Assign this hook to the most visually striking opening page showing the protagonist or the inciting incident.
+- No comedy or sarcasm in this opening line—keep it tense, cinematic, and high-stakes.
 """
 
     else:
         intro_rule = """
 EPISODE CONTINUATION:
 
-This is not Episode 1.
-
-Start directly with the story. Do not add introductions, greetings,
-episode announcements, or generic welcoming statements.
+This is not Episode 1. Start directly in media res with the immediate action or cliffhanger resolution.
+Do NOT include any greetings, episode announcements, recaps of past episodes, or generic welcoming statements.
 """
 
     # ---------------------------------------------------------
@@ -3331,13 +3326,31 @@ LANGUAGE RULES:
 """
     else:
         language_rules = f"""
-LANGUAGE RULES:
-- Write the entire output naturally in {lang_name}.
-- Do not unnecessarily mix unrelated languages or scripts into the output.
+LANGUAGE & US MANHWA/WEBTOON CULTURE RULES:
+- Write like a top US YouTube Manhwa Recap narrator (e.g. Manga Recaps, Plot Armor, Manhwa Clan).
+- Use natural Western manhwa community terminology and tropes where appropriate:
+  * Awakened abilities, Hunter rankings (S-Rank, E-Rank), Dungeon Break, Status Window / System Prompt, Leveling Up;
+  * Overpowered (OP) Protagonist, Regressor, Reincarnator, Hidden Mastermind, Aura / Killing Intent, flexing / humbled.
+- Verbal Velocity: Use strong, active transitive verbs (e.g., 'obliterates', 'outsmarts', 'unleashes', 'corners', 'exposes', 'shatters', 'ambushes') rather than passive explanations ('is seen doing', 'was attacked by').
+
+YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY:
+- To prevent YouTube demonetization or age-restrictions, NEVER use raw graphic or prohibited terms (such as suicide, murder, massacre, slaughter, bloodbath, kill).
+- Always use dramatic, high-energy YouTube-safe alternatives:
+  * Use 'eliminated', 'dispatched', 'wiped out', 'taken down', 'neutralized', 'sent to the afterlife', 'erased', 'finished off', or 'crushed'.
 - Follow the glossary consistently.
-- Preserve proper names when translating them would be unnatural unless
-  an explicit glossary translation is provided.
+- Preserve proper names when translating them would be unnatural unless an explicit glossary translation is provided.
 """
+
+    if lang_key in {"en", "english"}:
+        prompt_examples = """5 - He thought the nightmare was finally over, but the real dungeon boss just spawned.#
+[12, 13] - As the beast lunges forward, he dodges instantly and slices off its arm.#
+[14, 15, 16] - With a single devastating strike, the monster roars in agony before crashing down.#
+24 - And in the end, an ominous system alert warns him of an even deadlier crisis.#"""
+    else:
+        prompt_examples = """5 - Cậu vừa tưởng mọi chuyện đã kết thúc, nhưng hóa ra rắc rối mới chỉ bắt đầu.#
+[12, 13] - Trong lúc mọi người còn hoang mang, anh lập tức rút kiếm chém đứt cánh tay đối thủ.#
+[14, 15, 16] - Đòn tấn công uy lực khiến quái vật gầm rú dữ dội rồi đổ gục hoàn toàn xuống đất.#
+24 - Và đến cuối cùng, thứ chờ đợi họ lại là một biến cố còn nguy hiểm hơn nữa.#"""
 
     # ---------------------------------------------------------
     # Main prompt
@@ -3423,10 +3436,12 @@ The final segment must represent the latest meaningful story development
 shown in the provided material.
 
 --------------------------------------------------
-3. NATURAL SHORT-FORM STYLE
+3. NATURAL SHORT-FORM STYLE & CULTURE
 --------------------------------------------------
 
 Write like a native {lang_name} short-form content creator telling a story.
+
+{language_rules}
 
 Style:
 - fast-paced and punchy;
@@ -3591,10 +3606,7 @@ Rules:
 
 Examples:
 
-5 - Cậu vừa tưởng mọi chuyện đã kết thúc, nhưng hóa ra rắc rối mới chỉ bắt đầu.#
-[12, 13] - Trong lúc mọi người còn hoang mang, anh lập tức rút kiếm chém đứt cánh tay đối thủ.#
-[14, 15, 16] - Đòn tấn công uy lực khiến quái vật gầm rú dữ dội rồi đổ gục hoàn toàn xuống đất.#
-24 - Và đến cuối cùng, thứ chờ đợi họ lại là một biến cố còn nguy hiểm hơn nữa.#
+{prompt_examples}
 
 FINAL VALIDATION BEFORE RESPONDING:
 

@@ -74,3 +74,18 @@ def test_parse_gemini_recap_text_multi_panel():
     validated = parse_recap_data(parsed, max_page=30)
     assert len(validated) == 3
 
+
+def test_generate_gemini_prompt_us_recap_culture_and_retention_hook():
+    prompt_ep1_en = generate_gemini_prompt("Solo Leveling", 1, 45, "en")
+    assert "EPISODE 1 HIGH-RETENTION HOOK" in prompt_ep1_en
+    assert "0–5s GOLDEN RULE" in prompt_ep1_en
+    assert "US MANHWA/WEBTOON CULTURE RULES" in prompt_ep1_en
+    assert "Awakened abilities" in prompt_ep1_en or "Status Window" in prompt_ep1_en
+    assert "YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY" in prompt_ep1_en
+    assert "eliminated" in prompt_ep1_en and "dispatched" in prompt_ep1_en
+
+    prompt_ep2_en = generate_gemini_prompt("Solo Leveling", 2, 45, "en")
+    assert "EPISODE CONTINUATION" in prompt_ep2_en
+    assert "in media res" in prompt_ep2_en
+
+

@@ -109,7 +109,7 @@ class Stage8_LocalTTS(BaseStage):
         to_ep = task.to_episode
         download_dir = task.artifacts.get("download_dir")
         
-        language = task.payload.get("language", "vi")
+        language = task.payload.get("language", "en")
         default_voice = "auto"
         voice_id = normalize_tts_voice_mode(task.payload.get("voice_id", default_voice), default=default_voice)
         ref_audio_path = task.payload.get("ref_audio_path")

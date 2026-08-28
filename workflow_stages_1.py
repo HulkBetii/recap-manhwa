@@ -94,7 +94,7 @@ class Stage0_ProjectInit(BaseStage):
         
         project_dir = os.path.dirname(os.path.abspath(__file__))
         identity_hash = source_hash(context.task.comic_url)
-        download_folder_name = f"{sanitized_title}_{context.task.from_episode}_{context.task.to_episode}_{context.task.payload.get('language', 'vi')}_{identity_hash}"
+        download_folder_name = f"{sanitized_title}_{context.task.from_episode}_{context.task.to_episode}_{context.task.payload.get('language', 'en')}_{identity_hash}"
         download_dir = os.path.join(project_dir, "downloads", download_folder_name)
         
         context.task.artifacts["download_folder_name"] = download_folder_name
@@ -383,7 +383,7 @@ class Stage1_ComicParsing(BaseStage):
             
             old_folder_name = task.artifacts.get("download_folder_name")
             identity_hash = source_hash(task.comic_url)
-            new_folder_name = f"{sanitized_title}_{task.from_episode}_{task.to_episode}_{task.payload.get('language', 'vi')}_{identity_hash}"
+            new_folder_name = f"{sanitized_title}_{task.from_episode}_{task.to_episode}_{task.payload.get('language', 'en')}_{identity_hash}"
             project_dir = os.path.dirname(os.path.abspath(__file__))
             new_download_dir = os.path.join(project_dir, "downloads", new_folder_name)
             
@@ -1003,7 +1003,7 @@ class Stage5_GeminiAutomation(BaseStage):
         download_dir = task.artifacts.get("download_dir")
         comic_title = task.artifacts.get("comic_title", "Manhwa")
         timeout = task.payload.get("timeout", 120)
-        language = task.payload.get("language", "vi")
+        language = task.payload.get("language", "en")
         safe_mode = task.payload.get("safe_mode", False)
 
         # Configurations
