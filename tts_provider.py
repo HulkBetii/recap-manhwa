@@ -130,21 +130,33 @@ _whisper_model = None
 def get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
-        if whisper is None:
-            raise RuntimeError("Thư viện whisper chưa được cài đặt.")
-        logger.info(f"Initializing Whisper model ('base') on device='{config.DEVICE}'...")
-        _whisper_model = whisper.load_model("base", device=config.DEVICE)
+        try:
+            from faster_whisper import WhisperModel
+            device = "cuda" if "cuda" in config.DEVICE else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+            logger.info(f"Initializing faster-whisper model ('base') on device='{device}' ({compute_type})...")
+            _whisper_model = ("faster_whisper", WhisperModel("base", device=device, compute_type=compute_type))
+        except Exception as e:
+            if whisper is None:
+                raise RuntimeError("Không tìm thấy faster-whisper hoặc openai-whisper.")
+            logger.info(f"Initializing Whisper model ('base') on device='{config.DEVICE}'...")
+            _whisper_model = ("whisper", whisper.load_model("base", device=config.DEVICE))
     return _whisper_model
 
 def generate_transcript(audio_path: str, srt_path: str):
     """
-    Transcribes an audio file using local OpenAI Whisper and outputs an SRT file.
+    Transcribes an audio file using local Whisper/faster-whisper and outputs an SRT file.
     """
-    model = get_whisper_model()
-    logger.info(f"Transcribing audio file '{audio_path}' using Whisper...")
+    m_type, model = get_whisper_model()
+    logger.info(f"Transcribing audio file '{audio_path}' using {m_type}...")
     with _whisper_lock:
-        result = model.transcribe(audio_path, word_timestamps=True)
-    write_srt(result["segments"], srt_path)
+        if m_type == "faster_whisper":
+            segments_gen, _ = model.transcribe(audio_path, word_timestamps=True)
+            segments = [{"start": s.start, "end": s.end, "text": s.text} for s in segments_gen]
+        else:
+            result = model.transcribe(audio_path, word_timestamps=True)
+            segments = result["segments"]
+    write_srt(segments, srt_path)
     logger.info(f"Successfully generated transcript SRT at '{srt_path}'")
 
 _ref_audio_transcriptions = {}
@@ -302,13 +314,32 @@ async def generate_ai33pro_tts(text: str, output_audio_path: str, output_srt_pat
             logger.error(f"Exception during AI33Pro request: {e}", exc_info=True)
             return False
 
+async def generate_edge_tts(text: str, output_audio_path: str, output_srt_path: str, voice_name: str = "en-US-ChristopherNeural") -> bool:
+    try:
+        import edge_tts
+        communicate = edge_tts.Communicate(text, voice_name)
+        with open(output_audio_path, "wb") as file:
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    file.write(chunk["data"])
+        logger.info("EdgeTTS audio generated successfully. Generating Whisper SRT transcript...")
+        await asyncio.to_thread(generate_transcript, output_audio_path, output_srt_path)
+        return True
+    except Exception as e:
+        logger.error(f"EdgeTTS generation failed: {e}", exc_info=True)
+        return False
+
 async def generate_tts(text: str, output_audio_path: str, output_srt_path: str, voice_id: str = None, ref_audio_path: str = None) -> bool:
     """
     Generates local TTS audio (MP3) and its SRT transcript using OmniVoice.
     Supports Voice Cloning (via ref_audio_path) and Voice Design (via voice_id / instruct).
     """
     if uses_ai33pro(voice_id):
-        return await generate_ai33pro_tts(text, output_audio_path, output_srt_path)
+        ok = await generate_ai33pro_tts(text, output_audio_path, output_srt_path)
+        if ok:
+            return True
+        logger.warning("AI33Pro failed or quota reached (402). Falling back to EdgeTTS...")
+        return await generate_edge_tts(text, output_audio_path, output_srt_path)
 
     try:
         model = get_omnivoice_model()

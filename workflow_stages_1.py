@@ -55,10 +55,10 @@ class Stage0_ProjectInit(BaseStage):
 
     async def execute(self, context: WorkflowContext) -> bool:
         py_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
-        if not (sys.version_info.major == 3 and sys.version_info.minor == 12):
-            await context.log(f"Yêu cầu Python 3.12. Phiên bản hiện tại: {py_ver}", "error")
+        if not (sys.version_info.major == 3 and sys.version_info.minor >= 10):
+            await context.log(f"Yêu cầu Python >= 3.10. Phiên bản hiện tại: {py_ver}", "error")
             return False
-        await context.log(f"Python 3.12 check pass ({py_ver})", "info")
+        await context.log(f"Python check pass ({py_ver})", "info")
 
         try:
             from playwright.async_api import async_playwright
@@ -2184,18 +2184,24 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 # Determine final background value (median of slices)
                 final_bg_val = int(np.median(bg_vals))
                 
-                # Padding & stitching using final background
-                max_w = max(img.shape[1] for img in loaded_images)
-                canvas = np.ones((total_height, max_w, 3), dtype=np.uint8) * final_bg_val
+                # Standardize canvas width using median slice width to prevent artificial side padding
+                target_w = int(np.median([img.shape[1] for img in loaded_images]))
+                if target_w < 400:
+                    target_w = max(img.shape[1] for img in loaded_images)
+                
+                canvas = np.ones((total_height, target_w, 3), dtype=np.uint8) * final_bg_val
                 
                 current_y = 0
                 for img in loaded_images:
                     h, w = img.shape[:2]
-                    start_x = (max_w - w) // 2
-                    canvas[current_y:current_y+h, start_x:start_x+w] = img
+                    if w != target_w:
+                        img_fitted = cv2.resize(img, (target_w, h), interpolation=cv2.INTER_AREA if w > target_w else cv2.INTER_CUBIC)
+                    else:
+                        img_fitted = img
+                    canvas[current_y:current_y+h, :] = img_fitted
                     current_y += h
                     
-                return canvas, total_height, max_w, offsets, global_protected, final_bg_val
+                return canvas, total_height, target_w, offsets, global_protected, final_bg_val
                 
             res = await loop.run_in_executor(None, run_detection_and_stitch)
             import torch
@@ -2337,7 +2343,16 @@ class Stage2b_IntelligentRepagination(BaseStage):
                         
                     return y_top, y_bottom
 
-                # Export new pages
+                # Export new pages (Clear old files in directory first)
+                if os.path.exists(images_pdf_dir):
+                    for old_f in os.listdir(images_pdf_dir):
+                        try:
+                            os.remove(os.path.join(images_pdf_dir, old_f))
+                        except Exception:
+                            pass
+                else:
+                    os.makedirs(images_pdf_dir, exist_ok=True)
+
                 new_pages = []
                 page_counter = 0
                 skipped_count = 0

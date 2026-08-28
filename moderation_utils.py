@@ -88,6 +88,8 @@ def is_blank_or_solid_page(
         return True, "dimension_too_small"
 
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
+
+    # 1. Global Metrics
     if bg_val is None:
         border_pixels = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
         bg_val = int(np.median(border_pixels))
@@ -97,7 +99,7 @@ def is_blank_or_solid_page(
     if bg_ratio >= ratio_threshold:
         return True, "solid_background"
 
-    canny = cv2.Canny(gray, 50, 150)
+    canny = cv2.Canny(gray, 40, 120)
     edge_ratio = float(np.mean(canny > 0))
     if edge_ratio < 0.0005:
         return True, "low_edge_density"
@@ -105,6 +107,44 @@ def is_blank_or_solid_page(
     variance = float(np.var(gray))
     if variance < 12.0:
         return True, "low_variance"
+
+    mean_val = float(np.mean(gray))
+    std_val = float(variance ** 0.5)
+
+    black_ratio = float(np.mean(gray < 28))
+    white_ratio = float(np.mean(gray > 228))
+    solid_ratio = max(black_ratio, white_ratio)
+
+    if solid_ratio > 0.82 and edge_ratio < 0.020:
+        return True, "solid_void"
+    if edge_ratio < 0.012:
+        return True, "low_detail_or_text_card"
+    if solid_ratio > 0.75 and edge_ratio < 0.016:
+        return True, "mostly_void"
+    if (std_val < 22.0 and edge_ratio < 0.025) or (mean_val < 18.0 and edge_ratio < 0.020) or (mean_val > 238.0 and edge_ratio < 0.020):
+        return True, "low_information_filler"
+
+    # 2. Center-Area Metrics (Handles images with letterboxing/padding)
+    w_start = int(w * 0.15)
+    w_end = int(w * 0.85)
+    if w_end > w_start:
+        center = gray[:, w_start:w_end]
+        c_mean = float(np.mean(center))
+        c_std = float(np.std(center))
+        c_canny = cv2.Canny(center, 40, 120)
+        c_edge = float(np.mean(c_canny > 0))
+        c_black = float(np.mean(center < 28))
+        c_white = float(np.mean(center > 228))
+        c_solid = max(c_black, c_white)
+
+        if c_solid > 0.80 and c_edge < 0.020:
+            return True, "center_solid_void"
+        if c_edge < 0.012:
+            return True, "center_low_detail_or_text_card"
+        if c_solid > 0.70 and c_edge < 0.015:
+            return True, "center_mostly_void"
+        if c_std < 18.0:
+            return True, "center_low_variance"
 
     return False, "valid"
 
@@ -121,21 +161,10 @@ def is_junk_or_title_page(
     import cv2
     import numpy as np
 
-    is_blank, reason = is_blank_or_solid_page(img_bgr, bg_val=bg_val, tol=tol)
-    if is_blank:
-        return True, reason
-
-    h, w = img_bgr.shape[:2]
-    if h < 100 or w < 100:
-        return True, "too_small"
+    if img_bgr is None or (hasattr(img_bgr, "size") and img_bgr.size == 0):
+        return True, "empty_image"
 
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
-    if bg_val is None:
-        border_pixels = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
-        bg_val = int(np.median(border_pixels))
-
-    diff = np.abs(gray.astype(np.int32) - bg_val)
-    bg_ratio = float(np.mean(diff <= tol))
 
     # 1. OCR text check if provided
     if ocr_texts:
@@ -146,6 +175,21 @@ def is_junk_or_title_page(
                 edge_ratio = float(np.mean(canny > 0))
                 if edge_ratio < 0.05:
                     return True, f"junk_keyword_{kw}"
+
+    is_blank, reason = is_blank_or_solid_page(img_bgr, bg_val=bg_val, tol=tol)
+    if is_blank:
+        return True, reason
+
+    h, w = img_bgr.shape[:2]
+    if h < 260 or w < 260:
+        return True, "too_small"
+
+    if bg_val is None:
+        border_pixels = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
+        bg_val = int(np.median(border_pixels))
+
+    diff = np.abs(gray.astype(np.int32) - bg_val)
+    bg_ratio = float(np.mean(diff <= tol))
 
     # 2. Sparse title banner detection (88%+ uniform background with minimal sparse text)
     if bg_ratio >= 0.88:

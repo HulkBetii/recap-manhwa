@@ -194,10 +194,13 @@ def clear_stage_and_downstream(episode_dir: str | Path, stage: str) -> None:
                 target.relative_to(root)
             except ValueError as exc:
                 raise ValueError("cache output escapes episode directory") from exc
-            if target.is_dir():
-                shutil.rmtree(target)
-            elif target.exists():
-                target.unlink()
+            try:
+                if target.is_dir():
+                    shutil.rmtree(target, ignore_errors=True)
+                elif target.exists():
+                    target.unlink()
+            except OSError:
+                pass
 
 
 class EpisodeStageCache:

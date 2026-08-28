@@ -3516,30 +3516,33 @@ Do not randomly translate character names or established fictional terms
 unless the glossary or the target language convention clearly supports it.
 
 --------------------------------------------------
-7. PAGE & PANEL SELECTION (DIRECT VISUAL MATCHING & MULTI-PANEL DENSITY)
+7. PAGE & PANEL SELECTION (HIGH-IMPACT STORY PANELS ONLY & MULTI-PANEL DENSITY)
 --------------------------------------------------
 
 Every output segment must be assigned to the exact page/panel number(s)
 from the provided comic that visually depicts the event, character, or action
 described in that segment.
 
-Crucial Visual Grounding & Multi-Panel Rules:
-- Direct Alignment: If the narration mentions a specific character, attack,
+Crucial Visual Grounding & Expressiveness Rules:
+- Direct Alignment: If the narration mentions a character, battle, weapon,
   discovery, or emotion, select the specific page/panel that clearly SHOWS it.
-- Multi-Panel Density (Crucial): To create dynamic visual flow (switching
-  images every 1.8s–2.8s), heavily utilize multi-panel ranges (e.g. [12, 13],
-  [14, 15, 16], or [20:40%, 21:60%]) whenever a sentence describes a sequence
-  of action, reaction, or continuous dialogue.
-- High Chapter Coverage: Strive to utilize 50%–80%+ of valid story pages
-  throughout the script. Avoid skipping large clusters of consecutive story
-  pages (e.g., avoid jumping 10+ pages with no segments).
-- Prefer pages containing:
-  * characters;
-  * meaningful character interactions;
-  * important actions;
-  * major reveals;
-  * strong emotional expressions;
-  * visually significant scenes.
+- Multi-Panel Density on Key Scenes: Select multi-panel ranges (e.g. [5, 6] or
+  [12, 13]) whenever describing consecutive character actions, reactions, or
+  combats within the same meaningful scene.
+- NO FILLER / NO MEANINGLESS IMAGES (STRICT RULE):
+  * NEVER select empty dark skies, ambient background textures, speed lines,
+    sound effect text bubbles, transition slivers, or solid black/white backgrounds.
+  * NEVER select pure text cards, floating narrator text boxes without characters,
+    or single word splash pages (e.g. 'WAR', 'PEACE', 'BOOM'). Always select panels
+    showing characters, faces, monsters, powers, or actions.
+  * DO NOT mechanically pair pages in numerical sequence (e.g. [1, 2], [3, 4], [5, 6]).
+  * Only select multi-panel ranges if BOTH panels contain meaningful story visuals.
+  * If a page lacks meaningful story or character visuals, SKIP IT completely.
+- Prioritize pages containing:
+  * Characters and clear facial expressions;
+  * High-energy combat, powers, and dynamic movements;
+  * Important discoveries, weapons, monsters, or revelations;
+  * Key character interactions and dialogue scenes.
 - Zero non-story pages: Never assign any segment to a cover, chapter title,
   production info, credit, or pure text card.
 
