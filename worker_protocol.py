@@ -16,14 +16,14 @@ def atomic_write_json(path: Path, value: object) -> None:
     temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temp_path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-        for attempt in range(10):
+        for attempt in range(50):
             try:
                 os.replace(temp_path, path)
                 return
             except PermissionError:
-                if attempt == 9:
+                if attempt == 49:
                     raise
-                time.sleep(0.02 * (attempt + 1))
+                time.sleep(min(0.25, 0.02 * (attempt + 1)))
     finally:
         if temp_path.exists():
             temp_path.unlink()

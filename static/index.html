@@ -60,8 +60,20 @@
                         <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.2); color: #A855F7; font-weight: 600;">Comix</span>
                     </div>
                 </div>
-
-
+                <div class="safe-mode-control">
+                    <div class="safe-mode-copy">
+                        <div class="safe-mode-title">
+                            <i data-lucide="shield-alert"></i>
+                            <span>Safe Mode</span>
+                            <span id="safe-mode-status" class="safe-mode-status off">Đang tắt</span>
+                        </div>
+                        <p>Chỉ kiểm duyệt các ảnh được chọn đưa vào video. Mặc định hệ thống không kiểm duyệt.</p>
+                    </div>
+                    <label class="safe-mode-switch" for="safe-mode" aria-label="Bật hoặc tắt Safe Mode">
+                        <input type="checkbox" id="safe-mode" role="switch" aria-checked="false">
+                        <span class="safe-mode-slider" aria-hidden="true"></span>
+                    </label>
+                </div>
 
                 <div class="action-buttons" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
                     <button id="btn-setup" class="btn btn-primary" style="padding: 0.85rem 0.5rem; font-size: 0.9rem;">
@@ -189,6 +201,11 @@
                             </div>
                         </div>
 
+                        <label for="burn-subtitles" style="display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.5rem; font-size: 0.72rem; color: var(--text-secondary); cursor: pointer;">
+                            <input type="checkbox" id="burn-subtitles">
+                            <span>Chèn phụ đề vào video (vẫn luôn xuất file SRT)</span>
+                        </label>
+
                         <!-- OmniVoice Extra Configurations -->
                         <div id="omnivoice-design-area" style="display: none; margin-bottom: 0.5rem;">
                             <div class="form-group" style="margin-bottom: 0;">
@@ -217,17 +234,7 @@
                             <div style="font-size: 0.65rem; color: var(--text-muted);">API key và Voice ID được đọc từ <code>XI_API_KEY</code>/<code>AI33PRO_VOICE_ID</code> trong <code>.env</code> và không được gửi qua trình duyệt.</div>
                         </div>
 
-                        <div style="display: none !important; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; border-top: 1px dashed var(--card-border); padding-top: 0.5rem;">
-                            <label for="safe-mode" style="font-size: 0.75rem; cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; gap: 0.25rem;">
-                                <i data-lucide="shield-alert" style="color: #f59e0b; width: 0.85rem; height: 0.85rem;"></i>
-                                Kích hoạt Safe Mode (Bộ lọc cục bộ)
-                            </label>
-                            <input type="checkbox" id="safe-mode" style="width: 1.1rem; height: 1.1rem; cursor: pointer;">
-                        </div>
-
-
-
-                        <div id="nsfw-settings" style="display: none !important; grid-template-columns: 1fr; gap: 0.5rem; transition: opacity 0.2s ease; opacity: 1; pointer-events: auto;">
+                        <div id="nsfw-settings" class="safe-mode-settings is-disabled">
                             <div class="form-group" style="margin-bottom: 0;">
                                 <label for="nsfw-threshold" style="font-size: 0.7rem; color: var(--text-secondary);">Độ nhạy Safe Mode</label>
                                 <div class="input-wrapper">
@@ -516,7 +523,7 @@ C:\Data\Profile 2" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1
     </div>
 
     <!-- JS Scripts -->
-    <script src="app.js?v=1.8"></script>
+    <script src="app.js?v=1.9"></script>
     <script>
         // Initialize Lucide icons
         lucide.createIcons();

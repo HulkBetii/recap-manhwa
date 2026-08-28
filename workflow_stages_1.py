@@ -22,6 +22,14 @@ except Exception:
 from tools.text_remover.comic_text_remover import get_easyocr_reader, ocr_lock
 from recap_schema import validate_recap_file
 from artifact_cache import EpisodeStageCache, source_hash, stage_fingerprint, validate_pdf_file
+from moderation_utils import (
+    MODERATION_MODEL_VERSION,
+    MODERATION_PROMPT_VERSION,
+    create_numbered_pdf,
+    list_image_files,
+    prepare_safe_pdf_bundle,
+    should_use_safety_fallback,
+)
 
 def validate_recap_json(file_path):
     recap_path = Path(file_path)
@@ -880,71 +888,32 @@ class Stage3_NSFWModeration(BaseStage):
     def weight(self) -> float: return 0.10
 
     async def execute(self, context: WorkflowContext) -> bool:
-        from app import sanitize_episode_images
-        
         task = context.task
         from_ep = task.from_episode
         to_ep = task.to_episode
         download_dir = task.artifacts.get("download_dir")
-        
-        safe_mode = task.payload.get("safe_mode", True)
-        nsfw_threshold = task.payload.get("nsfw_threshold", 0.3)
-        nsfw_mode = task.payload.get("nsfw_mode", "mask")
-        concurrency = task.payload.get("concurrency", 5)
+        safe_mode = task.payload.get("safe_mode", False)
 
         total_episodes = to_ep - from_ep + 1
         for idx, ep in enumerate(range(from_ep, to_ep + 1)):
             if context.cancel_token.is_cancelled(): raise asyncio.CancelledError()
-            
-            ep_images_pdf_dir = os.path.join(download_dir, f"episode_{ep}", "images_pdf")
+
             ep_dir = os.path.join(download_dir, f"episode_{ep}")
-            images_dir = os.path.join(ep_dir, "images")
-            images_blur_dir = os.path.join(ep_dir, "images_blur")
-            moderation_source_dir = ep_images_pdf_dir if os.path.isdir(ep_images_pdf_dir) and os.listdir(ep_images_pdf_dir) else images_dir
-            cache = EpisodeStageCache(ep_dir)
-            fingerprint = stage_fingerprint(task, "moderation", ep, input_paths=[moderation_source_dir])
-            if cache.is_current(
-                stage="moderation",
-                fingerprint=fingerprint,
-                outputs=[images_blur_dir],
-                validate=lambda: os.path.isdir(images_blur_dir) and any(
-                    name.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
-                    for name in os.listdir(images_blur_dir)
-                ),
-            ):
-                await context.log(f"Tập {ep}: Đã hoàn thành trước đó. Bỏ qua NSFW Moderation.", "success")
-                await context.start_episode(ep)
-                await context.complete_episode(ep)
-                await context.update_stage_progress(self.name, ((idx + 1) / total_episodes) * 100.0)
-                continue
-                
             await context.start_episode(ep)
             images_pdf_dir = os.path.join(ep_dir, "images_pdf")
-            
-            if os.path.exists(images_blur_dir):
-                shutil.rmtree(images_blur_dir)
-            os.makedirs(images_blur_dir, exist_ok=True)
-
-            image_files = sorted([f for f in os.listdir(moderation_source_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
+            image_files = list_image_files(images_pdf_dir)
             if not image_files:
-                await context.fail_episode(ep, "Không tìm thấy ảnh gốc.")
+                await context.fail_episode(ep, "Không tìm thấy ảnh đã phân trang trong images_pdf.")
                 return False
 
-            for f in image_files:
-                shutil.copy2(os.path.join(moderation_source_dir, f), os.path.join(images_blur_dir, f))
-
             if safe_mode:
-                await sanitize_episode_images(
-                    ep_dir=images_blur_dir,
-                    nsfw_threshold=nsfw_threshold,
-                    nsfw_mode=nsfw_mode,
-                    sse_logger=context,
-                    concurrency=concurrency,
+                await context.log(
+                    f"Tập {ep}: Hoãn kiểm duyệt {len(image_files)} ảnh; chỉ ảnh được recap chọn mới được kiểm duyệt trước render.",
+                    "info",
                 )
-
-            await context.log(f"Tập {ep}: Đã chuẩn bị ảnh sạch cho giai đoạn tạo PDF.", "info")
+            else:
+                await context.log(f"Tập {ep}: Safe Mode tắt; bỏ qua mọi đường kiểm duyệt.", "info")
             await context.complete_episode(ep)
-            cache.commit(stage="moderation", fingerprint=fingerprint, outputs=[images_blur_dir])
             await context.update_stage_progress(self.name, ((idx + 1) / total_episodes) * 100.0)
         return True
 
@@ -955,8 +924,6 @@ class Stage4_PDFGeneration(BaseStage):
     def weight(self) -> float: return 0.05
 
     async def execute(self, context: WorkflowContext) -> bool:
-        from PIL import Image
-        
         task = context.task
         from_ep = task.from_episode
         to_ep = task.to_episode
@@ -973,7 +940,7 @@ class Stage4_PDFGeneration(BaseStage):
             clean_title = "".join(c for c in task.comic_title if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
             pdf_name = f"{clean_title}_Tap_{ep}.pdf"
             pdf_path = os.path.join(ep_dir, "pdf", pdf_name)
-            images_pdf_dir = os.path.join(ep_dir, "images_blur")
+            images_pdf_dir = os.path.join(ep_dir, "images_pdf")
             cache = EpisodeStageCache(ep_dir)
             fingerprint = stage_fingerprint(task, "pdf", ep, input_paths=[images_pdf_dir])
             if cache.is_current(
@@ -990,99 +957,14 @@ class Stage4_PDFGeneration(BaseStage):
                 return True
                 
             await context.start_episode(ep)
-            ep_dir = os.path.join(download_dir, f"episode_{ep}")
-            images_pdf_dir = os.path.join(ep_dir, "images_blur")
-            clean_title = "".join(c for c in task.comic_title if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
-            pdf_name = f"{clean_title}_Tap_{ep}.pdf"
-            pdf_path = os.path.join(ep_dir, "pdf", pdf_name)
-            
-            image_files = sorted([f for f in os.listdir(images_pdf_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
+            image_files = list_image_files(images_pdf_dir)
             if not image_files:
                 await context.fail_episode(ep, "Không có ảnh để tạo PDF.")
                 return False
 
-
-
             pdf_quality = task.payload.get("pdf_quality", 30)
-
-            await context.log(f"Tập {ep}: Tạo file PDF chapter.pdf...", "info")
-            def convert_to_pdf():
-                from PIL import ImageDraw, ImageFont
-                pil_imgs = []
-                open_files = []
-                temp_pdf_path = pdf_path + ".tmp.pdf"
-                try:
-                    for idx, f in enumerate(image_files):
-                        img_path = os.path.join(images_pdf_dir, f)
-                        img = Image.open(img_path)
-                        open_files.append(img)
-                        
-                        rgb_img = img.convert("RGB")
-                        rgb_img.load()
-                        
-                        # 1. Resize to max width 700 to significantly reduce file size while maintaining readability
-                        max_width = 700
-                        if rgb_img.width > max_width:
-                            resample_filter = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
-                            new_h = int(rgb_img.height * (max_width / rgb_img.width))
-                            rgb_img = rgb_img.resize((max_width, new_h), resample_filter)
-                        
-                        # 2. Draw physical page watermark
-                        draw = ImageDraw.Draw(rgb_img)
-                        text = f"Page: {idx + 1}"
-                        
-                        try:
-                            font = ImageFont.truetype("arial.ttf", 36)
-                        except Exception:
-                            font = ImageFont.load_default()
-                            
-                        if hasattr(draw, "textbbox"):
-                            bbox = draw.textbbox((0, 0), text, font=font)
-                            text_w = bbox[2] - bbox[0]
-                            text_h = bbox[3] - bbox[1]
-                        else:
-                            text_w, text_h = draw.textsize(text, font=font)
-                            
-                        pad = 10
-                        box_w = text_w + pad * 2
-                        box_h = text_h + pad * 2
-                        
-                        x1 = (rgb_img.width - box_w) // 2
-                        y1 = 20
-                        x2 = x1 + box_w
-                        y2 = y1 + box_h
-                        
-                        draw.rectangle([x1, y1, x2, y2], fill=(0, 0, 0))
-                        draw.text((x1 + pad, y1 + pad), text, fill=(255, 255, 255), font=font)
-                        
-                        pil_imgs.append(rgb_img)
-                    if pil_imgs:
-                        # 3. Save PDF with quality and optimize options
-                        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
-                        pil_imgs[0].save(
-                            temp_pdf_path,
-                            "PDF", 
-                            save_all=True, 
-                            append_images=pil_imgs[1:], 
-                            quality=pdf_quality, 
-                            optimize=True
-                        )
-                        os.replace(temp_pdf_path, pdf_path)
-                finally:
-                    if os.path.exists(temp_pdf_path):
-                        os.remove(temp_pdf_path)
-                    for img in pil_imgs:
-                        try:
-                            img.close()
-                        except Exception:
-                            pass
-                    for f_img in open_files:
-                        try:
-                            f_img.close()
-                        except Exception:
-                            pass
-
-            await asyncio.to_thread(convert_to_pdf)
+            await context.log(f"Tập {ep}: Tạo PDF gốc trực tiếp từ images_pdf...", "info")
+            await asyncio.to_thread(create_numbered_pdf, images_pdf_dir, pdf_path, pdf_quality)
             await context.complete_episode(ep)
             cache.commit(stage="pdf", fingerprint=fingerprint, outputs=[pdf_path])
             completed_eps += 1
@@ -1122,7 +1004,7 @@ class Stage5_GeminiAutomation(BaseStage):
         comic_title = task.artifacts.get("comic_title", "Manhwa")
         timeout = task.payload.get("timeout", 120)
         language = task.payload.get("language", "vi")
-        safe_mode = task.payload.get("safe_mode", True)
+        safe_mode = task.payload.get("safe_mode", False)
 
         # Configurations
         max_retries = task.payload.get("retry_count", 5)
@@ -1174,21 +1056,58 @@ class Stage5_GeminiAutomation(BaseStage):
             await context.start_episode(ep)
             clean_title = "".join(c for c in task.comic_title if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
             pdf_name = f"{clean_title}_Tap_{ep}.pdf"
-            pdf_path = os.path.join(ep_dir, "pdf", pdf_name)
-            if not os.path.exists(pdf_path):
+            raw_pdf_path = os.path.join(ep_dir, "pdf", pdf_name)
+            if not os.path.exists(raw_pdf_path):
                 pdf_dir = os.path.join(ep_dir, "pdf")
                 if os.path.exists(pdf_dir):
                     pdf_files = [f for f in os.listdir(pdf_dir) if f.lower().endswith(".pdf")]
                     if pdf_files:
-                        pdf_path = os.path.join(pdf_dir, pdf_files[0])
+                        raw_pdf_path = os.path.join(pdf_dir, pdf_files[0])
             images_pdf_dir = os.path.join(ep_dir, "images_pdf")
             raw_response_path = os.path.join(ep_dir, "raw_gemini_response.txt")
             recap_json_path = os.path.join(ep_dir, "recap.json")
 
-            image_files = sorted([f for f in os.listdir(images_pdf_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
+            image_files = list_image_files(images_pdf_dir)
             prompt_content = generate_gemini_prompt(comic_title, ep, len(image_files), language)
             cache = EpisodeStageCache(ep_dir)
-            fingerprint = stage_fingerprint(task, "gemini", ep, input_paths=[pdf_path], extra=prompt_content)
+            safe_bundle_dir = os.path.join(ep_dir, "gemini_safe")
+            safe_pdf_path = os.path.join(safe_bundle_dir, pdf_name)
+            safe_marker_path = os.path.join(safe_bundle_dir, "used.json")
+            from types import SimpleNamespace
+            fallback_task = SimpleNamespace(
+                comic_url=task.comic_url,
+                payload={**task.payload, "safe_mode": True},
+            )
+            safe_fingerprint = stage_fingerprint(
+                fallback_task,
+                "gemini_safe_pdf",
+                ep,
+                input_paths=[images_pdf_dir],
+                extra={
+                    "model": MODERATION_MODEL_VERSION,
+                    "prompt": MODERATION_PROMPT_VERSION,
+                },
+            )
+            raw_gemini_fingerprint = stage_fingerprint(
+                task, "gemini", ep, input_paths=[raw_pdf_path], extra=prompt_content
+            )
+            cached_gemini_fingerprint = cache.data.get("stages", {}).get("gemini", {}).get("fingerprint")
+            cached_safe_gemini_fingerprint = None
+            if validate_pdf_file(safe_pdf_path) and os.path.isfile(safe_marker_path):
+                cached_safe_gemini_fingerprint = stage_fingerprint(
+                    task, "gemini", ep, input_paths=[safe_pdf_path], extra=prompt_content
+                )
+
+            if (
+                cached_safe_gemini_fingerprint is not None
+                and cached_gemini_fingerprint == str(cached_safe_gemini_fingerprint)
+            ):
+                pdf_path = safe_pdf_path
+                fingerprint = cached_safe_gemini_fingerprint
+            else:
+                pdf_path = raw_pdf_path
+                fingerprint = raw_gemini_fingerprint
+
             if cache.is_current(
                 stage="gemini",
                 fingerprint=fingerprint,
@@ -1201,12 +1120,33 @@ class Stage5_GeminiAutomation(BaseStage):
                 await context.update_stage_progress(self.name, (completed_eps_count / total_eps) * 100.0)
                 return True
 
+            safe_bundle_current = False
+            if safe_mode and os.path.isdir(safe_bundle_dir):
+                safe_bundle_current = cache.is_current(
+                    stage="gemini_safe_pdf",
+                    fingerprint=safe_fingerprint,
+                    outputs=[safe_bundle_dir],
+                    validate=lambda: validate_pdf_file(safe_pdf_path) and os.path.isfile(safe_marker_path),
+                )
+            safe_gemini_fingerprint = None
+            if safe_bundle_current:
+                safe_gemini_fingerprint = stage_fingerprint(
+                    task, "gemini", ep, input_paths=[safe_pdf_path], extra=prompt_content
+                )
+            pdf_path = safe_pdf_path if safe_mode and safe_bundle_current else raw_pdf_path
+            fingerprint = (
+                safe_gemini_fingerprint
+                if pdf_path == safe_pdf_path and safe_gemini_fingerprint is not None
+                else raw_gemini_fingerprint
+            )
+
             success = False
             start_time = time.time()
 
             for attempt in range(1, max_retries + 1):
                 if context.cancel_token.is_cancelled():
                     break
+                response_text = ""
                 attempt_deadline = time.monotonic() + timeout
                 try:
                     local_br, local_br_ctx, local_ctx_id, local_nm, should_close_ctx = await asyncio.wait_for(
@@ -1737,133 +1677,62 @@ class Stage5_GeminiAutomation(BaseStage):
                         "warning", episode=ep
                     )
 
-                    failure_text = f"{e}\n{response_text if 'response_text' in locals() else ''}".casefold()
-                    safety_markers = (
-                        "safety policy",
-                        "safety policies",
-                        "explicit content",
-                        "sexual content",
-                        "i can't help",
-                        "i cannot help",
-                        "can't assist",
-                        "cannot assist",
-                        "unable to assist",
-                        "not able to help",
-                        "nội dung nhạy cảm",
+                    failure_text = f"{e}\n{response_text}"
+                    should_retry_with_safe_pdf = should_use_safety_fallback(
+                        safe_mode=safe_mode,
+                        attempt=attempt,
+                        response=failure_text,
                     )
-                    should_retry_with_safe_pdf = any(marker in failure_text for marker in safety_markers)
 
-                    if attempt == 1 and should_retry_with_safe_pdf:
-                        await context.log(f"Tập {ep}: Giai đoạn Gemini gặp lỗi lần đầu. Tự động kích hoạt Safe Mode (DINO+SAM) để che nội dung nhạy cảm và thử lại...", "info", episode=ep)
+                    if should_retry_with_safe_pdf:
+                        await context.log(
+                            f"Tập {ep}: Gemini từ chối vì safety; chỉ chapter này sẽ được kiểm duyệt toàn bộ vào PDF fallback tạm.",
+                            "info",
+                            episode=ep,
+                        )
                         try:
                             from app import sanitize_episode_images
-                            from PIL import Image, ImageDraw, ImageFont
-                            
-                            images_blur_dir = os.path.join(ep_dir, "images_blur")
-                            
-                            # Clean images_pdf
-                            if os.path.exists(images_pdf_dir):
-                                shutil.rmtree(images_pdf_dir)
-                            os.makedirs(images_pdf_dir, exist_ok=True)
-                            
-                            # Clean/prepare images_blur
-                            if os.path.exists(images_blur_dir):
-                                shutil.rmtree(images_blur_dir)
-                            os.makedirs(images_blur_dir, exist_ok=True)
-                            
-                            images_dir = os.path.join(ep_dir, "images")
-                            image_files_to_blur = sorted([f for f in os.listdir(images_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
-                            for f_blur in image_files_to_blur:
-                                shutil.copy2(os.path.join(images_dir, f_blur), os.path.join(images_blur_dir, f_blur))
-                            
-                            # Run DINO+SAM safe mode filter
-                            nsfw_threshold = task.payload.get("nsfw_threshold", 0.3)
-                            nsfw_mode = task.payload.get("nsfw_mode", "mask")
-                            concurrency = task.payload.get("concurrency", 5)
-                            
-                            await sanitize_episode_images(
-                                ep_dir=images_blur_dir,
-                                nsfw_threshold=nsfw_threshold,
-                                nsfw_mode=nsfw_mode,
-                                sse_logger=context,
-                                concurrency=concurrency,
-                                pdf_dir=images_pdf_dir
+
+                            pdf_path = str(await prepare_safe_pdf_bundle(
+                                images_pdf_dir,
+                                safe_bundle_dir,
+                                pdf_name=pdf_name,
+                                pdf_quality=task.payload.get("pdf_quality", 30),
+                                sanitizer=sanitize_episode_images,
+                                sanitizer_kwargs={
+                                    "nsfw_threshold": task.payload.get("nsfw_threshold", 0.3),
+                                    "nsfw_mode": task.payload.get("nsfw_mode", "mask"),
+                                    "sse_logger": context,
+                                    "concurrency": task.payload.get("concurrency", 5),
+                                },
+                            ))
+                            cache.commit(
+                                stage="gemini_safe_pdf",
+                                fingerprint=safe_fingerprint,
+                                outputs=[safe_bundle_dir],
                             )
-                            
-                            # Regenerate PDF (same logic as Stage 4)
-                            await context.log(f"Tập {ep}: Đang tạo lại file PDF đã che mờ/kiểm duyệt...", "info", episode=ep)
-                            image_pdf_files = sorted([f for f in os.listdir(images_pdf_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
-                            if image_pdf_files:
-                                pdf_quality = task.payload.get("pdf_quality", 30)
-                                
-                                def convert_to_pdf_sync():
-                                    pil_imgs = []
-                                    temp_safe_pdf_path = pdf_path + ".tmp.pdf"
-                                    try:
-                                        for idx_pdf, f_pdf in enumerate(image_pdf_files):
-                                            img_path_pdf = os.path.join(images_pdf_dir, f_pdf)
-                                            with Image.open(img_path_pdf) as img_pdf:
-                                                rgb_img_pdf = img_pdf.convert("RGB")
-                                                rgb_img_pdf.load()
-                                                
-                                                max_width_pdf = 700
-                                                if rgb_img_pdf.width > max_width_pdf:
-                                                    resample_filter = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
-                                                    new_h_pdf = int(rgb_img_pdf.height * (max_width_pdf / rgb_img_pdf.width))
-                                                    rgb_img_pdf = rgb_img_pdf.resize((max_width_pdf, new_h_pdf), resample_filter)
-                                                    
-                                                draw_pdf = ImageDraw.Draw(rgb_img_pdf)
-                                                text_pdf = f"Page: {idx_pdf + 1}"
-                                                try:
-                                                    font_pdf = ImageFont.truetype("arial.ttf", 36)
-                                                except Exception:
-                                                    font_pdf = ImageFont.load_default()
-                                                    
-                                                if hasattr(draw_pdf, "textbbox"):
-                                                    bbox_pdf = draw_pdf.textbbox((0, 0), text_pdf, font=font_pdf)
-                                                    text_w_pdf = bbox_pdf[2] - bbox_pdf[0]
-                                                    text_h_pdf = bbox_pdf[3] - bbox_pdf[1]
-                                                else:
-                                                    text_w_pdf, text_h_pdf = draw_pdf.textsize(text_pdf, font=font_pdf)
-                                                    
-                                                pad_pdf = 10
-                                                box_w_pdf = text_w_pdf + pad_pdf * 2
-                                                box_h_pdf = text_h_pdf + pad_pdf * 2
-                                                
-                                                x1_pdf = (rgb_img_pdf.width - box_w_pdf) // 2
-                                                y1_pdf = 20
-                                                x2_pdf = x1_pdf + box_w_pdf
-                                                y2_pdf = y1_pdf + box_h_pdf
-                                                
-                                                draw_pdf.rectangle([x1_pdf, y1_pdf, x2_pdf, y2_pdf], fill=(0, 0, 0))
-                                                draw_pdf.text((x1_pdf + pad_pdf, y1_pdf + pad_pdf), text_pdf, fill=(255, 255, 255), font=font_pdf)
-                                                
-                                                pil_imgs.append(rgb_img_pdf)
-                                                
-                                        if pil_imgs:
-                                            pil_imgs[0].save(
-                                                temp_safe_pdf_path,
-                                                "PDF",
-                                                save_all=True,
-                                                append_images=pil_imgs[1:],
-                                                quality=pdf_quality,
-                                                optimize=True
-                                            )
-                                            os.replace(temp_safe_pdf_path, pdf_path)
-                                    finally:
-                                        if os.path.exists(temp_safe_pdf_path):
-                                            os.remove(temp_safe_pdf_path)
-                                        for img_c in pil_imgs:
-                                            try: img_c.close()
-                                            except Exception: pass
-                                            
-                                await asyncio.to_thread(convert_to_pdf_sync)
-                                await context.log(f"Tập {ep}: Đã hoàn thành tạo lại PDF an toàn.", "success", episode=ep)
-                            else:
-                                await context.log(f"Tập {ep}: Lỗi: Không tìm thấy ảnh để tạo lại PDF.", "error", episode=ep)
-                                
+                            fingerprint = stage_fingerprint(
+                                task,
+                                "gemini",
+                                ep,
+                                input_paths=[pdf_path],
+                                extra=prompt_content,
+                            )
+                            await context.log(
+                                f"Tập {ep}: Đã tạo PDF fallback riêng; ảnh chuẩn và PDF gốc không bị thay đổi.",
+                                "success",
+                                episode=ep,
+                            )
                         except Exception as safe_err:
-                            await context.log(f"Lỗi kích hoạt Safe Mode động: {safe_err}", "error", episode=ep)
+                            pdf_path = raw_pdf_path
+                            fingerprint = stage_fingerprint(
+                                task,
+                                "gemini",
+                                ep,
+                                input_paths=[pdf_path],
+                                extra=prompt_content,
+                            )
+                            await context.log(f"Lỗi tạo PDF safety fallback: {safe_err}", "error", episode=ep)
                             
                     # Reset shared context on any failure so next attempt checks rate limit and rotates profile if needed
                     await context.log("Đặt lại browser context để sẵn sàng xoay vòng tài khoản nếu cần...", "warning", episode=ep)

@@ -1,5 +1,7 @@
 import importlib
 import json
+import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -115,6 +117,41 @@ def test_crawl_request_rejects_removed_fields():
             "vlm_provider": "chatgpt",
             "vlm_email": "old@example.com",
         })
+
+
+def test_safe_mode_is_visible_and_disabled_by_default():
+    app_module = importlib.import_module("app")
+    request = app_module.CrawlRequest.model_validate({
+        "url": "https://example.com/comic",
+        "from_episode": 1,
+        "to_episode": 1,
+    })
+    assert request.safe_mode is False
+
+    html = (Path(__file__).parents[1] / "static" / "index.html").read_text(encoding="utf-8")
+    control = re.search(r'<input[^>]+id="safe-mode"[^>]*>', html)
+    assert control is not None
+    assert 'role="switch"' in control.group(0)
+    assert re.search(r"(?<!aria-)checked(?:\s|=|>)", control.group(0)) is None
+
+
+def test_subtitle_burn_is_visible_and_disabled_by_default():
+    app_module = importlib.import_module("app")
+    request = app_module.CrawlRequest.model_validate({
+        "url": "https://example.com/comic",
+        "from_episode": 1,
+        "to_episode": 1,
+    })
+    assert request.burn_subtitles is False
+
+    static_dir = Path(__file__).parents[1] / "static"
+    html = (static_dir / "index.html").read_text(encoding="utf-8")
+    control = re.search(r'<input[^>]+id="burn-subtitles"[^>]*>', html)
+    assert control is not None
+    assert re.search(r"(?<!aria-)checked(?:\s|=|>)", control.group(0)) is None
+
+    javascript = (static_dir / "app.js").read_text(encoding="utf-8")
+    assert "burn_subtitles: document.getElementById('burn-subtitles').checked" in javascript
 
 
 def test_ai33_voice_is_normalized_to_environment_mode():

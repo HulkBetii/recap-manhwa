@@ -16,6 +16,26 @@ from artifact_cache import (
     validate_srt_file,
 )
 from tts_settings import normalize_tts_voice_mode
+from moderation_utils import (
+    MODERATION_MODEL_VERSION,
+    MODERATION_PROMPT_VERSION,
+    list_image_files,
+    prepare_moderated_directory,
+    selected_file_names,
+    selected_page_numbers,
+)
+
+
+def is_ffmpeg_pipe_closed_error(error: BaseException) -> bool:
+    return (
+        isinstance(error, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError))
+        or getattr(error, "errno", None) in {22, 32}
+        or getattr(error, "winerror", None) in {87, 109, 232}
+    )
+
+
+def can_recover_ffmpeg_pipe_output(error: BaseException, output_path: str) -> bool:
+    return is_ffmpeg_pipe_closed_error(error) and validate_mp4_file(output_path)
 
 class Stage7_NarrationAggregation(BaseStage):
     @property
@@ -762,7 +782,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             overlay_path = os.path.abspath(overlay_path)
         if not overlay_path or not os.path.exists(overlay_path):
             overlay_path = os.path.join(project_dir, "images", "overlay.png")
-        subtitles_enabled = False
+        subtitles_enabled = bool(task.payload.get("burn_subtitles", False))
 
         def render_episode_video_sync(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30):
             from PIL import Image, ImageFilter, ImageEnhance
@@ -1155,7 +1175,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     try:
                         proc.stdin.write(final_frame.tobytes())
                     except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError) as write_err:
-                        if getattr(write_err, "errno", 0) == 32 or isinstance(write_err, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
+                        if is_ffmpeg_pipe_closed_error(write_err):
                             pipe_broken = True
                             final_frame.close()
                             break
@@ -1219,12 +1239,82 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             
             await context.start_episode(ep)
             ep_dir = os.path.join(download_dir, f"episode_{ep}")
+            images_pdf_dir = os.path.join(ep_dir, "images_pdf")
             images_blur_dir = os.path.join(ep_dir, "images_blur")
             recap_json_path = os.path.join(ep_dir, "recap.json")
             srt_path = os.path.join(ep_dir, "transcript.srt")
             audio_path = os.path.join(ep_dir, "audio.mp3")
             output_video_path = os.path.join(ep_dir, "video.mp4")
             cache = EpisodeStageCache(ep_dir)
+
+            if not os.path.exists(recap_json_path) or not os.path.exists(srt_path) or not os.path.exists(audio_path):
+                await context.fail_episode(ep, "Thiếu recap.json, transcript.srt hoặc audio.mp3.")
+                return False
+
+            canonical_image_files = list_image_files(images_pdf_dir)
+            if not canonical_image_files:
+                await context.fail_episode(ep, "Không tìm thấy ảnh chuẩn trong images_pdf.")
+                return False
+
+            segments = load_recap_dicts(recap_json_path, max_page=len(canonical_image_files))
+            selected_pages = selected_page_numbers(segments, max_page=len(canonical_image_files))
+            selected_files = selected_file_names(canonical_image_files, selected_pages)
+            safe_mode = task.payload.get("safe_mode", False)
+            moderation_fingerprint = stage_fingerprint(
+                task,
+                "selected_moderation",
+                ep,
+                input_paths=[images_pdf_dir],
+                extra={
+                    "selected_pages": selected_pages,
+                    "model": MODERATION_MODEL_VERSION,
+                    "prompt": MODERATION_PROMPT_VERSION,
+                },
+            )
+            moderation_current = cache.is_current(
+                stage="selected_moderation",
+                fingerprint=moderation_fingerprint,
+                outputs=[images_blur_dir],
+                validate=lambda: list_image_files(images_blur_dir) == canonical_image_files,
+            )
+            if moderation_current:
+                await context.log(
+                    f"Tập {ep}: Cache kiểm duyệt ảnh đã chọn hợp lệ ({len(selected_pages)} page).",
+                    "success",
+                )
+            else:
+                sanitizer = None
+                if safe_mode:
+                    from app import sanitize_episode_images
+                    sanitizer = sanitize_episode_images
+                    await context.log(
+                        f"Tập {ep}: Kiểm duyệt {len(selected_pages)}/{len(canonical_image_files)} page được chọn cho video: {selected_pages}",
+                        "info",
+                    )
+                else:
+                    await context.log(
+                        f"Tập {ep}: Safe Mode tắt; sao chép ảnh render mà không chạy DINO/SAM.",
+                        "info",
+                    )
+
+                await prepare_moderated_directory(
+                    images_pdf_dir,
+                    images_blur_dir,
+                    sanitizer=sanitizer,
+                    selected_files=selected_files,
+                    sanitizer_kwargs={
+                        "nsfw_threshold": task.payload.get("nsfw_threshold", 0.3),
+                        "nsfw_mode": task.payload.get("nsfw_mode", "mask"),
+                        "sse_logger": context,
+                        "concurrency": task.payload.get("concurrency", 5),
+                    },
+                )
+                cache.commit(
+                    stage="selected_moderation",
+                    fingerprint=moderation_fingerprint,
+                    outputs=[images_blur_dir],
+                )
+
             fingerprint = stage_fingerprint(
                 task,
                 "video",
@@ -1247,12 +1337,6 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     await context.update_stage_progress(self.name, (completed_eps_count / total_episodes) * 100.0)
                 return True
 
-            if not os.path.exists(recap_json_path) or not os.path.exists(srt_path) or not os.path.exists(audio_path):
-                await context.fail_episode(ep, "Thiếu recap.json, transcript.srt hoặc audio.mp3.")
-                return False
-
-            segments = load_recap_dicts(recap_json_path)
-
             with open(srt_path, "r", encoding="utf-8") as f:
                 srt_content = f.read().replace('\r\n', '\n').strip()
             pattern = r"(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})"
@@ -1264,11 +1348,10 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     "end": parse_time_to_seconds(end_str)
                 })
 
-            image_files = sorted([f for f in os.listdir(images_blur_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
-            if not image_files:
-                await context.fail_episode(ep, "Không tìm thấy ảnh moderated.")
+            image_files = list_image_files(images_blur_dir)
+            if image_files != canonical_image_files:
+                await context.fail_episode(ep, "Ảnh render không giữ nguyên page mapping từ images_pdf.")
                 return False
-            segments = load_recap_dicts(recap_json_path, max_page=len(image_files))
 
             working_encoder = get_working_encoder(ffmpeg_exe, os.path.join(images_blur_dir, image_files[0]))
             fps = task.payload.get("fps", 30)
@@ -1277,12 +1360,20 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             temp_video_path = output_video_path + ".tmp.mp4"
             if os.path.exists(temp_video_path):
                 os.remove(temp_video_path)
-            await asyncio.to_thread(
-                render_episode_video_sync,
-                images_blur_dir, image_files, segments, timings, temp_video_path,
-                ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path,
-                subtitles_enabled, "transcript.srt", fps
-            )
+            try:
+                await asyncio.to_thread(
+                    render_episode_video_sync,
+                    images_blur_dir, image_files, segments, timings, temp_video_path,
+                    ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path,
+                    subtitles_enabled, "transcript.srt", fps
+                )
+            except Exception as render_error:
+                if not can_recover_ffmpeg_pipe_output(render_error, temp_video_path):
+                    raise
+                await context.log(
+                    f"Tập {ep}: FFmpeg đóng pipe sau khi đã tạo MP4 hợp lệ; tiếp tục commit output.",
+                    "warning",
+                )
             if not os.path.isfile(temp_video_path) or os.path.getsize(temp_video_path) == 0:
                 raise RuntimeError("FFmpeg did not produce a valid episode video")
             if not validate_mp4_file(temp_video_path):
@@ -1475,24 +1566,19 @@ class Stage11_FinalVideoAssembly(BaseStage):
         total_episodes = to_ep - from_ep + 1
         episodes_processed = list(range(from_ep, to_ep + 1))
         
-        # Calculate video durations and locate input srt files
         video_durations = []
         srt_paths = []
         for ep in episodes_processed:
             ep_dir = os.path.join(download_dir, f"episode_{ep}")
             video_path = os.path.join(ep_dir, "video.mp4")
             srt_path = os.path.join(ep_dir, "transcript.srt")
-            
-            # Query video duration
-            duration = get_video_duration(video_path, ffmpeg_exe)
-            video_durations.append(duration)
+            video_durations.append(get_video_duration(video_path, ffmpeg_exe))
             srt_paths.append(srt_path)
 
         if total_episodes == 1:
             shutil.copy2(os.path.join(download_dir, f"episode_{from_ep}", "video.mp4"), temp_final_video_path)
             await context.log(f"Chỉ có 1 tập, sao chép trực tiếp thành {final_video_name}.", "success")
             
-            # Copy srt file directly as final_srt_path if it exists
             single_srt = os.path.join(download_dir, f"episode_{from_ep}", "transcript.srt")
             if os.path.exists(single_srt):
                 shutil.copy2(single_srt, temp_final_srt_path)
@@ -1536,7 +1622,6 @@ class Stage11_FinalVideoAssembly(BaseStage):
                 err_msg = stderr.decode("utf-8", errors="ignore").strip()
                 raise Exception(f"FFmpeg final video assembly failed (exit code {proc.returncode}): {err_msg}")
 
-            # Merge SRT files with offsets
             await context.log("Đang tiến hành gộp các file phụ đề srt...", "info")
             merge_srt_files(srt_paths, video_durations, temp_final_srt_path)
             await context.log(f"Đã hoàn thành gộp phụ đề thành {final_srt_name}.", "success")

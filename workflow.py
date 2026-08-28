@@ -501,6 +501,18 @@ class WorkflowManager:
             for stage in stages_pipeline:
                 if context.cancel_token.is_cancelled():
                     raise asyncio.CancelledError()
+
+                stage_record = next((item for item in task.stages if item["name"] == stage.name), None)
+                if (
+                    stage.name != "Stage 0 - Project Init"
+                    and stage_record is not None
+                    and stage_record["status"] == StageState.SUCCESS
+                ):
+                    await context.log(
+                        f"Giai đoạn '{stage.name}' đã hoàn thành ở lần chạy trước. Tiếp tục từ checkpoint kế tiếp.",
+                        "success",
+                    )
+                    continue
                 
                 task.current_stage = stage.name
                 for s in task.stages:

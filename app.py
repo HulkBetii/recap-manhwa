@@ -712,7 +712,7 @@ class CrawlRequest(BaseModel):
     url: str
     from_episode: int = Field(ge=1)
     to_episode: int = Field(ge=1)
-    safe_mode: bool = True
+    safe_mode: bool = False
     nsfw_threshold: float = 0.3
     nsfw_mode: str = "mask"
     timeout: int = Field(default=160, ge=30, le=600)
@@ -726,6 +726,7 @@ class CrawlRequest(BaseModel):
     ref_audio_path: Optional[str] = None
     logo_path: Optional[str] = None
     overlay_path: Optional[str] = None
+    burn_subtitles: bool = False
     remove_text: bool = True
     remove_text_conf: float = 0.3
     remove_text_radius: int = 3
@@ -2159,7 +2160,18 @@ async def process_single_image(
                 await sse_logger.log(f"  [Safe Mode] -> {log_res_fb}", "error")
             return log_res_fb
 
-async def sanitize_episode_images(ep_dir: str, nsfw_threshold: float, nsfw_mode: str, from_page: int = None, to_page: int = None, sse_logger = None, concurrency: int = 5, pdf_dir: str = None) -> list:
+async def sanitize_episode_images(
+    ep_dir: str,
+    nsfw_threshold: float,
+    nsfw_mode: str,
+    from_page: int = None,
+    to_page: int = None,
+    sse_logger = None,
+    concurrency: int = 5,
+    pdf_dir: str = None,
+    selected_files=None,
+    strict: bool = False,
+) -> list:
     global dino_processor, dino_model, sam_processor, sam_model
 
     import os
@@ -2172,6 +2184,15 @@ async def sanitize_episode_images(ep_dir: str, nsfw_threshold: float, nsfw_mode:
     image_files = sorted([f for f in os.listdir(ep_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
     if not image_files:
         return []
+
+    if selected_files is not None:
+        selected_set = set(selected_files)
+        missing = sorted(selected_set - set(image_files))
+        if missing:
+            raise ValueError(f"Không tìm thấy ảnh cần kiểm duyệt: {missing}")
+        image_files = [file_name for file_name in image_files if file_name in selected_set]
+        if not image_files:
+            raise ValueError("Danh sách ảnh cần kiểm duyệt đang rỗng.")
 
     if from_page is not None and to_page is not None:
         image_files = image_files[from_page - 1 : to_page]
@@ -2212,7 +2233,8 @@ async def sanitize_episode_images(ep_dir: str, nsfw_threshold: float, nsfw_mode:
             sam_processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
             sam_model = SamModel.from_pretrained("facebook/sam-vit-base").to(device)
 
-        prompt = "breast. buttocks. genitalia. nude body. male chest. exposed torso. underwear. bikini. speech bubble. comic text. written words."
+        from moderation_utils import MODERATION_PROMPT
+        prompt = MODERATION_PROMPT
         effective_threshold = max(0.1, nsfw_threshold)
 
         # Run concurrent image processing tasks with the specified concurrency.
@@ -2233,9 +2255,13 @@ async def sanitize_episode_images(ep_dir: str, nsfw_threshold: float, nsfw_mode:
 
         results = await asyncio.gather(*tasks)
         sanitized_log = list(results)
+        if strict and any(": error" in result.casefold() for result in sanitized_log):
+            raise RuntimeError("Một hoặc nhiều ảnh kiểm duyệt bị lỗi.")
 
     except Exception as e:
         print(f"Lỗi chạy DINO+SAM filter: {str(e)}")
+        if strict:
+            raise
         # Ultimate fallback: keep original color files and log
         sanitized_log = []
         for file_name in image_files:
@@ -2246,7 +2272,7 @@ async def sanitize_episode_images(ep_dir: str, nsfw_threshold: float, nsfw_mode:
 # Background Crawler Task
 async def run_crawler_task(
     url: str, from_ep: int, to_ep: int,
-    safe_mode: bool = True,
+    safe_mode: bool = False,
     nsfw_threshold: float = 0.4,
     nsfw_mode: str = "mask",
     timeout: int = 160,
@@ -2399,7 +2425,7 @@ async def run_crawler_task(
 
 async def run_auto_summarization_flow(
     download_dir: str, title_text: str, from_ep: int, to_ep: int,
-    safe_mode: bool = True,
+    safe_mode: bool = False,
     nsfw_threshold: float = 0.4,
     nsfw_mode: str = "mask",
     timeout: int = 160,
@@ -2972,6 +2998,7 @@ async def crawl(payload: CrawlRequest):
         "ref_audio_path": _validated_asset_reference(payload.ref_audio_path),
         "logo_path": _validated_asset_reference(payload.logo_path),
         "overlay_path": _validated_asset_reference(payload.overlay_path),
+        "burn_subtitles": payload.burn_subtitles,
         "remove_text": payload.remove_text,
         "remove_text_conf": payload.remove_text_conf,
         "remove_text_radius": payload.remove_text_radius,

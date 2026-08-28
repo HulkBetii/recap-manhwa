@@ -10,9 +10,10 @@ import psutil
 import pytest
 
 from workflow import EventBus, WorkflowManager
-from workflow_base import JSONWorkflowRepository, WorkflowState
+from workflow_base import JSONWorkflowRepository, WorkflowState, WorkflowTask
 from worker_protocol import atomic_write_json
 from video_worker import public_final_video_url
+from workflow_stages_2 import Stage11_FinalVideoAssembly, can_recover_ffmpeg_pipe_output, is_ffmpeg_pipe_closed_error
 
 
 HELPER = Path(__file__).parent / "helpers" / "workflow_stub_worker.py"
@@ -23,12 +24,68 @@ def test_workflow_never_deletes_gemini_activity():
     assert "clear_gemini_activity" not in source
     assert "My Activity" not in source
     assert "time.monotonic() - start_time_seconds" in source
+    assert "checkpoint kế tiếp" in source
+    assert 'stage.name != "Stage 0 - Project Init"' in source
 
 
 def test_video_worker_returns_real_output_url():
     assert public_final_video_url("comic_1_1_en_deadbeef") == (
         "/downloads/comic_1_1_en_deadbeef/output/comic_1_1_en_deadbeef.mp4"
     )
+
+
+def test_ffmpeg_closed_pipe_errors_include_windows_invalid_argument():
+    assert is_ffmpeg_pipe_closed_error(BrokenPipeError())
+    assert is_ffmpeg_pipe_closed_error(OSError(22, "Invalid argument"))
+    assert not is_ffmpeg_pipe_closed_error(OSError(5, "Access denied"))
+
+
+def test_ffmpeg_closed_pipe_recovery_requires_valid_mp4(monkeypatch, tmp_path):
+    output = tmp_path / "video.mp4.tmp.mp4"
+    output.write_bytes(b"valid-enough-for-test")
+    monkeypatch.setattr("workflow_stages_2.validate_mp4_file", lambda path: Path(path) == output)
+
+    assert can_recover_ffmpeg_pipe_output(OSError(22, "Invalid argument"), str(output))
+    assert not can_recover_ffmpeg_pipe_output(OSError(5, "Access denied"), str(output))
+    assert not can_recover_ffmpeg_pipe_output(OSError(22, "Invalid argument"), str(tmp_path / "missing.mp4"))
+
+
+@pytest.mark.asyncio
+async def test_final_assembly_always_exports_subtitles(monkeypatch, tmp_path):
+    import app as app_module
+
+    episode_dir = tmp_path / "episode_1"
+    episode_dir.mkdir()
+    (episode_dir / "video.mp4").write_bytes(b"video")
+    (episode_dir / "transcript.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nTest\n",
+        encoding="utf-8",
+    )
+
+    task = WorkflowTask("Comic", "https://example.com/comic", 1, 1, {})
+    task.artifacts = {
+        "download_dir": str(tmp_path),
+        "download_folder_name": "comic_1_1_en_test",
+    }
+
+    class Context:
+        def __init__(self, workflow_task):
+            self.task = workflow_task
+
+        async def log(self, *_args, **_kwargs):
+            return None
+
+        async def update_stage_progress(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(app_module, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("workflow_stages_2.get_video_duration", lambda *_args: 1.0)
+    assert await Stage11_FinalVideoAssembly().execute(Context(task))
+
+    output_dir = tmp_path / "output"
+    assert (output_dir / "comic_1_1_en_test.mp4").is_file()
+    assert (output_dir / "comic_1_1_en_test.srt").is_file()
+    assert task.artifacts["final_subtitle_url"].endswith("comic_1_1_en_test.srt")
 
 
 def test_atomic_status_write_retries_windows_file_sharing(monkeypatch, tmp_path):

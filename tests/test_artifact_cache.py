@@ -150,3 +150,106 @@ def test_partial_mp4_is_not_valid_or_cached(tmp_path):
         validate=lambda: validate_mp4_file(video),
     )
     assert not video.exists()
+
+
+def test_selected_moderation_change_invalidates_only_images_and_video(tmp_path):
+    episode_dir = tmp_path / "episode_1"
+    images_pdf = episode_dir / "images_pdf"
+    images_blur = episode_dir / "images_blur"
+    write(images_pdf / "001.jpg", b"source")
+    write(images_blur / "001.jpg", b"moderated")
+    recap = write(episode_dir / "recap.json")
+    narration = write(episode_dir / "narration.txt")
+    audio = write(episode_dir / "audio.mp3")
+    video = write(episode_dir / "video.mp4", valid_mp4_bytes())
+    original = task(safe_mode=True, nsfw_threshold=0.3, nsfw_mode="mask")
+    cache = EpisodeStageCache(episode_dir)
+    fingerprint = stage_fingerprint(
+        original,
+        "selected_moderation",
+        1,
+        input_paths=[images_pdf],
+        extra={"selected_pages": [1]},
+    )
+    cache.commit(stage="selected_moderation", fingerprint=fingerprint, outputs=[images_blur])
+
+    changed = task(safe_mode=True, nsfw_threshold=0.4, nsfw_mode="mask")
+    changed_fingerprint = stage_fingerprint(
+        changed,
+        "selected_moderation",
+        1,
+        input_paths=[images_pdf],
+        extra={"selected_pages": [1]},
+    )
+    assert not cache.is_current(
+        stage="selected_moderation",
+        fingerprint=changed_fingerprint,
+        outputs=[images_blur],
+    )
+    assert images_pdf.exists()
+    assert recap.exists()
+    assert narration.exists()
+    assert audio.exists()
+    assert not images_blur.exists()
+    assert not video.exists()
+
+
+def test_selected_page_change_invalidates_selected_moderation_and_video_only(tmp_path):
+    episode_dir = tmp_path / "episode_1"
+    images_pdf = episode_dir / "images_pdf"
+    images_blur = episode_dir / "images_blur"
+    write(images_pdf / "001.jpg", b"one")
+    write(images_pdf / "002.jpg", b"two")
+    write(images_blur / "001.jpg", b"one")
+    write(images_blur / "002.jpg", b"two")
+    recap = write(episode_dir / "recap.json")
+    narration = write(episode_dir / "narration.txt")
+    audio = write(episode_dir / "audio.mp3")
+    video = write(episode_dir / "video.mp4", valid_mp4_bytes())
+    current_task = task(safe_mode=True, nsfw_threshold=0.3, nsfw_mode="mask")
+    cache = EpisodeStageCache(episode_dir)
+    fingerprint = stage_fingerprint(
+        current_task,
+        "selected_moderation",
+        1,
+        input_paths=[images_pdf],
+        extra={"selected_pages": [1]},
+    )
+    cache.commit(stage="selected_moderation", fingerprint=fingerprint, outputs=[images_blur])
+
+    changed_fingerprint = stage_fingerprint(
+        current_task,
+        "selected_moderation",
+        1,
+        input_paths=[images_pdf],
+        extra={"selected_pages": [2]},
+    )
+    assert not cache.is_current(
+        stage="selected_moderation",
+        fingerprint=changed_fingerprint,
+        outputs=[images_blur],
+    )
+    assert recap.exists()
+    assert narration.exists()
+    assert audio.exists()
+    assert not images_blur.exists()
+    assert not video.exists()
+
+
+def test_partial_selected_moderation_output_is_not_cached(tmp_path):
+    episode_dir = tmp_path / "episode_1"
+    images_blur = episode_dir / "images_blur"
+    first = write(images_blur / "001.jpg", b"one")
+    second = write(images_blur / "002.jpg", b"two")
+    cache = EpisodeStageCache(episode_dir)
+    fingerprint = stage_fingerprint(task(safe_mode=True), "selected_moderation", 1)
+    cache.commit(stage="selected_moderation", fingerprint=fingerprint, outputs=[images_blur])
+    second.unlink()
+
+    assert first.exists()
+    assert not cache.is_current(
+        stage="selected_moderation",
+        fingerprint=fingerprint,
+        outputs=[images_blur],
+    )
+    assert not images_blur.exists()

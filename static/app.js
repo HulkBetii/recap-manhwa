@@ -914,6 +914,7 @@ btnCrawl.addEventListener('click', async () => {
                 ref_audio_path: ttsMode === 'clone' ? uploadedRefAudioPath : null,
                 logo_path: uploadedLogoPath,
                 overlay_path: uploadedOverlayPath,
+                burn_subtitles: document.getElementById('burn-subtitles').checked,
                 remove_text: true,
                 remove_text_conf: 0.3,
                 remove_text_radius: 3,
@@ -1178,16 +1179,21 @@ btnClearCache.addEventListener('click', async () => {
 // Toggle Safe Mode config styling
 const safeModeCheckbox = document.getElementById('safe-mode');
 const nsfwSettings = document.getElementById('nsfw-settings');
-if (safeModeCheckbox && nsfwSettings) {
-    safeModeCheckbox.addEventListener('change', () => {
-        if (safeModeCheckbox.checked) {
-            nsfwSettings.style.opacity = '1';
-            nsfwSettings.style.pointerEvents = 'auto';
-        } else {
-            nsfwSettings.style.opacity = '0.5';
-            nsfwSettings.style.pointerEvents = 'none';
-        }
-    });
+const safeModeStatus = document.getElementById('safe-mode-status');
+const nsfwThresholdInput = document.getElementById('nsfw-threshold');
+if (safeModeCheckbox && nsfwSettings && safeModeStatus) {
+    const syncSafeModeUI = () => {
+        const enabled = safeModeCheckbox.checked;
+        safeModeCheckbox.setAttribute('aria-checked', String(enabled));
+        safeModeStatus.textContent = enabled ? 'Đang bật' : 'Đang tắt';
+        safeModeStatus.classList.toggle('on', enabled);
+        safeModeStatus.classList.toggle('off', !enabled);
+        nsfwSettings.classList.toggle('is-disabled', !enabled);
+        if (nsfwThresholdInput) nsfwThresholdInput.disabled = !enabled;
+    };
+
+    safeModeCheckbox.addEventListener('change', syncSafeModeUI);
+    syncSafeModeUI();
 }
 
 if (btnClearQueue) {

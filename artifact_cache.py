@@ -13,42 +13,45 @@ from typing import Any, Callable, Iterable
 from tts_settings import get_ai33pro_voice_id, uses_ai33pro
 
 
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 MANIFEST_NAME = "artifact_manifest.json"
 STAGE_ORDER = (
     "image_crawl",
     "repagination",
-    "moderation",
     "pdf",
+    "gemini_safe_pdf",
     "gemini",
     "json_extract",
     "narration",
     "tts",
     "subtitles",
+    "selected_moderation",
     "video",
 )
 STAGE_CONFIG_KEYS = {
     "image_crawl": ("image_quality", "concurrency", "comix_group_id"),
     "repagination": ("image_quality",),
-    "moderation": ("safe_mode", "nsfw_threshold", "nsfw_mode", "remove_text", "remove_text_conf", "remove_text_radius"),
     "pdf": ("pdf_quality", "language"),
+    "gemini_safe_pdf": ("safe_mode", "nsfw_threshold", "nsfw_mode", "pdf_quality"),
     "gemini": ("vlm_provider", "language"),
     "json_extract": ("language",),
     "narration": ("language",),
     "tts": ("voice_id", "ref_audio_path", "language"),
     "subtitles": ("language",),
-    "video": ("logo_path", "overlay_path", "remove_text", "remove_text_conf", "remove_text_radius", "fps"),
+    "selected_moderation": ("safe_mode", "nsfw_threshold", "nsfw_mode"),
+    "video": ("logo_path", "overlay_path", "remove_text", "remove_text_conf", "remove_text_radius", "burn_subtitles", "fps"),
 }
 STAGE_OUTPUT_PATHS = {
     "image_crawl": ("images",),
     "repagination": ("images_pdf", "debug_repaging"),
-    "moderation": ("images_blur",),
     "pdf": ("pdf",),
+    "gemini_safe_pdf": ("gemini_safe",),
     "gemini": ("raw_gemini_response.txt", "recap.json"),
     "json_extract": (),
     "narration": ("narration.txt",),
     "tts": ("audio.mp3", "transcript.srt", "tts_config.json"),
     "subtitles": (),
+    "selected_moderation": ("images_blur",),
     "video": ("video.mp4", "content_bounds_cache.json", "ffmpeg_render_stderr.log"),
 }
 
