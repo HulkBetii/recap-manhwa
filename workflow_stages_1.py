@@ -1847,9 +1847,9 @@ class Stage2b_IntelligentRepagination(BaseStage):
         except Exception:
             pass
         
-        # Configurations
-        min_height = task.payload.get("repage_min_height", 1000)
-        max_height = task.payload.get("repage_max_height", 2500)
+        # Configurations (Optimized for Sub-panel Segmentation)
+        min_height = task.payload.get("repage_min_height", 350)
+        max_height = task.payload.get("repage_max_height", 1400)
         canny_low = task.payload.get("repage_canny_low", 50)
         canny_high = task.payload.get("repage_canny_high", 150)
         
@@ -2280,28 +2280,9 @@ class Stage2b_IntelligentRepagination(BaseStage):
                         except Exception:
                             pass
                 
-                def is_blank_page(crop, bg_val, tol=15, ratio_threshold=0.995):
-                    # 1. Grayscale and difference with background value
-                    gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-                    diff = np.abs(gray_crop.astype(int) - bg_val)
-                    bg_ratio = np.mean(diff <= tol)
-                    if bg_ratio >= ratio_threshold:
-                        return True
-                        
-                    # 2. Check edge density using Canny (for empty pages with slight noise/gradients)
-                    canny = cv2.Canny(gray_crop, 50, 150)
-                    edge_ratio = np.mean(canny > 0)
-                    if edge_ratio < 0.0005:  # extremely low edge density
-                        return True
-                        
-                    # 3. Check pixel intensity variance (low contrast / blank gradient)
-                    variance = np.var(gray_crop)
-                    if variance < 10.0:  # virtually solid color
-                        return True
-                        
-                    return False
-                        
-                def find_content_range(slice_img, pad=15):
+                from moderation_utils import is_junk_or_title_page
+                
+                def find_content_range(slice_img, pad=10):
                     h, w = slice_img.shape[:2]
                     if h <= 2 * pad:
                         return 0, h
@@ -2367,16 +2348,24 @@ class Stage2b_IntelligentRepagination(BaseStage):
                     y_end = cuts[i+1]
                     slice_img = canvas[y_start:y_end, :]
                     
-                    if skip_blank and is_blank_page(slice_img, final_bg_val, tol=tolerance):
-                        skipped_count += 1
-                        continue
+                    if skip_blank:
+                        is_junk_raw, _ = is_junk_or_title_page(slice_img, bg_val=final_bg_val, tol=tolerance)
+                        if is_junk_raw:
+                            skipped_count += 1
+                            continue
                         
                     # Calculate content boundaries to crop unnecessary whitespace from top and bottom
-                    pad_val = task.payload.get("repage_crop_padding", 12)
+                    pad_val = task.payload.get("repage_crop_padding", 10)
                     y_top, y_bottom = find_content_range(slice_img, pad=pad_val)
                     
                     # Apply crop to image slice
                     cropped_slice = slice_img[y_top:y_bottom, :]
+                    
+                    if skip_blank:
+                        is_junk_cropped, _ = is_junk_or_title_page(cropped_slice, bg_val=final_bg_val, tol=tolerance)
+                        if is_junk_cropped:
+                            skipped_count += 1
+                            continue
                     
                     page_counter += 1
                     new_filename = f"{page_counter:03d}.webp"

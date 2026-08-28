@@ -282,7 +282,14 @@ class WorkflowContext:
             "episode": episode or self.task.current_episode
         }
         self.task.logs.append(log_entry)
-        print(f"[{self.task.comic_title}] [{level.upper()}] {safe_message}", flush=True)
+        try:
+            print(f"[{self.task.comic_title}] [{level.upper()}] {safe_message}", flush=True)
+        except UnicodeEncodeError:
+            try:
+                sys.stdout.buffer.write(f"[{self.task.comic_title}] [{level.upper()}] {safe_message}\n".encode("utf-8", errors="replace"))
+                sys.stdout.buffer.flush()
+            except Exception:
+                pass
         await self.manager.save_and_broadcast("WorkflowProgressUpdated", self.task)
 
     async def update_stage_progress(self, stage_name: str, progress: float):

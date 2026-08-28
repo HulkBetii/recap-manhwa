@@ -1504,7 +1504,7 @@ def clean_gemini_response(text: str) -> str:
     # 1. Split text into lines
     lines = text.split("\n")
     
-    page_prefix_pat = re.compile(r"^\s*\[?\d+\]?\s*[\-:\.]")
+    page_prefix_pat = re.compile(r"^\s*\[?[0-9\s,:%]+\]?\s*[\-:\.]")
     
     # Filter out conversational intro/outro lines
     filtered_lines = []
@@ -1589,16 +1589,19 @@ def verify_gemini_response_format(text: str) -> tuple[bool, str]:
     text = clean_gemini_response(text)
     
     # 1. Check if this is a JSON response
-    # If it is valid JSON, we bypass the text-format checks.
+    # If it is valid JSON with speech/images, we bypass the text-format checks.
     extracted = extract_json_from_text(text)
-    if extracted:
+    if extracted and ("\"speech\"" in extracted or "'speech'" in extracted):
         try:
             parsed = json.loads(extracted)
             if isinstance(parsed, list) and len(parsed) > 0:
+                valid_json = True
                 for item in parsed:
                     if not isinstance(item, dict) or "speech" not in item or "images" not in item:
-                        return False, "JSON item lacks 'speech' or 'images' key"
-                return True, "Valid JSON"
+                        valid_json = False
+                        break
+                if valid_json:
+                    return True, "Valid JSON"
         except Exception:
             pass
 
@@ -1633,13 +1636,74 @@ def verify_gemini_response_format(text: str) -> tuple[bool, str]:
         if not line.endswith("#"):
             return False, f"Line {idx+1} does not end with the hash symbol (#): '{line}'"
         
-        # Verify the line matches the format [Page] - [Text]#
+        # Verify the line matches the format [Page(s)] - [Text]#
         line_content = line[:-1].strip()
-        match = re.match(r"^\[?(\d+)\]?\s*[\-:\.]?\s*(.+)$", line_content, re.DOTALL)
+        match = re.match(r"^\[?([0-9\s,:%]+)\]?\s*[\-:\.]?\s*(.+)$", line_content, re.DOTALL)
         if not match:
             return False, f"Line {idx+1} does not match the expected '[Page] - [Text]' format: '{line}'"
             
     return True, "Valid"
+
+
+def _parse_gemini_image_specs(spec_str: str) -> list[dict]:
+    """
+    Parses image specs from string formats like:
+    - "14" -> [{"page": 14, "priority": 1.0}]
+    - "[14, 15]" -> [{"page": 14, "priority": 0.5}, {"page": 15, "priority": 0.5}]
+    - "[14:40%, 15:60%]" -> [{"page": 14, "priority": 0.4}, {"page": 15, "priority": 0.6}]
+    - "[14:0.3, 15:0.7]" -> [{"page": 14, "priority": 0.3}, {"page": 15, "priority": 0.7}]
+    """
+    cleaned = spec_str.strip().strip("[]").strip()
+    parts = [p.strip() for p in cleaned.split(",") if p.strip()]
+    if not parts:
+        return []
+
+    parsed_images = []
+    has_custom_weights = False
+
+    for part in parts:
+        if ":" in part:
+            p_num_str, weight_str = part.split(":", 1)
+            digits = re.sub(r"\D", "", p_num_str)
+            if not digits:
+                continue
+            p_num = int(digits)
+            weight_clean = weight_str.replace("%", "").strip()
+            try:
+                weight_val = float(weight_clean)
+                if "%" in weight_str or weight_val > 1.0:
+                    weight_val = weight_val / 100.0
+            except ValueError:
+                weight_val = 1.0
+            parsed_images.append({"page": p_num, "priority": max(0.01, weight_val)})
+            has_custom_weights = True
+        else:
+            digits = re.sub(r"\D", "", part)
+            if not digits:
+                continue
+            p_num = int(digits)
+            parsed_images.append({"page": p_num, "priority": 1.0})
+
+    if not parsed_images:
+        return []
+
+    if not has_custom_weights:
+        count = len(parsed_images)
+        for img in parsed_images:
+            img["priority"] = round(1.0 / count, 4)
+    else:
+        total = sum(img["priority"] for img in parsed_images)
+        if total > 0:
+            for img in parsed_images:
+                img["priority"] = round(img["priority"] / total, 4)
+
+    # Adjust rounding discrepancy to ensure exact 1.0 sum
+    diff = round(1.0 - sum(img["priority"] for img in parsed_images), 4)
+    if diff != 0 and parsed_images:
+        parsed_images[-1]["priority"] = max(0.01, round(parsed_images[-1]["priority"] + diff, 4))
+
+    return parsed_images
+
 
 def parse_gemini_recap_text(text: str) -> list:
     if not text:
@@ -1663,36 +1727,17 @@ def parse_gemini_recap_text(text: str) -> list:
         if not seg:
             continue
             
-        m = re.match(r"^\[?(\d+)\]?\s*-\s*(.*)$", seg, re.DOTALL)
+        m = re.match(r"^\[?([0-9\s,:%]+)\]?\s*[\-:\.]?\s*(.*)$", seg, re.DOTALL)
         if m:
-            page_num = m.group(1).strip()
+            page_spec = m.group(1).strip()
             content = m.group(2).strip()
             if content:
-                content = re.sub(r"[\*\_`]", "", content)
-                parsed_list.append({
-                    "speech": content,
-                    "images": [
-                        {
-                            "page": page_num,
-                            "priority": 1.0
-                        }
-                    ]
-                })
-        else:
-            m_fallback = re.match(r"^\[?(\d+)\]?\s*[\-:\.]?\s*(.*)$", seg, re.DOTALL)
-            if m_fallback:
-                page_num = m_fallback.group(1).strip()
-                content = m_fallback.group(2).strip()
-                if content:
-                    content = re.sub(r"[\*\_`]", "", content)
+                content = re.sub(r"[\*\_`]", "", content).strip()
+                imgs = _parse_gemini_image_specs(page_spec)
+                if imgs and content:
                     parsed_list.append({
                         "speech": content,
-                        "images": [
-                            {
-                                "page": page_num,
-                                "priority": 1.0
-                            }
-                        ]
+                        "images": imgs
                     })
                     
     # Fallback to JSON if plain text parsing did not yield any results
@@ -1714,7 +1759,7 @@ def parse_gemini_recap_text(text: str) -> list:
                 total_p = sum(float(img.get("priority", 0)) for img in images_list)
                 if abs(total_p - 1.0) > 0.02:
                     for img in images_list:
-                        img["priority"] = 1.0 / len(images_list)
+                        img["priority"] = round(1.0 / len(images_list), 4)
                         
     return parsed_list
 
@@ -3351,28 +3396,28 @@ The result should feel like a creator is naturally telling the audience
 what happened in the chapter rather than reading or translating the comic.
 
 --------------------------------------------------
-2. STORY COVERAGE
+2. STORY COVERAGE & DENSE PACING
 --------------------------------------------------
 
-Compress the {total_pages} provided pages into approximately 15–25
-high-value recap segments.
+Create a rich, fast-paced recap of the {total_pages} provided pages with
+approximately 30–45 high-value recap micro-segments (scaled to cover the
+entire chapter thoroughly with minimal story gaps).
 
-Cover the important story progression from the beginning toward the end
-of the provided material.
+Cover the important story progression continuously from the beginning
+toward the end of the provided material.
 
 Prioritize:
 1. important character introductions;
-2. major actions;
-3. important discoveries;
-4. conflicts;
-5. turning points;
-6. emotional moments;
+2. major actions and battle sequences;
+3. important discoveries and clues;
+4. conflicts and character dynamics;
+5. turning points and strategy shifts;
+6. emotional reactions and expressions;
 7. meaningful reveals;
 8. the ending or cliffhanger.
 
-Do not artificially create one segment per page.
-
-Do not spend multiple segments describing trivial visual details.
+Do not artificially create one segment per page, but maintain strong
+visual and narrative continuity across the chapter.
 
 The final segment must represent the latest meaningful story development
 shown in the provided material.
@@ -3384,15 +3429,14 @@ shown in the provided material.
 Write like a native {lang_name} short-form content creator telling a story.
 
 Style:
-- fast-paced;
+- fast-paced and punchy;
 - conversational;
-- concise;
+- concise (each segment approximately 1–2 short sentences, 2.5s–3.5s spoken);
 - dramatic when appropriate;
 - easy to understand;
 - optimized for TTS;
-- short sentences;
+- short sentences with active verbs;
 - natural pauses;
-- active voice;
 - minimal complicated sentence structures.
 
 Avoid:
@@ -3457,38 +3501,32 @@ Do not randomly translate character names or established fictional terms
 unless the glossary or the target language convention clearly supports it.
 
 --------------------------------------------------
-7. PAGE SELECTION
+7. PAGE & PANEL SELECTION (DIRECT VISUAL MATCHING & MULTI-PANEL DENSITY)
 --------------------------------------------------
 
-Each output segment must be assigned to one page from the provided comic.
+Every output segment must be assigned to the exact page/panel number(s)
+from the provided comic that visually depicts the event, character, or action
+described in that segment.
 
-The selected page should visually support the event described by that
-segment.
-
-Prefer pages containing:
-- characters;
-- meaningful character interactions;
-- important actions;
-- major reveals;
-- important locations;
-- strong emotional expressions;
-- visually significant scenes.
-
-Avoid using pages that are primarily:
-- blank;
-- pure text;
-- credits;
-- title cards;
-- production information;
-- translator credits;
-- watermarks;
-- standalone sound-effect artwork.
-
-If the best story moment occurs on a visually unsuitable page, select the
-nearest suitable page that still clearly represents the same story beat.
-
-Do not select a page solely because it contains text describing an event
-if another nearby page provides meaningful visual context.
+Crucial Visual Grounding & Multi-Panel Rules:
+- Direct Alignment: If the narration mentions a specific character, attack,
+  discovery, or emotion, select the specific page/panel that clearly SHOWS it.
+- Multi-Panel Density (Crucial): To create dynamic visual flow (switching
+  images every 1.8s–2.8s), heavily utilize multi-panel ranges (e.g. [12, 13],
+  [14, 15, 16], or [20:40%, 21:60%]) whenever a sentence describes a sequence
+  of action, reaction, or continuous dialogue.
+- High Chapter Coverage: Strive to utilize 50%–80%+ of valid story pages
+  throughout the script. Avoid skipping large clusters of consecutive story
+  pages (e.g., avoid jumping 10+ pages with no segments).
+- Prefer pages containing:
+  * characters;
+  * meaningful character interactions;
+  * important actions;
+  * major reveals;
+  * strong emotional expressions;
+  * visually significant scenes.
+- Zero non-story pages: Never assign any segment to a cover, chapter title,
+  production info, credit, or pure text card.
 
 --------------------------------------------------
 8. ENDING ANCHOR
@@ -3535,12 +3573,12 @@ The output is consumed by an automated parser.
 
 Return ONLY the following format:
 
-[Page number] - [Recap text]#
+[Page number(s)] - [Recap text]#
 
 Rules:
 - One segment per line.
 - Every line must end with "#".
-- The first character of the response must be a page number.
+- The line starts with page number(s) in brackets (e.g. [5] or [12, 13] or [14, 15, 16] or [14:40%, 15:60%]).
 - No title.
 - No introduction outside the format.
 - No conclusion outside the format.
@@ -3551,22 +3589,23 @@ Rules:
 - Do not include quotation marks around the recap.
 - Keep each segment concise enough for spoken narration.
 
-Example:
+Examples:
 
 5 - Cậu vừa tưởng mọi chuyện đã kết thúc, nhưng hóa ra rắc rối mới chỉ bắt đầu.#
-12 - Trong lúc mọi người còn chưa hiểu chuyện gì xảy ra, một bí mật bất ngờ bị hé lộ.#
+[12, 13] - Trong lúc mọi người còn hoang mang, anh lập tức rút kiếm chém đứt cánh tay đối thủ.#
+[14, 15, 16] - Đòn tấn công uy lực khiến quái vật gầm rú dữ dội rồi đổ gục hoàn toàn xuống đất.#
 24 - Và đến cuối cùng, thứ chờ đợi họ lại là một biến cố còn nguy hiểm hơn nữa.#
 
 FINAL VALIDATION BEFORE RESPONDING:
 
 Silently verify that:
-1. Every line follows "[Page] - [Text]#".
+1. Every line follows "[Page(s)] - [Text]#".
 2. The output uses only {lang_name}.
-3. There are approximately 15–25 segments.
+3. There are approximately 30–45 concise micro-segments with dense multi-panel coverage.
 4. No source dialogue or narration has been reproduced verbatim.
 5. No unsupported plot event has been invented.
 6. The final segment represents the latest meaningful story event.
-7. Page references correspond to visually relevant pages.
+7. Page references correspond strictly to visually relevant pages/panels.
 8. There are no greetings, titles, explanations, or Markdown.
 9. The result sounds natural when read aloud.
 """

@@ -22,7 +22,10 @@ except Exception:
     mock_triton.dtw_kernel = TritonMock()
     sys.modules["whisper.triton_ops"] = mock_triton
 
-import whisper
+try:
+    import whisper
+except ImportError:
+    whisper = None
 from datetime import timedelta
 import logging
 from security_utils import redact_sensitive_text
@@ -127,6 +130,8 @@ _whisper_model = None
 def get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
+        if whisper is None:
+            raise RuntimeError("Thư viện whisper chưa được cài đặt.")
         logger.info(f"Initializing Whisper model ('base') on device='{config.DEVICE}'...")
         _whisper_model = whisper.load_model("base", device=config.DEVICE)
     return _whisper_model

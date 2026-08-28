@@ -31,6 +31,34 @@ SAFETY_MARKERS = (
     "nội dung nhạy cảm",
     "chính sách an toàn",
 )
+JUNK_TEXT_KEYWORDS = (
+    "chapter",
+    "chap",
+    "tập",
+    "chương",
+    "prologue",
+    "epilogue",
+    "credit",
+    "credits",
+    "translated",
+    "translator",
+    "translation",
+    "scanlation",
+    "scans",
+    "discord",
+    "donate",
+    "patreon",
+    "team",
+    "group",
+    "tác giả",
+    "họa sĩ",
+    "nhóm dịch",
+    "raw",
+    "edit",
+    "typeset",
+    "proofread",
+    "cleaning",
+)
 
 
 def list_image_files(directory: str | Path) -> list[str]:
@@ -42,6 +70,91 @@ def list_image_files(directory: str | Path) -> list[str]:
         for item in root.iterdir()
         if item.is_file() and item.suffix.lower() in IMAGE_SUFFIXES
     )
+
+
+def is_blank_or_solid_page(
+    img_bgr: Any,
+    bg_val: int | None = None,
+    tol: int = 15,
+    ratio_threshold: float = 0.992,
+) -> tuple[bool, str]:
+    import cv2
+    import numpy as np
+
+    if img_bgr is None or (hasattr(img_bgr, "size") and img_bgr.size == 0):
+        return True, "empty_image"
+    h, w = img_bgr.shape[:2]
+    if h < 20 or w < 20:
+        return True, "dimension_too_small"
+
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
+    if bg_val is None:
+        border_pixels = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
+        bg_val = int(np.median(border_pixels))
+
+    diff = np.abs(gray.astype(np.int32) - bg_val)
+    bg_ratio = float(np.mean(diff <= tol))
+    if bg_ratio >= ratio_threshold:
+        return True, "solid_background"
+
+    canny = cv2.Canny(gray, 50, 150)
+    edge_ratio = float(np.mean(canny > 0))
+    if edge_ratio < 0.0005:
+        return True, "low_edge_density"
+
+    variance = float(np.var(gray))
+    if variance < 12.0:
+        return True, "low_variance"
+
+    return False, "valid"
+
+
+def is_junk_or_title_page(
+    img_bgr: Any,
+    bg_val: int | None = None,
+    tol: int = 15,
+    ocr_texts: list[str] | None = None,
+) -> tuple[bool, str]:
+    """
+    Detects whether a comic slice is a title card, chapter banner, credits, or non-story junk.
+    """
+    import cv2
+    import numpy as np
+
+    is_blank, reason = is_blank_or_solid_page(img_bgr, bg_val=bg_val, tol=tol)
+    if is_blank:
+        return True, reason
+
+    h, w = img_bgr.shape[:2]
+    if h < 100 or w < 100:
+        return True, "too_small"
+
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
+    if bg_val is None:
+        border_pixels = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
+        bg_val = int(np.median(border_pixels))
+
+    diff = np.abs(gray.astype(np.int32) - bg_val)
+    bg_ratio = float(np.mean(diff <= tol))
+
+    # 1. OCR text check if provided
+    if ocr_texts:
+        joined_text = " ".join(t.lower() for t in ocr_texts if t).strip()
+        for kw in JUNK_TEXT_KEYWORDS:
+            if kw in joined_text:
+                canny = cv2.Canny(gray, 50, 150)
+                edge_ratio = float(np.mean(canny > 0))
+                if edge_ratio < 0.05:
+                    return True, f"junk_keyword_{kw}"
+
+    # 2. Sparse title banner detection (88%+ uniform background with minimal sparse text)
+    if bg_ratio >= 0.88:
+        canny = cv2.Canny(gray, 50, 150)
+        edge_ratio = float(np.mean(canny > 0))
+        if edge_ratio < 0.025:
+            return True, "sparse_title_banner"
+
+    return False, "valid_story_panel"
 
 
 def selected_page_numbers(segments: Iterable[dict[str, Any]], *, max_page: int) -> list[int]:
