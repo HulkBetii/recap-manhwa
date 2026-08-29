@@ -56,13 +56,15 @@ def test_camera_planner_never_uses_scroll_down():
         assert plan["animation_type"] != "scroll_down", "scroll_down must be completely abolished"
         assert len(plan["keyframes"]) >= 2
 
-        # Check keyframe bounds
+        # Check keyframe bounds and center-lock / micro-scale limits
         W_c = tc["bounds"][2]
         H_c = tc["bounds"][3]
         for kf in plan["keyframes"]:
             assert 0 <= kf["x"] <= W_c
             assert 0 <= kf["y"] <= H_c
-            assert 1.0 <= kf["scale"] <= 1.30
+            assert 1.0 <= kf["scale"] <= 1.05, f"Scale {kf['scale']} exceeded micro-motion limit 1.05"
+            if plan["animation_type"] != "cinematic_pan_horizontal":
+                assert abs(kf["x"] - W_c / 2.0) < 1e-3, f"Keyframe X {kf['x']} must be center-locked to {W_c / 2.0}"
 
 
 def test_camera_planner_mode_selection():

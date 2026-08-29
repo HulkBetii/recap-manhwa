@@ -55,6 +55,7 @@
                         <span style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 500;">Hỗ trợ:</span>
                         <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #10B981; font-weight: 600;">Webtoons</span>
                         <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); color: #3B82F6; font-weight: 600;">Vortex Scans</span>
+                        <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); color: #A78BFA; font-weight: 600;">Valir Scans</span>
                         <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); color: #F59E0B; font-weight: 600;">ToonGod</span>
                         <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #EF4444; font-weight: 600;">Asura Scans</span>
                         <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.2); color: #A855F7; font-weight: 600;">Comix</span>
@@ -149,7 +150,7 @@
                             <div class="form-group" style="margin-bottom: 0;">
                                 <label for="vlm-retries" style="font-size: 0.7rem; color: var(--text-secondary);">Số lần thử lại</label>
                                 <div class="input-wrapper">
-                                    <input type="number" id="vlm-retries" min="1" max="10" value="3" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box;">
+                                    <input type="number" id="vlm-retries" min="1" max="10" value="5" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box;">
                                 </div>
                             </div>
                         </div>
@@ -178,10 +179,11 @@
                                 <label for="vlm-language" style="font-size: 0.7rem; color: var(--text-secondary);">Ngôn ngữ tóm tắt</label>
                                 <div class="input-wrapper">
                                     <select id="vlm-language" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
-                                        <option value="en" selected>English</option>
-                                        <option value="vi">Tiếng Việt</option>
-                                        <option value="ja">Japanese</option>
-                                        <option value="zh">Chinese</option>
+                                        <option value="en" selected>English (Tiếng Anh - Mặc định)</option>
+                                        <option value="vi">Tiếng Việt (Vietnamese)</option>
+                                        <option value="ja">Japanese (Tiếng Nhật)</option>
+                                        <option value="zh">Chinese (Tiếng Trung)</option>
+                                        <option value="ko">Korean (Tiếng Hàn)</option>
                                     </select>
                                 </div>
                             </div>
@@ -189,13 +191,14 @@
 
                         <div style="display: grid; grid-template-columns: 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label for="tts-voice-id" style="font-size: 0.7rem; color: var(--text-secondary);">Chế độ giọng đọc (OmniVoice)</label>
+                                <label for="tts-voice-id" style="font-size: 0.7rem; color: var(--text-secondary);">Chế độ giọng đọc (TTS Mode)</label>
                                 <div class="input-wrapper">
                                     <select id="tts-voice-id" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
-                                        <option value="auto">Auto Voice (Tự động chọn giọng)</option>
-                                        <option value="design">Voice Design (Thiết kế giọng bằng văn bản)</option>
-                                        <option value="clone">Voice Cloning (Sao chép giọng nói mẫu)</option>
-                                        <option value="ai33pro" selected>API AI33Pro (Giọng ElevenLabs)</option>
+                                        <option value="ai33pro" selected>API AI33Pro (ElevenLabs / EdgeTTS Auto Fallback)</option>
+                                        <option value="edge-tts">EdgeTTS Trực tiếp (Microsoft Azure Voices)</option>
+                                        <option value="auto">OmniVoice Auto (Tự động thiết kế giọng)</option>
+                                        <option value="design">OmniVoice Prompt Design (Thiết kế giọng bằng văn bản)</option>
+                                        <option value="clone">OmniVoice Voice Cloning (Sao chép giọng nói mẫu)</option>
                                     </select>
                                 </div>
                             </div>
@@ -285,33 +288,52 @@
                 </div>
  
                 <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--card-border); padding-top: 1rem;">
-                    <label for="chrome-profiles-textarea">
-                        <i data-lucide="users"></i>
-                        <span>Cấu hình Tài khoản / Chrome Profiles</span>
-                    </label>
-                    <div class="input-wrapper" style="margin-top: 0.5rem;">
-                        <textarea id="chrome-profiles-textarea" rows="4" placeholder="Nhập đường dẫn Chrome Profile (mỗi dòng một đường dẫn)...
-e.g.
-C:\Data\Profile 1
-C:\Data\Profile 2" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--card-border); border-radius: 0.75rem; padding: 0.85rem 1rem; color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; resize: vertical; outline: none; transition: all var(--transition-fast);"></textarea>
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <label for="active-profile-select" style="margin-bottom: 0;">
+                            <i data-lucide="users"></i>
+                            <span>Cấu hình Tài khoản / Chrome Profiles</span>
+                        </label>
+                        <button type="button" id="btn-create-profile" class="btn" style="padding: 0.35rem 0.65rem; font-size: 0.75rem; background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; border: none; cursor: pointer; border-radius: 0.4rem; font-weight: 600; display: flex; align-items: center; gap: 0.35rem;">
+                            <i data-lucide="user-plus" style="width: 0.8rem; height: 0.8rem;"></i>
+                            <span>+ Thêm Profile Mới</span>
+                        </button>
                     </div>
-                    <span class="input-help">Đường dẫn các thư mục Profile Chrome để chạy xoay vòng khi bị giới hạn (Rate limit).</span>
-                    
-                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 0.5rem;">
-                        <span style="font-size: 0.75rem; color: var(--text-secondary);">Tài khoản hoạt động:</span>
-                        <select id="active-profile-select" style="background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); padding: 0.25rem 0.5rem; border-radius: 0.35rem; font-size: 0.75rem; outline: none;"></select>
+
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 0.75rem; gap: 0.5rem;">
+                        <div style="flex: 1;">
+                            <span style="font-size: 0.75rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Tài khoản đang chọn:</span>
+                            <select id="active-profile-select" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); padding: 0.45rem 0.6rem; border-radius: 0.45rem; font-size: 0.8rem; outline: none;"></select>
+                        </div>
                     </div>
-                    
+
                     <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem;">
-                        <button id="btn-save-profiles" class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.8rem; display: flex; align-items: center; gap: 0.4rem; cursor: pointer; border-radius: 0.35rem; border: none; font-weight: 600;">
-                            <i data-lucide="save" style="width: 0.9rem; height: 0.9rem;"></i>
-                            <span>Lưu Cấu hình</span>
-                        </button>
-                        <button id="btn-setup-active-profile" class="btn" style="padding: 0.5rem 1rem; font-size: 0.8rem; display: flex; align-items: center; gap: 0.4rem; background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); color: var(--text-primary); cursor: pointer; border-radius: 0.35rem; font-weight: 600;">
+                        <button id="btn-setup-active-profile" class="btn btn-primary" style="flex: 2; padding: 0.55rem 0.8rem; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; gap: 0.4rem; cursor: pointer; border-radius: 0.45rem; font-weight: 600; background: linear-gradient(135deg, #FFAE6E 0%, #FF7A5C 100%); border: none;">
                             <i data-lucide="chrome" style="width: 0.9rem; height: 0.9rem;"></i>
-                            <span>Đăng nhập profile</span>
+                            <span>Đăng nhập Profile này</span>
+                        </button>
+                        <button id="btn-delete-profile" class="btn" style="flex: 1; padding: 0.55rem 0.8rem; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; gap: 0.4rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #FCA5A5; cursor: pointer; border-radius: 0.45rem; font-weight: 600;">
+                            <i data-lucide="trash-2" style="width: 0.9rem; height: 0.9rem;"></i>
+                            <span>Xóa</span>
                         </button>
                     </div>
+
+                    <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 0.6rem; background: rgba(255, 174, 110, 0.05); padding: 0.45rem 0.65rem; border-radius: 0.4rem; border: 1px dashed rgba(255, 174, 110, 0.25); line-height: 1.4;">
+                        💡 <strong>Mẹo:</strong> Bạn có thể mở trực tiếp file <code>login_profile.bat</code> trong thư mục dự án để Chrome bật ngay trên màn hình Desktop của bạn.
+                    </div>
+
+                    <!-- Collapsible advanced custom paths -->
+                    <details style="margin-top: 0.75rem; font-size: 0.75rem; color: var(--text-secondary);">
+                        <summary style="cursor: pointer; user-select: none; margin-bottom: 0.4rem;">Tùy chỉnh đường dẫn thủ công (Nâng cao)</summary>
+                        <div class="input-wrapper" style="margin-top: 0.25rem;">
+                            <textarea id="chrome-profiles-textarea" rows="3" placeholder="Nhập đường dẫn Chrome Profile (mỗi dòng một đường dẫn)..." style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 0.5rem 0.75rem; color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; resize: vertical; outline: none;"></textarea>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; margin-top: 0.4rem;">
+                            <button id="btn-save-profiles" class="btn" style="padding: 0.35rem 0.75rem; font-size: 0.75rem; display: flex; align-items: gap: 0.35rem; cursor: pointer; border-radius: 0.35rem; background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: var(--text-primary); font-weight: 600;">
+                                <i data-lucide="save" style="width: 0.8rem; height: 0.8rem;"></i>
+                                <span>Lưu thủ công</span>
+                            </button>
+                        </div>
+                    </details>
                 </div>
             </section>
 
@@ -516,17 +538,29 @@ C:\Data\Profile 2" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1
                 </div>
                 <button id="btn-close-video-modal" class="btn-icon" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; transition: color var(--transition-fast); display: flex; align-items: center; justify-content: center; padding: 0.5rem; border-radius: 50%;"><i data-lucide="x"></i></button>
             </div>
-            <div class="modal-body" style="padding: 1.5rem; display: flex; align-items: center; justify-content: center; background: #000;">
-                <video id="modal-video-player" controls style="width: 100%; max-height: 70vh; border-radius: 0.5rem; outline: none;"></video>
+            <div class="modal-body" style="padding: 1.5rem; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #000; gap: 1rem;">
+                <video id="modal-video-player" controls style="width: 100%; max-height: 65vh; border-radius: 0.5rem; outline: none;"></video>
+                <div style="display: flex; gap: 0.75rem; width: 100%; justify-content: flex-end;">
+                    <a id="btn-download-video" href="#" download class="btn" style="padding: 0.45rem 0.85rem; font-size: 0.8rem; background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; border-radius: 0.45rem; text-decoration: none; display: flex; align-items: center; gap: 0.35rem; font-weight: 600;">
+                        <i data-lucide="download" style="width: 0.85rem; height: 0.85rem;"></i>
+                        <span>Tải Video (MP4)</span>
+                    </a>
+                    <a id="btn-download-srt" href="#" download class="btn" style="padding: 0.45rem 0.85rem; font-size: 0.8rem; background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.45rem; text-decoration: none; display: flex; align-items: center; gap: 0.35rem; font-weight: 500;">
+                        <i data-lucide="file-text" style="width: 0.85rem; height: 0.85rem;"></i>
+                        <span>Tải Phụ đề (SRT)</span>
+                    </a>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- JS Scripts -->
-    <script src="app.js?v=1.9"></script>
+    <script src="app.js?v=2.1"></script>
     <script>
         // Initialize Lucide icons
-        lucide.createIcons();
+        if (window.lucide) {
+            lucide.createIcons();
+        }
     </script>
 </body>
 </html>

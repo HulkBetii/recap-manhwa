@@ -1,5 +1,18 @@
 import sys
 import os
+
+# Ensure UTF-8 output on Windows consoles
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Optimize CUDA memory allocation to avoid fragmentation and OOM
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 # Enable CPU fallback for unsupported MPS operators on macOS
@@ -328,7 +341,14 @@ class SSELogger:
 
     async def log(self, message: str, level: str = "info", app_status: str = None, status_text: str = None, data: dict = None):
         safe_message = redact_sensitive_text(str(message)) or ""
-        print(f"[{level.upper()}] {safe_message}", flush=True)
+        try:
+            print(f"[{level.upper()}] {safe_message}", flush=True)
+        except Exception:
+            try:
+                sys.stdout.buffer.write(f"[{level.upper()}] {safe_message}\n".encode("utf-8", errors="replace"))
+                sys.stdout.buffer.flush()
+            except Exception:
+                pass
         payload = {
             "message": safe_message,
             "level": level,
@@ -481,6 +501,69 @@ async def save_app_config(payload: SaveConfigRequest):
         if idx < len(config["chrome_profiles"]):
             os.environ["CHROME_PROFILE_PATH"] = config["chrome_profiles"][idx]
     return {"status": "success", "message": "Cập nhật cấu hình Chrome Profiles thành công.", "config": config}
+
+class CreateProfileRequest(BaseModel):
+    name: Optional[str] = None
+
+@app.post("/api/profiles/create")
+async def create_chrome_profile(payload: Optional[CreateProfileRequest] = None):
+    config = load_config()
+    profiles = config.get("chrome_profiles", [])
+    project_profiles_dir = os.path.abspath(os.path.join(os.getcwd(), "Profiles"))
+    os.makedirs(project_profiles_dir, exist_ok=True)
+
+    # Find highest existing Profile_X number
+    existing_nums = []
+    for p in profiles:
+        m = re.search(r"Profile_(\d+)", p, re.IGNORECASE)
+        if m:
+            existing_nums.append(int(m.group(1)))
+    # Check folder system as well
+    if os.path.exists(project_profiles_dir):
+        for item in os.listdir(project_profiles_dir):
+            m = re.search(r"Profile_(\d+)", item, re.IGNORECASE)
+            if m:
+                existing_nums.append(int(m.group(1)))
+
+    next_num = (max(existing_nums) + 1) if existing_nums else (len(profiles) + 1)
+    prof_folder_name = f"Profile_{next_num}"
+    new_prof_dir = os.path.join(project_profiles_dir, prof_folder_name)
+    os.makedirs(new_prof_dir, exist_ok=True)
+    new_prof_path = os.path.join(new_prof_dir, "Default")
+
+    if new_prof_path not in profiles:
+        profiles.append(new_prof_path)
+
+    config["chrome_profiles"] = profiles
+    config["current_profile_index"] = len(profiles) - 1
+    save_config(config)
+
+    await sse_logger.log(f"Đã tạo Profile mới: {prof_folder_name} ({new_prof_path})", "success")
+    return {
+        "status": "success",
+        "message": f"Đã tạo {prof_folder_name} thành công. Vui lòng bấm 'Đăng nhập profile' để đăng nhập Google.",
+        "config": config,
+        "new_profile": new_prof_path,
+        "new_index": config["current_profile_index"]
+    }
+
+class DeleteProfileRequest(BaseModel):
+    index: int
+
+@app.post("/api/profiles/delete")
+async def delete_chrome_profile(payload: DeleteProfileRequest):
+    config = load_config()
+    profiles = config.get("chrome_profiles", [])
+    idx = payload.index
+    if 0 <= idx < len(profiles):
+        deleted = profiles.pop(idx)
+        config["chrome_profiles"] = profiles
+        if config["current_profile_index"] >= len(profiles):
+            config["current_profile_index"] = max(0, len(profiles) - 1)
+        save_config(config)
+        await sse_logger.log(f"Đã xóa profile khỏi danh sách: {deleted}", "info")
+        return {"status": "success", "message": "Xóa profile thành công.", "config": config}
+    raise HTTPException(status_code=400, detail="Chỉ mục profile không hợp lệ.")
 
 # Serve HTML frontend
 @app.get("/")
@@ -1711,10 +1794,6 @@ def parse_gemini_recap_text(text: str) -> list:
     
     text = clean_gemini_response(text)
     
-    # Verify response format and check for garbage at the end
-    is_valid, err_msg = verify_gemini_response_format(text)
-    if not is_valid:
-        raise ValueError(f"Kiểm tra định dạng phản hồi Gemini thất bại: {err_msg}")
     # 1. Strip everything between <thinking> and </thinking>
     text_clean = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
     

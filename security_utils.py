@@ -13,7 +13,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DOWNLOADS_ROOT = (PROJECT_ROOT / "downloads").resolve()
 UPLOADS_ROOT = (PROJECT_ROOT / "static" / "uploads").resolve()
 SESSION_COOKIE_NAME = "recap_session"
-SESSION_TOKEN = secrets.token_urlsafe(32)
+
+_SESSION_TOKEN_FILE = PROJECT_ROOT / ".session_token"
+if _SESSION_TOKEN_FILE.exists():
+    try:
+        SESSION_TOKEN = _SESSION_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    except Exception:
+        SESSION_TOKEN = secrets.token_urlsafe(32)
+else:
+    SESSION_TOKEN = secrets.token_urlsafe(32)
+    try:
+        _SESSION_TOKEN_FILE.write_text(SESSION_TOKEN, encoding="utf-8")
+    except Exception:
+        pass
 ALLOWED_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
 SENSITIVE_PAYLOAD_KEYS = {
     "ai33pro_api_key",

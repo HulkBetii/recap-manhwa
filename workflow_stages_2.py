@@ -608,14 +608,17 @@ def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple]:
             panel_bot = min(panel_bot, s - 1)
             break
 
+    panel_top = max(top_gutter, panel_top - 5)
+    panel_bot = min(bot_gutter, panel_bot + 5)
+
     h_panel = panel_bot - panel_top
     if h_panel >= 250:
         clean_bounds = (0, panel_top, w_full, h_panel)
-        local_focal_x = raw_focal_x
+        local_focal_x = w_full / 2.0
         local_focal_y = float(np.clip(raw_focal_y - panel_top, 0.20 * h_panel, 0.80 * h_panel))
     else:
         clean_bounds = (0, top_gutter, w_full, max(20, bot_gutter - top_gutter))
-        local_focal_x = raw_focal_x
+        local_focal_x = w_full / 2.0
         local_focal_y = float(np.clip(raw_focal_y - top_gutter, 0.20 * clean_bounds[3], 0.80 * clean_bounds[3]))
 
     return clean_bounds, (local_focal_x, local_focal_y)
@@ -742,34 +745,35 @@ class CameraPlanner:
         transition: str = "cross_fade"
     ) -> dict:
         """
-        Generates a cinematic camera plan that zooms smoothly INTO the action/character,
-        maintaining maximum visual engagement and NEVER zooming back out to full view at the end.
+        Generates a cinematic camera plan that preserves full panel width and text readability,
+        centering the X-axis and applying subtle micro-motion zoom (1.00x -> 1.035x).
         """
         cb_x, cb_y, W_c, H_c = bounds
 
         center_x = W_c / 2.0
         center_y = H_c / 2.0
 
-        if focal_point is None:
-            focal_x, focal_y = center_x, center_y
-        else:
-            fx_raw, fy_raw = focal_point
-            # Anchor strongly to character focal point
-            focal_x = center_x * 0.30 + float(fx_raw) * 0.70
-            focal_y = center_y * 0.25 + float(fy_raw) * 0.75
+        # Center-lock X axis to guarantee zero clipping of text bubbles on left/right borders
+        focal_x = center_x
 
-        focal_x = float(np.clip(focal_x, 0.20 * W_c, 0.80 * W_c))
-        focal_y = float(np.clip(focal_y, 0.18 * H_c, 0.82 * H_c))
+        if focal_point is None:
+            focal_y = center_y
+        else:
+            _, fy_raw = focal_point
+            # Gentle vertical bias towards character eye-line / action while staying well inside safe margins
+            focal_y = center_y * 0.60 + float(fy_raw) * 0.40
+
+        focal_y = float(np.clip(focal_y, 0.25 * H_c, 0.75 * H_c))
 
         aspect_ratio = W_c / max(1.0, float(H_c))
         easing = "easeInOutSine"
 
-        # Mode 1: Short Duration (< 1.8s) -> Quick Dynamic Focus In (1.01x -> 1.05x)
+        # Mode 1: Short Duration (< 1.8s) -> Subtle Micro-Motion Breathing (1.00x -> 1.020x)
         if duration < 1.8:
             animation_type = "subtle_breath"
             keyframes = [
-                {"time": 0.0, "x": center_x * 0.50 + focal_x * 0.50, "y": center_y * 0.50 + focal_y * 0.50, "scale": 1.01},
-                {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.05}
+                {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
+                {"time": duration, "x": center_x, "y": focal_y, "scale": 1.020}
             ]
             return {
                 "page": page_num,
@@ -780,12 +784,12 @@ class CameraPlanner:
                 "transition": transition
             }
 
-        # Mode 2: Long Duration (> 4.5s) -> Deep Dramatic Focus Zoom In (1.00x -> 1.09x)
+        # Mode 2: Long Duration (> 4.5s) -> Deep Gentle Cinematic Motion (1.00x -> 1.045x)
         if duration > 4.5:
             animation_type = "virtual_multicam"
             keyframes = [
-                {"time": 0.0, "x": center_x * 0.60 + focal_x * 0.40, "y": center_y * 0.60 + focal_y * 0.40, "scale": 1.00},
-                {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.09}
+                {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
+                {"time": duration, "x": center_x, "y": focal_y, "scale": 1.045}
             ]
             return {
                 "page": page_num,
@@ -796,14 +800,14 @@ class CameraPlanner:
                 "transition": transition
             }
 
-        # Mode 3: Wide Horizontal Panel (W/H >= 1.25) -> Cinematic Horizontal Pan at Close Scale
+        # Mode 3: Wide Horizontal Panel (W/H >= 1.25) -> Cinematic Horizontal Micro-Pan (scale 1.00x -> 1.030x)
         if aspect_ratio >= 1.25:
             animation_type = "cinematic_pan_horizontal"
-            pan_span = max(15.0, min(W_c * 0.10, 80.0))
+            pan_span = max(10.0, min(W_c * 0.04, 30.0))
             dir_x = random.choice([-1.0, 1.0])
             keyframes = [
-                {"time": 0.0, "x": focal_x - dir_x * pan_span, "y": focal_y, "scale": 1.05},
-                {"time": duration, "x": focal_x + dir_x * pan_span, "y": focal_y, "scale": 1.08}
+                {"time": 0.0, "x": center_x - dir_x * pan_span, "y": center_y, "scale": 1.00},
+                {"time": duration, "x": center_x + dir_x * pan_span, "y": focal_y, "scale": 1.030}
             ]
             return {
                 "page": page_num,
@@ -814,12 +818,12 @@ class CameraPlanner:
                 "transition": transition
             }
 
-        # Mode 4: Standard Panels -> Dynamic Focal Zoom In (1.00x -> 1.07x)
+        # Mode 4: Standard Panels -> Dynamic Focal Micro-Zoom In (1.00x -> 1.035x)
         animation_type = "focal_zoom_in"
-        target_scale = 1.07 if duration >= 3.0 else 1.05
+        target_scale = 1.035 if duration >= 3.0 else 1.025
         keyframes = [
-            {"time": 0.0, "x": center_x * 0.60 + focal_x * 0.40, "y": center_y * 0.60 + focal_y * 0.40, "scale": 1.00},
-            {"time": duration, "x": focal_x, "y": focal_y, "scale": target_scale}
+            {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
+            {"time": duration, "x": center_x, "y": focal_y, "scale": target_scale}
         ]
 
         return {

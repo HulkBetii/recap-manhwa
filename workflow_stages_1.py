@@ -1002,7 +1002,7 @@ class Stage5_GeminiAutomation(BaseStage):
         to_ep = task.to_episode
         download_dir = task.artifacts.get("download_dir")
         comic_title = task.artifacts.get("comic_title", "Manhwa")
-        timeout = task.payload.get("timeout", 120)
+        timeout = max(int(task.payload.get("timeout", 160)), 300)
         language = task.payload.get("language", "en")
         safe_mode = task.payload.get("safe_mode", False)
 
@@ -1179,6 +1179,15 @@ class Stage5_GeminiAutomation(BaseStage):
                     max(0.0, attempt_deadline - time.monotonic()),
                     cancel_timed_out_attempt,
                 )
+
+                def extend_attempt_timeout(additional_seconds=60):
+                    nonlocal timeout_handle
+                    if timeout_handle is not None:
+                        timeout_handle.cancel()
+                    timeout_handle = asyncio.get_running_loop().call_later(
+                        max(5.0, additional_seconds),
+                        cancel_timed_out_attempt,
+                    )
                 page = None
                 try:
                     page = await local_br_ctx.new_page()
@@ -1228,17 +1237,16 @@ class Stage5_GeminiAutomation(BaseStage):
                         raise Exception("Không tìm thấy input textbox.")
 
                     # STEP 2: Upload PDF
+                    # STEP 2: Upload PDF
                     upload_start = time.time()
                     await context.log(f"[Page {page_id}] Tập {ep}: Bắt đầu tải lên PDF...", "info", episode=ep)
                     
                     upload_success = False
-                    
-                    # Try the Gemini file chooser before falling back to the hidden input.
                     try:
                         attach_button = None
                         attach_selectors = [
                             "button[data-testid='file-uploader']",
-                            "button[aria-label='Upload & tools']", # Gemini upload button
+                            "button[aria-label='Upload & tools']",
                             "button[aria-label*='Attach']",
                             "button[aria-label*='attach']",
                             "button[aria-label*='Đính kèm']",
@@ -1255,75 +1263,64 @@ class Stage5_GeminiAutomation(BaseStage):
                         if attach_button:
                             await attach_button.click()
                             await asyncio.sleep(1.5)
-                            
-                            upload_opt = None
-                            upload_option_selectors = [
-                                "[role='menuitem']:has-text('Upload from computer')",
-                                "[role='menuitem']:has-text('Tải lên từ máy tính')",
-                                "[role='menuitem']:has-text('Upload files')",
-                                "[role='menuitem']:has-text('Tải lên')",
-                                "button:has-text('Upload from computer')",
-                                "button:has-text('Tải lên từ máy tính')",
-                                "span:has-text('Upload from computer')",
-                                "span:has-text('Tải lên từ máy tính')",
-                                "[data-testid*='computer']",
-                                "[data-testid*='upload']",
-                                "button[aria-label*='Upload files']",
-                                "button:has-text('Upload files')",
-                                "button:has-text('Tải lên')",
-                                "[role='menuitem']:has-text('Upload files')"
-                            ]
-                            for sel in upload_option_selectors:
-                                loc = page.locator(sel).first
-                                if await loc.count() > 0 and await loc.is_visible():
-                                    upload_opt = loc
-                                    break
-                            
-                            if upload_opt:
-                                async with page.expect_file_chooser() as fc_info:
-                                    await upload_opt.click()
-                                file_chooser = await fc_info.value
-                                await file_chooser.set_files(pdf_path)
-                                upload_success = True
-                                await context.log(f"[Page {page_id}] Tập {ep}: Đã tải lên PDF bằng file chooser (menu option) thành công.", "info", episode=ep)
-                            else:
-                                # Fallback: try expect_file_chooser directly on the attach button
-                                try:
-                                    async with page.expect_file_chooser() as fc_info:
-                                        await attach_button.click()
-                                    file_chooser = await fc_info.value
-                                    await file_chooser.set_files(pdf_path)
-                                    upload_success = True
-                                    await context.log(f"[Page {page_id}] Tập {ep}: Đã tải lên PDF bằng file chooser (direct click) thành công.", "info", episode=ep)
-                                except Exception:
-                                    pass
+                        
+                        file_input = page.locator("input[type='file'][accept*='.pdf'], input.hidden-file-input, input[type='file']").first
+                        if await file_input.count() > 0:
+                            await file_input.set_input_files(pdf_path)
+                            upload_success = True
+                            await context.log(f"[Page {page_id}] Tập {ep}: Đã tải lên PDF bằng file input thành công.", "info", episode=ep)
                     except Exception as upload_err:
-                        await context.log(f"[Page {page_id}] Thử tải lên bằng file chooser thất bại: {upload_err}. Sử dụng Fallback...", "warning", episode=ep)
-                    
-                    if not upload_success:
-                        try:
-                            file_input = page.locator("form input[type='file'], #composer-background input[type='file'], input[type='file'][multiple], input[type='file']").first
-                            if await file_input.count() > 0:
-                                await file_input.set_input_files(pdf_path)
-                                upload_success = True
-                                await context.log(f"[Page {page_id}] Tập {ep}: Đã tải lên PDF bằng set_input_files thành công.", "info", episode=ep)
-                        except Exception as upload_err:
-                            await context.log(f"[Page {page_id}] Thử tải lên bằng set_input_files thất bại: {upload_err}. Sử dụng Clipboard Fallback...", "warning", episode=ep)
+                        await context.log(f"[Page {page_id}] Thử tải lên bằng file input thất bại: {upload_err}. Thử fallback...", "warning", episode=ep)
 
-                        if not upload_success:
-                            with open(pdf_path, "rb") as pdf_file:
-                                pdf_base64 = base64.b64encode(pdf_file.read()).decode("utf-8")
-                            await page.evaluate(js_paste_pdf, {
-                                "xpath": textbox_xpath,
-                                "base64Data": pdf_base64,
-                                "fileName": os.path.basename(pdf_path),
-                                "mimeType": "application/pdf"
-                            })
+                    if not upload_success:
+                        with open(pdf_path, "rb") as pdf_file:
+                            pdf_base64 = base64.b64encode(pdf_file.read()).decode("utf-8")
+                        await page.evaluate(js_paste_pdf, {
+                            "xpath": textbox_xpath,
+                            "base64Data": pdf_base64,
+                            "fileName": os.path.basename(pdf_path),
+                            "mimeType": "application/pdf"
+                        })
+                        await context.log(f"[Page {page_id}] Tập {ep}: Đã tải lên PDF bằng Clipboard Fallback.", "info", episode=ep)
                     
                     await asyncio.sleep(2.0)
                     upload_time = round(time.time() - upload_start, 1)
 
-                    # STEP 3: Paste Prompt
+                    # STEP 3: Wait for PDF attachment chip & upload completion
+                    await context.log(f"[Page {page_id}] Tập {ep}: Đang kiểm tra trạng thái tải lên của PDF...", "info", episode=ep)
+                    attachment_appeared = False
+                    for _ in range(15):
+                        if context.cancel_token.is_cancelled():
+                            break
+                        chip = page.locator("gem-attachment, .attachment-container, [data-testid*='attachment'], [class*='file-card'], div:has-text('.pdf')").first
+                        if await chip.count() > 0:
+                            attachment_appeared = True
+                            break
+                        await asyncio.sleep(1)
+
+                    if not attachment_appeared:
+                        await context.log(f"[Page {page_id}] Tập {ep}: Cảnh báo: Chưa phát hiện thẻ attachment sau 15s. Tiếp tục kiểm tra spinner...", "warning", episode=ep)
+
+                    loader_check_sec = 0
+                    while loader_check_sec < 90:
+                        if context.cancel_token.is_cancelled():
+                            break
+                        try:
+                            spinner = page.locator("gem-attachment mat-spinner, gem-attachment .mat-mdc-progress-spinner, gem-attachment [role='progressbar'], .loading-indicator").first
+                            if await spinner.count() > 0 and await spinner.is_visible():
+                                if loader_check_sec % 10 == 0:
+                                    await context.log(f"[Page {page_id}] Tập {ep}: PDF đang tải lên/xử lý (loading). Đã chờ {loader_check_sec} giây...", "info", episode=ep)
+                                await asyncio.sleep(1)
+                                loader_check_sec += 1
+                                continue
+                        except Exception:
+                            pass
+                        break
+
+                    await context.log(f"[Page {page_id}] Tập {ep}: PDF đã tải xong (trạng thái loading biến mất).", "success", episode=ep)
+                    await asyncio.sleep(2.0)
+
+                    # STEP 4: Paste Prompt
                     await textbox.click(force=True)
                     await textbox.fill(prompt_content)
                     try:
@@ -1356,108 +1353,7 @@ class Stage5_GeminiAutomation(BaseStage):
                     if not editor_text or not editor_text.strip():
                         raise Exception("Xác thực thất bại: Prompt editor bị trống.")
 
-                    # Check and wait for PDF upload loading spinner to disappear
-                    await context.log(f"[Page {page_id}] Tập {ep}: Đang kiểm tra trạng thái tải lên của PDF...", "info", episode=ep)
-                    
-                    # Wait for attachment to appear first (up to 15 seconds)
-                    attachment_sel = "gem-attachment, .attachment-container, [data-testid='attachment'], [data-testid*='attachment'], [data-testid*='file-card'], [class*='AttachmentCard'], .file-attachment, [class*='file-card']"
-                    loader_sels = [
-                        "gem-attachment.loading",
-                        ".attachment-container.loading",
-                        "[data-testid='attachment'].loading",
-                        "gem-attachment .gem-attachment-content.loading",
-                        "gem-attachment mat-spinner",
-                        "gem-attachment .mat-mdc-progress-spinner",
-                        "gem-attachment [role='progressbar']",
-                        "gem-attachment .loading-indicator",
-                        ".attachment-container .gem-attachment-content.loading",
-                        ".attachment-container mat-spinner",
-                        ".attachment-container .mat-mdc-progress-spinner",
-                        ".attachment-container [role='progressbar']",
-                        ".attachment-container .loading-indicator",
-                        "[data-testid='attachment'] .gem-attachment-content.loading",
-                        "[data-testid='attachment'] mat-spinner",
-                        "[data-testid='attachment'] .mat-mdc-progress-spinner",
-                        "[data-testid='attachment'] [role='progressbar']",
-                        "[data-testid='attachment'] .loading-indicator",
-                        # General progress and loading indicators scoped to input/composer area
-                        "form [role='progressbar']",
-                        "input-area-v2 [role='progressbar']",
-                        "form .loading-indicator",
-                        "input-area-v2 .loading-indicator",
-                        "form svg.animate-spin",
-                        "input-area-v2 svg.animate-spin",
-                        "[data-testid*='attachment'] svg.animate-spin"
-                    ]
-                    loader_sel = ", ".join(loader_sels)
-                    
-                    attachment_appeared = False
-                    for _ in range(15):
-                        if context.cancel_token.is_cancelled():
-                            break
-                        
-                        # Check for Gemini/Google data limit dialog
-                        limit_dialog_selectors = [
-                            "text='Delete data to upload file'",
-                            "text='reached your data limit'",
-                            "text='Xóa dữ liệu để tải tệp lên'",
-                            "text='hạn mức dữ liệu'"
-                        ]
-                        for dialog_sel in limit_dialog_selectors:
-                            try:
-                                if await page.locator(dialog_sel).first.count() > 0:
-                                    raise Exception("Tài khoản Gemini của bạn đã đạt giới hạn dung lượng tải tệp lên. Vui lòng xóa bớt lịch sử chat cũ có đính kèm tệp trong phần Hoạt động ứng dụng Gemini (Gemini Apps Activity).")
-                            except Exception as e:
-                                if "đạt giới hạn dung lượng" in str(e):
-                                    raise e
-
-                        try:
-                            att_loc = page.locator(attachment_sel).first
-                            if await att_loc.count() > 0:
-                                attachment_appeared = True
-                                break
-                            
-                            # Fallback check by text content
-                            pdf_chip = page.locator("div:has-text('.pdf'), span:has-text('.pdf'), div:has-text('chapter'), span:has-text('chapter')").first
-                            if await pdf_chip.count() > 0:
-                                attachment_appeared = True
-                                break
-                        except Exception:
-                            pass
-                        await asyncio.sleep(1)
-                    
-                    if not attachment_appeared:
-                        await context.log(f"[Page {page_id}] Tập {ep}: Cảnh báo: Không tìm thấy thẻ đính kèm sau 15 giây.", "warning", episode=ep)
-                    
-                    loader_check_sec = 0
-                    while True:
-                        if context.cancel_token.is_cancelled():
-                            break
-                        if loader_check_sec >= 60:
-                            await context.log(f"[Page {page_id}] Tập {ep}: Cảnh báo: Đã chờ 60 giây nhưng PDF vẫn ở trạng thái loading. Tiếp tục tiến trình...", "warning", episode=ep)
-                            break
-                        try:
-                            loader_loc = page.locator(loader_sel).first
-                            if await loader_loc.count() > 0 and await loader_loc.is_visible():
-                                if loader_check_sec % 10 == 0:
-                                    await context.log(f"[Page {page_id}] Tập {ep}: PDF đang tải lên/xử lý (loading). Đã chờ {loader_check_sec} giây...", "info", episode=ep)
-                                await asyncio.sleep(1)
-                                loader_check_sec += 1
-                                continue
-                        except Exception:
-                            pass
-                        break
-
-                    if loader_check_sec > 0 or attachment_appeared:
-                        await context.log(f"[Page {page_id}] Tập {ep}: PDF đã tải xong (trạng thái loading biến mất).", "success", episode=ep)
-                    else:
-                        await context.log(f"[Page {page_id}] Tập {ep}: Không thấy attachment hoặc trạng thái loading.", "info", episode=ep)
-
-                    # Delay 2s rồi click submit prompt
-                    await context.log(f"[Page {page_id}] Tập {ep}: Trì hoãn 2 giây trước khi gửi prompt...", "info", episode=ep)
-                    await asyncio.sleep(2.0)
-
-                    # Click Send/Submit!
+                    # STEP 5: Click Send/Submit!
                     send_button = None
                     button_found = False
                     for wait_sec in range(30):  # Chờ tối đa 30 giây để file processing xong và nút Gửi được bật
@@ -1497,7 +1393,8 @@ class Stage5_GeminiAutomation(BaseStage):
                     gen_start = time.time()
                     response_text = ""
                     error_reason = None
-                    response_deadline = attempt_deadline
+                    response_deadline = time.monotonic() + timeout
+                    extend_attempt_timeout(timeout)
                     unchanged_seconds = 0
                     last_checked_text = ""
                     
@@ -1522,6 +1419,56 @@ class Stage5_GeminiAutomation(BaseStage):
                         if error_reason:
                             break
 
+                        # Check thinking container state
+                        has_thinking = False
+                        is_still_thinking = False
+                        has_finished_thinking = False
+                        
+                        thinking_container = page.locator(".thinking-container, [data-testid='thinking-indicator']").first
+                        if await thinking_container.count() > 0 and await thinking_container.is_visible():
+                            has_thinking = True
+                            chevron_down = page.locator(".thinking-container svg.lucide-chevron-down, [data-testid='thinking-indicator'] svg.lucide-chevron-down").first
+                            if await chevron_down.count() > 0 and await chevron_down.is_visible():
+                                is_still_thinking = True
+                            
+                            panel_left_open = page.locator(".thinking-container svg.lucide-panel-left-open, [data-testid='thinking-indicator'] svg.lucide-panel-left-open").first
+                            if await panel_left_open.count() > 0 and await panel_left_open.is_visible():
+                                has_finished_thinking = True
+
+                        # Check if still generating by looking for stop button/icon
+                        is_generating = False
+                        stop_button_selectors = [
+                            "button[aria-label='Stop generating']",
+                            "button[aria-label*='Stop']",
+                            "button[aria-label*='stop']",
+                            "button[aria-label*='Dừng']",
+                            "button[aria-label*='dừng']",
+                            "button[data-testid='stop-button']",
+                            "[data-testid='stop-button']",
+                            "[aria-label='Stop generating']",
+                            "[aria-label='Stop']",
+                            "[aria-label='stop']",
+                            "mat-icon:has-text('stop')",
+                            "mat-icon[fonticon='stop']",
+                            "gem-icon-button[aria-label*='Stop']",
+                            "gem-icon-button[aria-label*='stop']",
+                            "gem-icon-button[aria-label*='Dừng']",
+                            "gem-icon-button[aria-label*='dừng']"
+                        ]
+                        for stop_sel in stop_button_selectors:
+                            try:
+                                loc = page.locator(stop_sel).first
+                                if await loc.count() > 0 and await loc.is_visible():
+                                    is_generating = True
+                                    break
+                            except Exception:
+                                pass
+
+                        # As long as Gemini is thinking or generating, keep extending deadline
+                        if is_generating or is_still_thinking:
+                            response_deadline = max(response_deadline, time.monotonic() + 90)
+                            extend_attempt_timeout(90)
+
                         # Get response text using response selectors
                         text_content = None
                         for sel in response_selectors:
@@ -1541,51 +1488,9 @@ class Stage5_GeminiAutomation(BaseStage):
                             else:
                                 unchanged_seconds = 0
                                 last_checked_text = response_text
-                            
-                            # Check thinking container state
-                            has_thinking = False
-                            is_still_thinking = False
-                            has_finished_thinking = False
-                            
-                            thinking_container = page.locator(".thinking-container, [data-testid='thinking-indicator']").first
-                            if await thinking_container.count() > 0 and await thinking_container.is_visible():
-                                has_thinking = True
-                                chevron_down = page.locator(".thinking-container svg.lucide-chevron-down, [data-testid='thinking-indicator'] svg.lucide-chevron-down").first
-                                if await chevron_down.count() > 0 and await chevron_down.is_visible():
-                                    is_still_thinking = True
-                                
-                                panel_left_open = page.locator(".thinking-container svg.lucide-panel-left-open, [data-testid='thinking-indicator'] svg.lucide-panel-left-open").first
-                                if await panel_left_open.count() > 0 and await panel_left_open.is_visible():
-                                    has_finished_thinking = True
-
-                            # Check if still generating by looking for stop button/icon
-                            is_generating = False
-                            stop_button_selectors = [
-                                "button[aria-label='Stop generating']",
-                                "button[aria-label*='Stop']",
-                                "button[aria-label*='stop']",
-                                "button[aria-label*='Dừng']",
-                                "button[aria-label*='dừng']",
-                                "button[data-testid='stop-button']",
-                                "[data-testid='stop-button']",
-                                "[aria-label='Stop generating']",
-                                "[aria-label='Stop']",
-                                "[aria-label='stop']",
-                                "mat-icon:has-text('stop')",
-                                "mat-icon[fonticon='stop']",
-                                "gem-icon-button[aria-label*='Stop']",
-                                "gem-icon-button[aria-label*='stop']",
-                                "gem-icon-button[aria-label*='Dừng']",
-                                "gem-icon-button[aria-label*='dừng']"
-                            ]
-                            for stop_sel in stop_button_selectors:
-                                try:
-                                    loc = page.locator(stop_sel).first
-                                    if await loc.count() > 0 and await loc.is_visible():
-                                        is_generating = True
-                                        break
-                                except Exception:
-                                    pass
+                                # Extend deadline and asyncio timeout handle as long as text is actively streaming
+                                response_deadline = max(response_deadline, time.monotonic() + 90)
+                                extend_attempt_timeout(90)
 
                             cleaned_response = clean_gemini_response(response_text).strip()
                             can_check_completion = True
@@ -1602,13 +1507,13 @@ class Stage5_GeminiAutomation(BaseStage):
                                 can_check_completion = True
 
                             if can_check_completion:
-                                if cleaned_response.endswith("#"):
-                                    try:
-                                        parsed = parse_gemini_recap_text(response_text)
-                                        if parsed and len(parsed) > 0:
+                                try:
+                                    parsed = parse_gemini_recap_text(response_text)
+                                    if parsed and len(parsed) > 0:
+                                        if cleaned_response.endswith("#") or unchanged_seconds >= 6:
                                             break
-                                    except Exception:
-                                        pass
+                                except Exception:
+                                    pass
                                     
                                 extracted = extract_json_from_text(response_text)
                                 if extracted:

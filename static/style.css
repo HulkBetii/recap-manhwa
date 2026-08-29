@@ -755,3 +755,15 @@ body {
     gap: 0.5rem;
     justify-content: flex-end;
 }
+
+#btn-download-video:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+    transition: all var(--transition-fast);
+}
+
+#btn-download-srt:hover {
+    background: rgba(255, 255, 255, 0.15) !important;
+    transform: translateY(-1px);
+    transition: all var(--transition-fast);
+}

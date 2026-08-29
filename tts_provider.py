@@ -165,10 +165,14 @@ def get_ref_audio_text(ref_audio_path: str) -> str:
     global _ref_audio_transcriptions
     if ref_audio_path not in _ref_audio_transcriptions:
         logger.info(f"Transcribing reference audio '{ref_audio_path}' locally using Whisper...")
-        model = get_whisper_model()
+        m_type, model = get_whisper_model()
         with _whisper_lock:
-            result = model.transcribe(ref_audio_path)
-        text = result.get("text", "").strip()
+            if m_type == "faster_whisper":
+                segments_gen, _ = model.transcribe(ref_audio_path)
+                text = " ".join([s.text for s in segments_gen]).strip()
+            else:
+                result = model.transcribe(ref_audio_path)
+                text = result.get("text", "").strip()
         logger.info(f"Transcribed reference audio text: '{text}'")
         _ref_audio_transcriptions[ref_audio_path] = text
     return _ref_audio_transcriptions[ref_audio_path]

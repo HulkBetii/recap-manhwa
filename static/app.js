@@ -213,8 +213,9 @@ function renderWorkflowDashboard() {
             `;
             
             if (w.artifacts.final_video_url && w.from_episode !== w.to_episode) {
+                const srtUrl = w.artifacts.final_subtitle_url || '';
                 cardContent += `
-                    <button class="btn btn-video-play" data-ep="${w.from_episode}-${w.to_episode}" data-url="${w.artifacts.final_video_url}" data-comic="${w.comic_title.replace(/"/g, '&quot;')}" style="font-size: 0.7rem; padding: 0.25rem 0.6rem; height: 24px; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border: none; color: #fff; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 0.2rem; font-weight: bold; box-shadow: 0 2px 6px rgba(239,68,68,0.3); margin-right: 0.2rem;">
+                    <button class="btn btn-video-play" data-ep="${w.from_episode}-${w.to_episode}" data-url="${w.artifacts.final_video_url}" data-srt="${srtUrl}" data-comic="${w.comic_title.replace(/"/g, '&quot;')}" style="font-size: 0.7rem; padding: 0.25rem 0.6rem; height: 24px; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border: none; color: #fff; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 0.2rem; font-weight: bold; box-shadow: 0 2px 6px rgba(239,68,68,0.3); margin-right: 0.2rem;">
                         <span>🎬</span>
                         <span>Tổng hợp (${w.from_episode}-${w.to_episode})</span>
                     </button>
@@ -223,8 +224,9 @@ function renderWorkflowDashboard() {
             
             if (w.artifacts.final_videos) {
                 Object.entries(w.artifacts.final_videos).sort((a,b) => parseInt(a[0]) - parseInt(b[0])).forEach(([ep, url]) => {
+                    const epSrt = url.replace(/final\.mp4$/, 'subtitles.srt');
                     cardContent += `
-                        <button class="btn btn-video-play" data-ep="${ep}" data-url="${url}" data-comic="${w.comic_title.replace(/"/g, '&quot;')}" style="font-size: 0.7rem; padding: 0.25rem 0.5rem; height: 24px; background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(239, 68, 68, 0.25) 100%); border: 1px solid rgba(239, 68, 68, 0.35); color: #fff; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 0.2rem; transition: background 0.2s;">
+                        <button class="btn btn-video-play" data-ep="${ep}" data-url="${url}" data-srt="${epSrt}" data-comic="${w.comic_title.replace(/"/g, '&quot;')}" style="font-size: 0.7rem; padding: 0.25rem 0.5rem; height: 24px; background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(239, 68, 68, 0.25) 100%); border: 1px solid rgba(239, 68, 68, 0.35); color: #fff; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 0.2rem; transition: background 0.2s;">
                             <span>▶</span>
                             <span>Tập ${ep}</span>
                         </button>
@@ -319,7 +321,8 @@ function renderWorkflowDashboard() {
                 const ep = playBtn.getAttribute('data-ep');
                 const url = playBtn.getAttribute('data-url');
                 const comic = playBtn.getAttribute('data-comic');
-                playVideo(url, ep, comic);
+                const srt = playBtn.getAttribute('data-srt') || '';
+                playVideo(url, ep, comic, srt);
                 return;
             }
             if (e.target.closest('.btn') || e.target.closest('button')) return;
@@ -707,6 +710,18 @@ async function loadProfilesConfig() {
     }
 }
 
+function formatProfileDisplayName(profilePath, idx) {
+    if (!profilePath) return `Profile ${idx + 1}`;
+    const cleanPath = profilePath.replace(/[\\/]+$/, '');
+    const parts = cleanPath.split(/[\\/]/).filter(p => p.trim() !== '');
+    let folderName = parts[parts.length - 1] || `Profile_${idx + 1}`;
+    if (folderName.toLowerCase() === 'default' && parts.length > 1) {
+        folderName = parts[parts.length - 2];
+    }
+    const displayFolder = folderName.replace('_', ' ');
+    return `${displayFolder} (Tài khoản ${idx + 1})`;
+}
+
 function updateProfileSelectOptions(profiles, selectedIndex) {
     const select = document.getElementById('active-profile-select');
     if (!select) return;
@@ -715,7 +730,7 @@ function updateProfileSelectOptions(profiles, selectedIndex) {
     if (!profiles || profiles.length === 0) {
         const opt = document.createElement('option');
         opt.value = 0;
-        opt.textContent = 'Chưa cấu hình';
+        opt.textContent = 'Chưa có Profile nào';
         select.appendChild(opt);
         return;
     }
@@ -723,11 +738,105 @@ function updateProfileSelectOptions(profiles, selectedIndex) {
     profiles.forEach((profile, idx) => {
         const opt = document.createElement('option');
         opt.value = idx;
-        opt.textContent = `Tài khoản ${idx + 1} (${profile.split(/[\\/]/).pop()})`;
+        opt.textContent = formatProfileDisplayName(profile, idx);
         if (idx === selectedIndex) {
             opt.selected = true;
         }
         select.appendChild(opt);
+    });
+}
+
+// Auto save active profile index on dropdown change
+const activeProfileSelect = document.getElementById('active-profile-select');
+if (activeProfileSelect) {
+    activeProfileSelect.addEventListener('change', async () => {
+        const textarea = document.getElementById('chrome-profiles-textarea');
+        const profiles = textarea ? textarea.value.split('\n').map(l => l.trim()).filter(l => l !== '') : [];
+        const selectedIdx = parseInt(activeProfileSelect.value) || 0;
+        try {
+            await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chrome_profiles: profiles,
+                    current_profile_index: selectedIdx
+                })
+            });
+            appendLog(`Đã chuyển sang ${formatProfileDisplayName(profiles[selectedIdx], selectedIdx)}.`, 'info');
+        } catch (e) {
+            console.error('Lỗi lưu active profile index:', e);
+        }
+    });
+}
+
+// Button Create New Profile Handler
+const btnCreateProfile = document.getElementById('btn-create-profile');
+if (btnCreateProfile) {
+    btnCreateProfile.addEventListener('click', async () => {
+        appendLog('Đang tạo Profile Chrome mới...', 'system');
+        btnCreateProfile.disabled = true;
+        try {
+            const response = await fetch('/api/profiles/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const result = await response.json();
+            if (response.ok) {
+                appendLog(result.message || 'Đã tạo Profile mới thành công!', 'success');
+                const textarea = document.getElementById('chrome-profiles-textarea');
+                if (textarea && result.config.chrome_profiles) {
+                    textarea.value = result.config.chrome_profiles.join('\n');
+                }
+                updateProfileSelectOptions(result.config.chrome_profiles, result.config.current_profile_index);
+            } else {
+                appendLog(`Lỗi tạo profile: ${result.detail || result.error}`, 'error');
+            }
+        } catch (err) {
+            appendLog(`Lỗi kết nối: ${err.message}`, 'error');
+        } finally {
+            btnCreateProfile.disabled = false;
+        }
+    });
+}
+
+// Button Delete Profile Handler
+const btnDeleteProfile = document.getElementById('btn-delete-profile');
+if (btnDeleteProfile) {
+    btnDeleteProfile.addEventListener('click', async () => {
+        const select = document.getElementById('active-profile-select');
+        const selectedIdx = select ? parseInt(select.value) : 0;
+        if (select && select.options.length <= 1) {
+            appendLog('Cần giữ lại ít nhất 1 Profile trong hệ thống.', 'warning');
+            return;
+        }
+        if (!confirm('Bạn có chắc muốn xóa Profile này khỏi danh sách xoay vòng?')) {
+            return;
+        }
+        appendLog('Đang xóa Profile...', 'system');
+        btnDeleteProfile.disabled = true;
+        try {
+            const response = await fetch('/api/profiles/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index: selectedIdx })
+            });
+            const result = await response.json();
+            if (response.ok) {
+                appendLog('Đã xóa Profile thành công.', 'success');
+                const textarea = document.getElementById('chrome-profiles-textarea');
+                if (textarea && result.config.chrome_profiles) {
+                    textarea.value = result.config.chrome_profiles.join('\n');
+                }
+                updateProfileSelectOptions(result.config.chrome_profiles, result.config.current_profile_index);
+            } else {
+                appendLog(`Lỗi xóa profile: ${result.detail || result.error}`, 'error');
+            }
+        } catch (err) {
+            appendLog(`Lỗi kết nối: ${err.message}`, 'error');
+        } finally {
+            btnDeleteProfile.disabled = false;
+        }
     });
 }
 
@@ -737,7 +846,7 @@ activateTab(tabWorkflow, workflowViewport, false);
 loadWorkflows();
 loadProfilesConfig();
 
-// Chrome Profiles Configuration Handlers
+// Chrome Profiles Configuration Handlers (Manual Save)
 const btnSaveProfiles = document.getElementById('btn-save-profiles');
 if (btnSaveProfiles) {
     btnSaveProfiles.addEventListener('click', async () => {
@@ -789,7 +898,7 @@ if (btnSetupActiveProfile) {
         
         const targetProfile = profiles[activeIdx] || profiles[0];
         
-        appendLog(`Đang khởi chạy trình duyệt login cho profile: ${targetProfile}...`, 'system');
+        appendLog(`Đang khởi chạy Chrome để đăng nhập Google Gemini cho Profile: ${formatProfileDisplayName(targetProfile, activeIdx)}...`, 'system');
         btnSetupActiveProfile.disabled = true;
         setStatus('active', 'Đang setup cookies');
         
@@ -959,10 +1068,32 @@ editorModal.addEventListener('click', (e) => {
 });
 
 // Video modal player functions
-function playVideo(videoUrl, episodeNum, comicTitle) {
+function playVideo(videoUrl, episodeNum, comicTitle, srtUrl = '') {
     videoModalTitle.textContent = `Phát Video Recap - ${comicTitle} - Tập ${episodeNum}`;
     modalVideoPlayer.src = videoUrl;
     modalVideoPlayer.load();
+    
+    // Configure download buttons
+    const btnDownloadVideo = document.getElementById('btn-download-video');
+    const btnDownloadSrt = document.getElementById('btn-download-srt');
+    
+    if (btnDownloadVideo) {
+        btnDownloadVideo.href = videoUrl;
+        const safeName = comicTitle.replace(/[^a-zA-Z0-9_\-]/g, '_');
+        btnDownloadVideo.download = `${safeName}_Tap_${episodeNum}.mp4`;
+    }
+    
+    if (btnDownloadSrt) {
+        if (srtUrl) {
+            btnDownloadSrt.href = srtUrl;
+            const safeName = comicTitle.replace(/[^a-zA-Z0-9_\-]/g, '_');
+            btnDownloadSrt.download = `${safeName}_Tap_${episodeNum}.srt`;
+            btnDownloadSrt.style.display = 'flex';
+        } else {
+            btnDownloadSrt.style.display = 'none';
+        }
+    }
+    
     videoModal.style.display = 'flex';
     modalVideoPlayer.play().catch(e => console.log('Autoplay blocked:', e));
 }
@@ -1224,8 +1355,6 @@ if (ttsVoiceIdInput) {
             if (omnivoiceDesignArea) omnivoiceDesignArea.style.display = 'none';
             if (omnivoiceCloneArea) omnivoiceCloneArea.style.display = 'none';
             if (ai33proApiArea) ai33proApiArea.style.display = 'block';
-            const languageSelect = document.getElementById('vlm-language');
-            if (languageSelect) languageSelect.value = 'en';
         } else {
             if (omnivoiceDesignArea) omnivoiceDesignArea.style.display = 'none';
             if (omnivoiceCloneArea) omnivoiceCloneArea.style.display = 'none';
