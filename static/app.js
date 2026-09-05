@@ -1416,6 +1416,14 @@ if (marketPresetSelect) {
             }
             if (burnSubs) burnSubs.checked = true;
             appendLog('Đã áp dụng cấu hình nhánh: Hàn Quốc (종말 · 생존 몰아보기) - Giọng InJoonNeural, Ngôn ngữ Korean, Subtitles Bật.', 'success');
+        } else if (preset === 'japan_isekai_territory') {
+            if (vlmLang) vlmLang.value = 'ja';
+            if (ttsVoiceIdInput) {
+                ttsVoiceIdInput.value = 'edge-tts_ja-JP-KeitaNeural';
+                ttsVoiceIdInput.dispatchEvent(new Event('change'));
+            }
+            if (burnSubs) burnSubs.checked = true;
+            appendLog('Đã áp dụng cấu hình nhánh: Nhật Bản (異世界転生 × 領地経営 × 成り上がり) - Giọng KeitaNeural (+8%, -1Hz), Ngôn ngữ Japanese, Subtitles Bật.', 'success');
         } else if (!preset) {
             if (vlmLang) vlmLang.value = 'en';
             if (ttsVoiceIdInput) {

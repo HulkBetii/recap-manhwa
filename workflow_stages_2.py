@@ -135,6 +135,15 @@ class Stage8_LocalTTS(BaseStage):
             voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else DEFAULT_KR_VOICE_ID
             rate = DEFAULT_KR_VOICE_RATE
             pitch = DEFAULT_KR_VOICE_PITCH
+        elif language in ("ja", "japanese"):
+            from markets.japan_isekai_territory.tts import (
+                DEFAULT_JA_VOICE_ID,
+                DEFAULT_JA_VOICE_RATE,
+                DEFAULT_JA_VOICE_PITCH,
+            )
+            voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else DEFAULT_JA_VOICE_ID
+            rate = DEFAULT_JA_VOICE_RATE
+            pitch = DEFAULT_JA_VOICE_PITCH
         else:
             default_voice = "auto"
             voice_id = normalize_tts_voice_mode(raw_voice_id or default_voice, default=default_voice)
@@ -1852,6 +1861,20 @@ class Stage12_MetadataReports(BaseStage):
             "overall_progress": task.overall_progress,
             "elapsed_time_seconds": task.elapsed_time
         }
+
+        market_id = task.payload.get("market_id")
+        if market_id:
+            try:
+                from markets import get_market
+                m = get_market(market_id)
+                if m:
+                    metadata["youtube_metadata"] = m.generate_youtube_metadata(
+                        task.comic_title or "Comic",
+                        task.from_episode or 1,
+                        task.to_episode or 1
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to generate market YouTube metadata: {e}")
         
         metadata_path = os.path.join(output_dir, "metadata.json")
         metadata_temp_path = metadata_path + ".tmp"

@@ -28,4 +28,10 @@ def _init_default_markets():
     except ImportError:
         pass
 
+    try:
+        from markets.japan_isekai_territory import JAPAN_ISEKAI_TERRITORY_MARKET
+        register_market(JAPAN_ISEKAI_TERRITORY_MARKET)
+    except ImportError:
+        pass
+
 _init_default_markets()

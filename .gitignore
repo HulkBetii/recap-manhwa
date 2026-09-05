@@ -10,6 +10,7 @@ yolov8n.pt
 *.pyc
 .DS_Store
 cookies.json
+cookies/
 cache/
 runtime/
 .cache/

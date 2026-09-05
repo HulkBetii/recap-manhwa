@@ -113,6 +113,11 @@ class Stage0_ProjectInit(BaseStage):
             query = urllib.parse.parse_qs(parsed.query)
             t_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
             comic_title = f"Naver_{t_id}" if t_id else "Naver_Webtoon"
+        elif "pocket.shonenmagazine.com" in parsed.netloc.lower():
+            from magapoke_crawler import parse_magapoke_url
+            m_info = parse_magapoke_url(url)
+            t_id = m_info.get("title_id") or "magapoke"
+            comic_title = f"MagaPoke_{t_id}"
         elif parsed.path:
             parts = [p for p in parsed.path.strip("/").split("/") if p]
             if parts:
@@ -223,11 +228,20 @@ class Stage1_ComicParsing(BaseStage):
                     if not found_clickable or click_count >= 10:
                         break
                 
-                # Extract and sort unique chapter slugs
-                hrefs = await page.locator("a").evaluate_all("elements => elements.map(el => el.getAttribute('href'))")
+                # Extract and sort unique chapter slugs (excluding locked/paid chapters)
+                chapter_items = await page.locator("a[href*='/chapter-']").evaluate_all("""
+                    elements => elements.map(el => {
+                        const href = el.getAttribute('href');
+                        const isLocked = !!el.querySelector('svg path[d*="M12 1.5"]') || 
+                                         !!el.closest('div')?.querySelector('.text-yellow-500, .text-yellow-600') ||
+                                         (el.innerText && el.innerText.includes('PAID'));
+                        return { href, isLocked };
+                    })
+                """)
                 vortex_chapters = []
-                for href in hrefs:
-                    if href and "/chapter-" in href:
+                for item in chapter_items:
+                    href = item.get("href")
+                    if href and not item.get("isLocked"):
                         parsed_href = urllib.parse.urlparse(href)
                         parts = parsed_href.path.strip("/").split("/")
                         if parts:
@@ -425,10 +439,29 @@ class Stage1_ComicParsing(BaseStage):
                             title_text = h2_list[0].strip()
                 except Exception:
                     pass
+            elif "pocket.shonenmagazine.com" in url:
+                try:
+                    from magapoke_crawler import fetch_magapoke_title_info, parse_magapoke_url
+                    m_info = parse_magapoke_url(url)
+                    task.artifacts["magapoke_title_id"] = m_info.get("title_id")
+                    task.artifacts["magapoke_episode_id"] = m_info.get("episode_id")
+                    
+                    info = await fetch_magapoke_title_info(page, url)
+                    if info.get("comic_title"):
+                        title_text = info["comic_title"]
+                    if info.get("episodes"):
+                        task.artifacts["magapoke_episodes"] = info["episodes"]
+                except Exception as ex:
+                    await context.log(f"Lỗi fetch MagaPoke metadata: {ex}", "warning")
             if not title_text:
                 title_text = await page.title()
             if " : 네이버" in title_text:
                 title_text = title_text.split(" : 네이버")[0].strip()
+            if " / マガポケ" in title_text:
+                title_text = title_text.split(" / マガポケ")[0].strip()
+            if "【第" in title_text and "】" in title_text:
+                # E.g. "Title ~sub~ | 【第1話】..." -> get Title only
+                pass
             title_text = title_text.split("|")[0].strip()
             title_text = title_text.split("Chapter")[0].strip()
             sanitized_title = sanitize_title(title_text)
@@ -501,6 +534,7 @@ class Stage2_AsyncImageCrawling(BaseStage):
         is_asura = "asura" in parsed.netloc.lower()
         is_comix = "comix.to" in parsed.netloc
         is_valir = "valirscans.org" in parsed.netloc.lower()
+        is_magapoke = "pocket.shonenmagazine.com" in parsed.netloc.lower()
         
         if is_naver:
             query = urllib.parse.parse_qs(parsed.query)
@@ -545,6 +579,8 @@ class Stage2_AsyncImageCrawling(BaseStage):
             else:
                 await context.log("Không tìm thấy series slug trong URL Valir Scans.", "error")
                 return False
+        elif is_magapoke:
+            series_slug = "magapoke"
         else:
             query = urllib.parse.parse_qs(parsed.query)
             title_no = query.get("title_no", [""])[0]
@@ -564,6 +600,12 @@ class Stage2_AsyncImageCrawling(BaseStage):
         async def block_resources(route):
             req_type = route.request.resource_type
             url_lower = route.request.url.lower()
+            if "magazinepocket.com" in url_lower or "shonenmagazine.com" in url_lower:
+                try:
+                    await route.continue_()
+                except Exception:
+                    pass
+                return
             if req_type in ["font", "media"] or any(
                 keyword in url_lower
                 for keyword in ["google-analytics", "doubleclick", "facebook", "analytics", "tracking", "adsbygoogle", "popads", "popunder", "adnxs", "optimizely", "hotjar"]
@@ -608,6 +650,32 @@ class Stage2_AsyncImageCrawling(BaseStage):
                     continue
                 
                 await context.start_episode(ep)
+                
+                if is_magapoke:
+                    from magapoke_crawler import crawl_magapoke_episode_images, parse_magapoke_url
+                    ep_url = url
+                    magapoke_episodes = task.artifacts.get("magapoke_episodes", [])
+                    user_ep_id = task.artifacts.get("magapoke_episode_id")
+                    if user_ep_id and ep == from_ep:
+                        title_id = task.artifacts.get("magapoke_title_id") or "01152"
+                        ep_url = f"https://pocket.shonenmagazine.com/title/{title_id}/episode/{user_ep_id}"
+                    elif magapoke_episodes and 0 <= (ep - 1) < len(magapoke_episodes):
+                        target_ep_obj = magapoke_episodes[ep - 1]
+                        eid = target_ep_obj.get("episode_id")
+                        title_id = target_ep_obj.get("title_id") or task.artifacts.get("magapoke_title_id") or "01152"
+                        ep_url = f"https://pocket.shonenmagazine.com/title/{title_id}/episode/{eid}"
+
+                    images_dir = os.path.join(ep_dir, "images")
+                    downloaded_paths = await crawl_magapoke_episode_images(page, ep_url, images_dir, context_logger=context)
+                    if not downloaded_paths:
+                        await context.fail_episode(ep, "Không thể thu thập ảnh từ Magazine Pocket viewer.")
+                        return False
+                    
+                    await context.log(f"Tập {ep}: Hoàn thành tải {len(downloaded_paths)} ảnh Magazine Pocket.", "success")
+                    await context.complete_episode(ep)
+                    await context.update_stage_progress(self.name, ((idx + 1) / total_episodes) * 100.0)
+                    cache.commit(stage="image_crawl", fingerprint=fingerprint, outputs=[ep_images_dir])
+                    continue
                 
                 if is_naver:
                     viewer_url = f"https://comic.naver.com/webtoon/detail?titleId={naver_title_id}&no={ep}"
@@ -777,6 +845,14 @@ class Stage2_AsyncImageCrawling(BaseStage):
                 try:
                     await page.wait_for_selector(wait_sel, timeout=15000)
                 except Exception:
+                    page_text = ""
+                    try:
+                        page_text = await page.inner_text("body")
+                    except Exception:
+                        pass
+                    if any(kw in page_text.lower() for kw in ["locked chapter", "premium chapter", "unlock chapters", "please login to unlock"]):
+                        await context.log(f"Tập {ep} ({chapter_slug}) là tập khóa/trả phí (VIP/Coins). Tự động bỏ qua tập này.", "warning")
+                        continue
                     await context.fail_episode(ep, "Không tìm thấy danh sách ảnh truyện.")
                     return False
 

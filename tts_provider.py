@@ -480,6 +480,9 @@ async def generate_tts(
         if edge_voice == "ko-KR-InJoonNeural" and rate == "+0%" and pitch == "+0Hz":
             rate = "+12%"
             pitch = "-2Hz"
+        elif edge_voice in ("ja-JP-KeitaNeural", "ja-JP-DaichiNeural") and rate == "+0%" and pitch == "+0Hz":
+            rate = "+8%"
+            pitch = "-1Hz"
         return await generate_edge_tts(text, output_audio_path, output_srt_path, voice_name=edge_voice, rate=rate, pitch=pitch)
 
     # 3. AI33Pro Mode

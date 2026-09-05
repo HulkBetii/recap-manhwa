@@ -938,9 +938,10 @@ async def get_browser_context(p, headless=False, start_maximized=False, temp_suf
         "headless": headless,
         "args": [
             "--disable-blink-features=AutomationControlled",
+            "--disable-web-security",
             "--disable-gpu-shader-disk-cache",
             "--disable-dev-shm-usage",
-            "--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints",
+            "--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints,IsolateOrigins,site-per-process",
             "--no-first-run",
             "--no-default-browser-check",
             "--password-store=basic",
