@@ -48,11 +48,12 @@
                         <span>Đường dẫn bộ truyện (Manhwa Link)</span>
                     </label>
                     <div class="input-wrapper">
-                        <input type="url" id="manhwa-url" placeholder="Nhập link truyện (Webtoons, Vortex, ToonGod, Asura, Comix)..." autocomplete="off">
+                        <input type="url" id="manhwa-url" placeholder="Nhập link truyện (Naver Webtoon, Webtoons, Vortex, ToonGod, Asura, Comix)..." autocomplete="off">
                     </div>
                     <span class="input-help">Trang truyện này sẽ được quét để xác định số tập và thông tin chi tiết.</span>
                     <div class="supported-hosts" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
                         <span style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 500;">Hỗ trợ:</span>
+                        <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(0, 220, 100, 0.1); border: 1px solid rgba(0, 220, 100, 0.3); color: #00DC64; font-weight: 600;">Naver Webtoon</span>
                         <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #10B981; font-weight: 600;">Webtoons</span>
                         <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); color: #3B82F6; font-weight: 600;">Vortex Scans</span>
                         <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); color: #A78BFA; font-weight: 600;">Valir Scans</span>
@@ -172,8 +173,13 @@
 
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label style="font-size: 0.7rem; color: var(--text-secondary);">VLM Stage 5</label>
-                                <div class="input-wrapper" style="padding: 0.4rem 0.6rem; font-size: 0.75rem;">Google Gemini (Chrome Profile)</div>
+                                <label for="market-preset" style="font-size: 0.7rem; color: #FFAE6E; font-weight: 600;">🎯 Nhánh thị trường (Market Preset)</label>
+                                <div class="input-wrapper">
+                                    <select id="market-preset" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,174,110,0.4); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
+                                        <option value="" selected>Mặc định (Toàn cầu / Tuỳ chỉnh)</option>
+                                        <option value="korea_apocalypse">🇰🇷 Hàn Quốc: Sinh tồn · Tận thế (종말 · 생존 몰아보기)</option>
+                                    </select>
+                                </div>
                             </div>
                             <div class="form-group" style="margin-bottom: 0;">
                                 <label for="vlm-language" style="font-size: 0.7rem; color: var(--text-secondary);">Ngôn ngữ tóm tắt</label>
@@ -195,7 +201,10 @@
                                 <div class="input-wrapper">
                                     <select id="tts-voice-id" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
                                         <option value="ai33pro" selected>API AI33Pro (ElevenLabs / EdgeTTS Auto Fallback)</option>
-                                        <option value="edge-tts">EdgeTTS Trực tiếp (Microsoft Azure Voices)</option>
+                                        <option value="edge-tts_ko-KR-InJoonNeural">EdgeTTS Hàn Quốc (ko-KR-InJoonNeural - Nam trầm kịch tính)</option>
+                                        <option value="edge-tts_ko-KR-SunHiNeural">EdgeTTS Hàn Quốc (ko-KR-SunHiNeural - Nữ chuẩn)</option>
+                                        <option value="voicevox">VOICEVOX Local GPU (Tiếng Nhật - Zundamon / Anime)</option>
+                                        <option value="edge-tts">EdgeTTS Trực tiếp (en-US Christopher)</option>
                                         <option value="auto">OmniVoice Auto (Tự động thiết kế giọng)</option>
                                         <option value="design">OmniVoice Prompt Design (Thiết kế giọng bằng văn bản)</option>
                                         <option value="clone">OmniVoice Voice Cloning (Sao chép giọng nói mẫu)</option>
@@ -204,10 +213,47 @@
                             </div>
                         </div>
 
+
                         <label for="burn-subtitles" style="display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.5rem; font-size: 0.72rem; color: var(--text-secondary); cursor: pointer;">
                             <input type="checkbox" id="burn-subtitles">
                             <span>Chèn phụ đề vào video (vẫn luôn xuất file SRT)</span>
                         </label>
+
+                        <!-- VOICEVOX Local GPU Configurations -->
+                        <div id="voicevox-config-area" style="display: none; margin-bottom: 0.5rem;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="voicevox-speaker-id" style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Nhân vật VOICEVOX (Voice & Style)</label>
+                                <div class="input-wrapper">
+                                    <select id="voicevox-speaker-id" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
+                                        <optgroup label="ずんだもん (Zundamon)">
+                                            <option value="3" selected>ずんだもん (Zundamon) - Normal</option>
+                                            <option value="7">ずんだもん (Zundamon) - Tsundere</option>
+                                            <option value="1">ずんだもん (Zundamon) - Sweet</option>
+                                            <option value="76">ずんだもん (Zundamon) - Crying (Mếu máo)</option>
+                                            <option value="22">ずんだもん (Zundamon) - Whisper</option>
+                                            <option value="5">ずんだもん (Zundamon) - Sexy</option>
+                                        </optgroup>
+                                        <optgroup label="四国めたん (Shikoku Metan)">
+                                            <option value="2">四国めたん (Shikoku Metan) - Normal</option>
+                                            <option value="6">四国めたん (Shikoku Metan) - Tsundere</option>
+                                            <option value="0">四国めたん (Shikoku Metan) - Sweet</option>
+                                            <option value="4">四国めたん (Shikoku Metan) - Sexy</option>
+                                        </optgroup>
+                                        <optgroup label="Nhân vật khác">
+                                            <option value="8">春日部つむぎ (Kasukabe Tsumugi) - Normal</option>
+                                            <option value="9">波音リツ (Namine Ritsu) - Normal</option>
+                                            <option value="10">雨晴はう (Amehare Hau) - Normal</option>
+                                            <option value="14">冥鳴ひまり (Meimei Himari) - Normal</option>
+                                            <option value="47">ナースロボ＿タイプＴ (Nurse Robot Type-T)</option>
+                                        </optgroup>
+                                    </select>
+                                </div>
+                                <div id="voicevox-status-badge" style="font-size: 0.65rem; color: #10B981; margin-top: 0.25rem; display: flex; align-items: center; gap: 0.3rem;">
+                                    <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #10B981;"></span>
+                                    <span>VOICEVOX Engine đang chạy trên GPU (port 50021)</span>
+                                </div>
+                            </div>
+                        </div>
 
                         <!-- OmniVoice Extra Configurations -->
                         <div id="omnivoice-design-area" style="display: none; margin-bottom: 0.5rem;">

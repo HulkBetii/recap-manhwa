@@ -47,6 +47,35 @@ def validate_recap_json(file_path):
                 break
     return validate_recap_file(recap_path, max_page=max_page)
 
+def safe_cv2_imread(path, flags=cv2.IMREAD_COLOR):
+    try:
+        with open(path, "rb") as f:
+            data = np.frombuffer(f.read(), dtype=np.uint8)
+            img = cv2.imdecode(data, flags)
+            if img is not None:
+                return img
+    except Exception:
+        pass
+    try:
+        return cv2.imread(path, flags)
+    except Exception:
+        return None
+
+def safe_cv2_imwrite(path, img, params=None):
+    try:
+        ext = os.path.splitext(path)[1]
+        success, encoded = cv2.imencode(ext, img, params) if params else cv2.imencode(ext, img)
+        if success:
+            with open(path, "wb") as f:
+                f.write(encoded)
+            return True
+    except Exception:
+        pass
+    try:
+        return cv2.imwrite(path, img, params)
+    except Exception:
+        return False
+
 class Stage0_ProjectInit(BaseStage):
     @property
     def name(self) -> str: return "Stage 0 - Project Init"
@@ -80,7 +109,11 @@ class Stage0_ProjectInit(BaseStage):
         url = context.task.comic_url
         parsed = urllib.parse.urlparse(url)
         comic_title = "Comic"
-        if parsed.path:
+        if "comic.naver.com" in parsed.netloc.lower():
+            query = urllib.parse.parse_qs(parsed.query)
+            t_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
+            comic_title = f"Naver_{t_id}" if t_id else "Naver_Webtoon"
+        elif parsed.path:
             parts = [p for p in parsed.path.strip("/").split("/") if p]
             if parts:
                 slug = parts[-1]
@@ -134,6 +167,13 @@ class Stage1_ComicParsing(BaseStage):
         elif "valirscans.org" in urllib.parse.urlparse(url).netloc.lower() and "/chapter/" in url:
             url = re.sub(r"/chapter/[^/]+/?$", "", url)
             task.comic_url = url
+        elif "comic.naver.com" in url:
+            parsed_naver = urllib.parse.urlparse(url)
+            query = urllib.parse.parse_qs(parsed_naver.query)
+            title_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
+            if "/webtoon/detail" in parsed_naver.path and title_id:
+                url = f"https://comic.naver.com/webtoon/list?titleId={title_id}"
+                task.comic_url = url
         elif "comix.to" in url:
             parsed_url = urllib.parse.urlparse(url)
             parts = parsed_url.path.strip("/").split("/")
@@ -372,10 +412,25 @@ class Stage1_ComicParsing(BaseStage):
                     task.artifacts["all_chapter_slugs"] = all_comix_slugs
                     task.artifacts["comix_max_chapter"] = max_ch
                     task.artifacts["comix_chapters_info"] = comix_chapters_info
+            elif "comic.naver.com" in url:
+                try:
+                    og_meta = await page.locator("meta[property='og:title']").evaluate_all(
+                        "elements => elements.map(el => el.getAttribute('content'))"
+                    )
+                    if og_meta and og_meta[0]:
+                        title_text = og_meta[0].strip()
+                    if not title_text:
+                        h2_list = await page.locator("h2").all_inner_texts()
+                        if h2_list and h2_list[0].strip():
+                            title_text = h2_list[0].strip()
+                except Exception:
+                    pass
             if not title_text:
                 title_text = await page.title()
-                title_text = title_text.split("|")[0].strip()
-                title_text = title_text.split("Chapter")[0].strip()
+            if " : 네이버" in title_text:
+                title_text = title_text.split(" : 네이버")[0].strip()
+            title_text = title_text.split("|")[0].strip()
+            title_text = title_text.split("Chapter")[0].strip()
             sanitized_title = sanitize_title(title_text)
             
             await context.log(f"Comic official title: {title_text}", "info")
@@ -440,13 +495,20 @@ class Stage2_AsyncImageCrawling(BaseStage):
         download_dir = task.artifacts.get("download_dir")
         
         parsed = urllib.parse.urlparse(url)
+        is_naver = "comic.naver.com" in parsed.netloc.lower()
         is_vortex = "vortexscans.org" in parsed.netloc
         is_toongod = "toongod.org" in parsed.netloc
         is_asura = "asura" in parsed.netloc.lower()
         is_comix = "comix.to" in parsed.netloc
         is_valir = "valirscans.org" in parsed.netloc.lower()
         
-        if is_vortex:
+        if is_naver:
+            query = urllib.parse.parse_qs(parsed.query)
+            naver_title_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
+            if not naver_title_id:
+                await context.log("Không tìm thấy titleId trong URL Naver Webtoon.", "error")
+                return False
+        elif is_vortex:
             parts = parsed.path.strip("/").split("/")
             if len(parts) >= 2 and parts[0] == "series":
                 series_slug = parts[1]
@@ -547,7 +609,10 @@ class Stage2_AsyncImageCrawling(BaseStage):
                 
                 await context.start_episode(ep)
                 
-                if is_vortex:
+                if is_naver:
+                    viewer_url = f"https://comic.naver.com/webtoon/detail?titleId={naver_title_id}&no={ep}"
+                    wait_sel = ".wt_viewer img, #comic_view_area img"
+                elif is_vortex:
                     slugs = task.artifacts.get("chapter_slugs", [])
                     if slugs and 0 <= (ep - 1) < len(slugs):
                         chapter_slug = slugs[ep - 1]
@@ -728,7 +793,15 @@ class Stage2_AsyncImageCrawling(BaseStage):
                     except Exception as e:
                         await context.log(f"Lỗi scroll trang comix: {e}", "warning")
 
-                if is_vortex:
+                if is_naver:
+                    raw_imgs = await page.locator(".wt_viewer img, #comic_view_area img").evaluate_all(
+                        "elements => elements.map(el => el.getAttribute('src') || el.getAttribute('data-src'))"
+                    )
+                    image_urls = [
+                        src for src in raw_imgs
+                        if src and "webtoon" in src and "agerate" not in src
+                    ]
+                elif is_vortex:
                     image_urls = await page.locator("img[data-reader-page-image]").evaluate_all(
                         "elements => elements.map(el => el.getAttribute('src'))"
                     )
@@ -832,7 +905,7 @@ class Stage2_AsyncImageCrawling(BaseStage):
                 os.makedirs(images_dir, exist_ok=True)
 
                 success_count = 0
-                dl_concurrency = max(8, task.payload.get("concurrency", 5))
+                dl_concurrency = 4 if is_asura else max(8, task.payload.get("concurrency", 5))
                 dl_sem = asyncio.Semaphore(dl_concurrency)
                 async def dl_task(img_url, img_idx):
                     nonlocal success_count
@@ -842,7 +915,9 @@ class Stage2_AsyncImageCrawling(BaseStage):
                         elif ".webp" in img_url.lower(): file_ext = ".webp"
                         save_path = os.path.join(images_dir, f"{str(img_idx).zfill(3)}{file_ext}")
                         
-                        if is_vortex:
+                        if is_naver:
+                            referer = "https://comic.naver.com/"
+                        elif is_vortex:
                             referer = "https://vortexscans.org/"
                         elif is_toongod:
                             referer = "https://www.toongod.org/"
@@ -1068,7 +1143,8 @@ class Stage5_GeminiAutomation(BaseStage):
             recap_json_path = os.path.join(ep_dir, "recap.json")
 
             image_files = list_image_files(images_pdf_dir)
-            prompt_content = generate_gemini_prompt(comic_title, ep, len(image_files), language)
+            market_id = task.payload.get("market_id")
+            prompt_content = generate_gemini_prompt(comic_title, ep, len(image_files), language, market_id=market_id)
             cache = EpisodeStageCache(ep_dir)
             safe_bundle_dir = os.path.join(ep_dir, "gemini_safe")
             safe_pdf_path = os.path.join(safe_bundle_dir, pdf_name)
@@ -2034,7 +2110,7 @@ class Stage2b_IntelligentRepagination(BaseStage):
             loop = asyncio.get_running_loop()
             
             def process_single_slice(path):
-                img = cv2.imread(path)
+                img = safe_cv2_imread(path)
                 if img is None:
                     return None
                 h, w = img.shape[:2]
@@ -2357,7 +2433,7 @@ class Stage2b_IntelligentRepagination(BaseStage):
                     for cut in cuts[1:-1]:
                         scaled_cut = int(cut * scale_factor)
                         cv2.line(small_canvas, (0, scaled_cut), (overlay_w, scaled_cut), (0, 0, 255), 2)
-                    cv2.imwrite(os.path.join(debug_dir, "cut_line_overlay.jpg"), small_canvas)
+                    safe_cv2_imwrite(os.path.join(debug_dir, "cut_line_overlay.jpg"), small_canvas)
                 except Exception:
                     pass
                     
@@ -2365,7 +2441,7 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 from concurrent.futures import ThreadPoolExecutor
                 def save_webp(task_tuple):
                     path, img = task_tuple
-                    cv2.imwrite(path, img, [cv2.IMWRITE_WEBP_QUALITY, 80])
+                    safe_cv2_imwrite(path, img, [cv2.IMWRITE_WEBP_QUALITY, 80])
                     
                 with ThreadPoolExecutor() as executor:
                     executor.map(save_webp, write_tasks)

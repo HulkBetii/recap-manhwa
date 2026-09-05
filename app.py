@@ -489,6 +489,42 @@ class SaveConfigRequest(BaseModel):
 async def get_app_config():
     return load_config()
 
+
+@app.get("/api/voicevox/status")
+async def get_voicevox_status():
+    import httpx
+    url = os.getenv("VOICEVOX_URL", "http://127.0.0.1:50021").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{url}/version")
+            if resp.status_code == 200:
+                return {"available": True, "version": resp.json(), "url": url}
+    except Exception as e:
+        return {"available": False, "error": str(e), "url": url}
+    return {"available": False, "url": url}
+
+
+@app.get("/api/voicevox/speakers")
+async def get_voicevox_speakers():
+    import httpx
+    url = os.getenv("VOICEVOX_URL", "http://127.0.0.1:50021").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{url}/speakers")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"VOICEVOX Engine not reachable: {exc}")
+    raise HTTPException(status_code=502, detail="Failed to fetch speakers from VOICEVOX Engine")
+
+
+@app.get("/api/markets")
+async def get_available_markets():
+    from markets import list_markets
+    return list_markets()
+
+
+
 @app.post("/api/config")
 async def save_app_config(payload: SaveConfigRequest):
     config = {
@@ -814,6 +850,7 @@ class CrawlRequest(BaseModel):
     remove_text_conf: float = 0.3
     remove_text_radius: int = 3
     comix_group_id: Optional[str] = None
+    market_id: Optional[str] = None
 
 
 def _validated_asset_reference(value: str | None) -> str | None:
@@ -1543,10 +1580,12 @@ def download_image_sync(url: str, save_path: str, referer: str = None):
             referer = "https://vortexscans.org/"
         elif "toongod.org" in url or "tngcdn.com" in url:
             referer = "https://www.toongod.org/"
-        elif "asurascans.com" in url:
+        elif "asurascans.com" in url or "cdn.asurascans.com" in url:
             referer = "https://asurascans.com/"
         elif "valirscans.org" in url or "media.valirscans.org" in url:
             referer = "https://valirscans.org/"
+        elif "naver.com" in url or "pstatic.net" in url:
+            referer = "https://comic.naver.com/"
         else:
             referer = "https://www.webtoons.com/"
             
@@ -1554,11 +1593,31 @@ def download_image_sync(url: str, save_path: str, referer: str = None):
         url,
         headers={
             "Referer": referer,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
         }
     )
-    with urllib.request.urlopen(req) as response, open(save_path, "wb") as out_file:
-        out_file.write(response.read())
+    
+    max_retries = 5
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as response, open(save_path, "wb") as out_file:
+                out_file.write(response.read())
+            return
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries:
+                import time, random
+                sleep_time = (attempt * 0.8) + (random.random() * 0.5)
+                time.sleep(sleep_time)
+            else:
+                if os.path.exists(save_path):
+                    try:
+                        os.remove(save_path)
+                    except Exception:
+                        pass
+                raise last_err
 
 async def download_image(url: str, save_path: str, referer: str = None):
     await asyncio.to_thread(download_image_sync, url, save_path, referer)
@@ -1962,9 +2021,30 @@ async def analyze(payload: AnalyzeRequest):
                     url = urllib.parse.urlunparse(parsed_url._replace(path=new_path, query="", fragment=""))
                     await sse_logger.log(f"Đường dẫn tập truyện phát hiện. Chuẩn hóa thành trang chính bộ truyện: {url}", "info")
                     await nav_manager.safe_goto(page, url, reason="Load normalized manhwa series page for episode count analysis", caller="analyze")
+        elif "comic.naver.com" in url:
+            parsed_naver = urllib.parse.urlparse(url)
+            query = urllib.parse.parse_qs(parsed_naver.query)
+            title_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
+            if "/webtoon/detail" in parsed_naver.path and title_id:
+                url = f"https://comic.naver.com/webtoon/list?titleId={title_id}"
+                await sse_logger.log(f"Đường dẫn tập truyện Naver phát hiện. Chuẩn hóa thành trang danh sách: {url}", "info")
+                await nav_manager.safe_goto(page, url, reason="Load normalized Naver series page for episode count analysis", caller="analyze")
 
         title_text = ""
-        if "vortexscans.org" in url:
+        if "comic.naver.com" in url:
+            try:
+                og_meta = await page.locator("meta[property='og:title']").evaluate_all(
+                    "elements => elements.map(el => el.getAttribute('content'))"
+                )
+                if og_meta and og_meta[0]:
+                    title_text = og_meta[0].strip()
+                if not title_text:
+                    h2_list = await page.locator("h2").all_inner_texts()
+                    if h2_list and h2_list[0].strip():
+                        title_text = h2_list[0].strip()
+            except Exception:
+                pass
+        elif "vortexscans.org" in url:
             try:
                 await page.wait_for_selector("h1.break-words, h1.text-2xl", timeout=5000)
                 title_text = await page.locator("h1.break-words, h1.text-2xl").first.inner_text()
@@ -1996,11 +2076,28 @@ async def analyze(payload: AnalyzeRequest):
                 pass
         if not title_text:
             title_text = await page.title()
-            title_text = title_text.split("|")[0].strip()
-            title_text = title_text.split("Chapter")[0].strip()
+        if " : 네이버" in title_text:
+            title_text = title_text.split(" : 네이버")[0].strip()
+        title_text = title_text.split("|")[0].strip()
+        title_text = title_text.split("Chapter")[0].strip()
 
         max_ep = 0
-        if "comix.to" in url:
+        if "comic.naver.com" in url:
+            try:
+                parsed_naver = urllib.parse.urlparse(url)
+                title_id = urllib.parse.parse_qs(parsed_naver.query).get("titleId", [""])[0] or urllib.parse.parse_qs(parsed_naver.query).get("title_no", [""])[0]
+                hrefs = await page.locator("a").evaluate_all(
+                    "elements => elements.map(el => el.getAttribute('href'))"
+                )
+                for href in hrefs:
+                    if href and "/webtoon/detail" in href:
+                        if not title_id or f"titleId={title_id}" in href:
+                            m = re.search(r"[?&]no=(\d+)", href)
+                            if m:
+                                max_ep = max(max_ep, int(m.group(1)))
+            except Exception:
+                pass
+        elif "comix.to" in url:
             try:
                 hrefs = await page.locator("a.mchap-row__primary").evaluate_all(
                     "elements => elements.map(el => el.getAttribute('href'))"
@@ -3090,10 +3187,21 @@ async def crawl(payload: CrawlRequest):
         url = urllib.parse.urlunparse(parsed_url._replace(netloc="asurascans.com"))
         payload.url = url
         await sse_logger.log(f"Chuẩn hóa tên miền Asura Scans thành: {url}", "info")
+    elif "comic.naver.com" in parsed_url.netloc.lower():
+        query = urllib.parse.parse_qs(parsed_url.query)
+        title_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
+        if "/webtoon/detail" in parsed_url.path and title_id:
+            url = f"https://comic.naver.com/webtoon/list?titleId={title_id}"
+            payload.url = url
+            await sse_logger.log(f"Chuẩn hóa URL Naver Webtoon thành trang danh sách: {url}", "info")
     
     parsed = urllib.parse.urlparse(payload.url)
     comic_title = "Comic"
-    if parsed.path:
+    if "comic.naver.com" in parsed.netloc.lower():
+        query = urllib.parse.parse_qs(parsed.query)
+        t_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
+        comic_title = f"Naver_{t_id}" if t_id else "Naver_Webtoon"
+    elif parsed.path:
         parts = [p for p in parsed.path.strip("/").split("/") if p]
         if parts:
             slug = parts[-1]
@@ -3105,8 +3213,21 @@ async def crawl(payload: CrawlRequest):
                 slug = parts[-2]
             comic_title = slug.replace("-", " ").title()
 
-    v_id = normalize_tts_voice_mode(payload.voice_id)
-        
+    market_id = payload.market_id
+    if not market_id and "comic.naver.com" in parsed.netloc.lower():
+        market_id = "korea_apocalypse"
+        await sse_logger.log("Tự động kích hoạt Market Profile Hàn Quốc: korea_apocalypse cho Naver Webtoon", "info")
+
+    lang = payload.language
+    if market_id == "korea_apocalypse":
+        if lang == "en":
+            lang = "ko"
+        from markets.korea_apocalypse.tts import DEFAULT_KR_VOICE_ID
+        if not payload.voice_id or payload.voice_id in ("ai33pro", "auto", "default"):
+            v_id = DEFAULT_KR_VOICE_ID
+    else:
+        v_id = normalize_tts_voice_mode(payload.voice_id)
+
     config = {
         "safe_mode": payload.safe_mode,
         "nsfw_threshold": payload.nsfw_threshold,
@@ -3116,7 +3237,7 @@ async def crawl(payload: CrawlRequest):
         "concurrency": payload.concurrency,
         "image_quality": payload.image_quality,
         "pdf_quality": payload.pdf_quality,
-        "language": payload.language,
+        "language": lang,
         "vlm_provider": payload.vlm_provider,
         "voice_id": v_id,
         "ref_audio_path": _validated_asset_reference(payload.ref_audio_path),
@@ -3126,7 +3247,8 @@ async def crawl(payload: CrawlRequest):
         "remove_text": payload.remove_text,
         "remove_text_conf": payload.remove_text_conf,
         "remove_text_radius": payload.remove_text_radius,
-        "comix_group_id": payload.comix_group_id
+        "comix_group_id": payload.comix_group_id,
+        "market_id": market_id,
     }
 
     task_id = await workflow_manager.queue_task(
@@ -3306,7 +3428,14 @@ def generate_gemini_prompt(
     total_pages: int,
     target_language: str = "en",
     glossary: str = None,
+    market_id: str = None,
 ) -> str:
+    if market_id:
+        from markets import get_market
+        market = get_market(market_id)
+        if market:
+            return market.get_gemini_prompt(comic_title, ep, total_pages, glossary)
+
     language_map = {
         "vi": "Vietnamese",
         "vietnamese": "Vietnamese",

@@ -29,3 +29,8 @@ scratch_check_undercover.py
 tasks_db.json.bak
 tasks_db.json.tmp
 .session_token
+output/
+*.mp4
+*.srt
+*.mp3
+*.wav

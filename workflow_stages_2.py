@@ -110,8 +110,35 @@ class Stage8_LocalTTS(BaseStage):
         download_dir = task.artifacts.get("download_dir")
         
         language = task.payload.get("language", "en")
-        default_voice = "auto"
-        voice_id = normalize_tts_voice_mode(task.payload.get("voice_id", default_voice), default=default_voice)
+        market_id = task.payload.get("market_id")
+        raw_voice_id = task.payload.get("voice_id")
+        rate = "+0%"
+        pitch = "+0Hz"
+
+        from markets import get_market
+        market = get_market(market_id)
+        if market:
+            if not raw_voice_id or raw_voice_id in ("ai33pro", "auto", "default"):
+                voice_id = market.default_voice_id
+            else:
+                voice_id = raw_voice_id
+            if market.voice_rate:
+                rate = market.voice_rate
+            if market.voice_pitch:
+                pitch = market.voice_pitch
+        elif language == "ko":
+            from markets.korea_apocalypse.tts import (
+                DEFAULT_KR_VOICE_ID,
+                DEFAULT_KR_VOICE_RATE,
+                DEFAULT_KR_VOICE_PITCH,
+            )
+            voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else DEFAULT_KR_VOICE_ID
+            rate = DEFAULT_KR_VOICE_RATE
+            pitch = DEFAULT_KR_VOICE_PITCH
+        else:
+            default_voice = "auto"
+            voice_id = normalize_tts_voice_mode(raw_voice_id or default_voice, default=default_voice)
+
         ref_audio_path = task.payload.get("ref_audio_path")
 
         total_episodes = to_ep - from_ep + 1
@@ -157,12 +184,12 @@ class Stage8_LocalTTS(BaseStage):
                 await context.update_stage_progress(self.name, (completed_eps / total_episodes) * 100.0)
                 return True
                 
-            await context.log(f"Tập {ep}: Đang sinh local TTS...", "info")
+            await context.log(f"Tập {ep}: Đang sinh local TTS ({voice_id}, rate={rate}, pitch={pitch})...", "info")
 
             from tts_provider import generate_tts
             audio_temp_path = audio_path + ".tmp.mp3"
             srt_temp_path = srt_path + ".tmp.srt"
-            success = await generate_tts(narration_text, audio_temp_path, srt_temp_path, voice_id, ref_audio_path)
+            success = await generate_tts(narration_text, audio_temp_path, srt_temp_path, voice_id, ref_audio_path, rate=rate, pitch=pitch)
             if not success:
                 for temp_path in (audio_temp_path, srt_temp_path):
                     if os.path.exists(temp_path):
@@ -400,9 +427,26 @@ def draw_subtitles_on_frame(image, text, font_size=42):
     if not text:
         return
         
-    # Try to load a clean bold sans-serif system font
+    # Try to load a clean bold sans-serif system font (with Korean and Japanese fallback)
     font = None
-    font_paths = [
+    has_korean = any(0xAC00 <= ord(c) <= 0xD7AF or 0x1100 <= ord(c) <= 0x11FF or 0x3130 <= ord(c) <= 0x318F for c in text)
+    has_japanese = any(0x3040 <= ord(c) <= 0x30FF for c in text)
+
+    font_paths = []
+    if has_korean:
+        font_paths.extend([
+            "C:\\Windows\\Fonts\\malgunbd.ttf",
+            "C:\\Windows\\Fonts\\malgun.ttf",
+            "malgunbd.ttf",
+            "malgun.ttf",
+        ])
+    elif has_japanese:
+        font_paths.extend([
+            "C:\\Windows\\Fonts\\meiryo.ttc",
+            "C:\\Windows\\Fonts\\msgothic.ttc",
+            "meiryo.ttc",
+        ])
+    font_paths.extend([
         "arialbd.ttf",
         "seguisb.ttf",
         "arial.ttf",
@@ -411,7 +455,7 @@ def draw_subtitles_on_frame(image, text, font_size=42):
         "C:\\Windows\\Fonts\\seguisb.ttf",
         "C:\\Windows\\Fonts\\arial.ttf",
         "C:\\Windows\\Fonts\\tahoma.ttf"
-    ]
+    ])
     for path in font_paths:
         try:
             font = ImageFont.truetype(path, font_size)

@@ -1019,7 +1019,11 @@ btnCrawl.addEventListener('click', async () => {
                 pdf_quality: parseInt(document.getElementById('image-quality').value),
                 language: document.getElementById('vlm-language').value,
                 vlm_provider: 'gemini',
-                voice_id: ttsMode === 'design' ? document.getElementById('omnivoice-instruct').value : ttsMode,
+                voice_id: ttsMode === 'design' 
+                    ? document.getElementById('omnivoice-instruct').value 
+                    : (ttsMode === 'voicevox' 
+                        ? `voicevox_${document.getElementById('voicevox-speaker-id') ? document.getElementById('voicevox-speaker-id').value : '3'}` 
+                        : ttsMode),
                 ref_audio_path: ttsMode === 'clone' ? uploadedRefAudioPath : null,
                 logo_path: uploadedLogoPath,
                 overlay_path: uploadedOverlayPath,
@@ -1027,7 +1031,8 @@ btnCrawl.addEventListener('click', async () => {
                 remove_text: true,
                 remove_text_conf: 0.3,
                 remove_text_radius: 3,
-                comix_group_id: document.getElementById('comix-group-id') ? document.getElementById('comix-group-id').value.trim() || null : null
+                comix_group_id: document.getElementById('comix-group-id') ? document.getElementById('comix-group-id').value.trim() || null : null,
+                market_id: document.getElementById('market-preset') ? document.getElementById('market-preset').value.trim() || null : null
             })
         });
 
@@ -1334,11 +1339,31 @@ if (btnRetryQueue) {
     btnRetryQueue.addEventListener('click', retryAllWorkflows);
 }
 
-// Toggle OmniVoice inputs based on selected mode
+// Toggle OmniVoice / VOICEVOX inputs based on selected mode
 const ttsVoiceIdInput = document.getElementById('tts-voice-id');
 const omnivoiceDesignArea = document.getElementById('omnivoice-design-area');
 const omnivoiceCloneArea = document.getElementById('omnivoice-clone-area');
 const ai33proApiArea = document.getElementById('ai33pro-api-area');
+const voicevoxConfigArea = document.getElementById('voicevox-config-area');
+
+async function checkVoicevoxStatus() {
+    const badge = document.getElementById('voicevox-status-badge');
+    if (!badge) return;
+    try {
+        const res = await fetch('/api/voicevox/status');
+        const data = await res.json();
+        if (data.available) {
+            badge.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #10B981;"></span><span>VOICEVOX Engine (v${data.version || 'GPU'}) đang hoạt động</span>`;
+            badge.style.color = '#10B981';
+        } else {
+            badge.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #EF4444;"></span><span>VOICEVOX Engine chưa bật (Docker port 50021) - Sẽ fallback EdgeTTS</span>`;
+            badge.style.color = '#EF4444';
+        }
+    } catch (e) {
+        badge.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #F59E0B;"></span><span>Không kiểm tra được VOICEVOX</span>`;
+        badge.style.color = '#F59E0B';
+    }
+}
 
 if (ttsVoiceIdInput) {
     ttsVoiceIdInput.addEventListener('change', () => {
@@ -1347,22 +1372,76 @@ if (ttsVoiceIdInput) {
             if (omnivoiceDesignArea) omnivoiceDesignArea.style.display = 'block';
             if (omnivoiceCloneArea) omnivoiceCloneArea.style.display = 'none';
             if (ai33proApiArea) ai33proApiArea.style.display = 'none';
+            if (voicevoxConfigArea) voicevoxConfigArea.style.display = 'none';
         } else if (mode === 'clone') {
             if (omnivoiceDesignArea) omnivoiceDesignArea.style.display = 'none';
             if (omnivoiceCloneArea) omnivoiceCloneArea.style.display = 'block';
             if (ai33proApiArea) ai33proApiArea.style.display = 'none';
+            if (voicevoxConfigArea) voicevoxConfigArea.style.display = 'none';
         } else if (mode === 'ai33pro') {
             if (omnivoiceDesignArea) omnivoiceDesignArea.style.display = 'none';
             if (omnivoiceCloneArea) omnivoiceCloneArea.style.display = 'none';
             if (ai33proApiArea) ai33proApiArea.style.display = 'block';
+            if (voicevoxConfigArea) voicevoxConfigArea.style.display = 'none';
+        } else if (mode === 'voicevox') {
+            if (omnivoiceDesignArea) omnivoiceDesignArea.style.display = 'none';
+            if (omnivoiceCloneArea) omnivoiceCloneArea.style.display = 'none';
+            if (ai33proApiArea) ai33proApiArea.style.display = 'none';
+            if (voicevoxConfigArea) voicevoxConfigArea.style.display = 'block';
+            checkVoicevoxStatus();
         } else {
             if (omnivoiceDesignArea) omnivoiceDesignArea.style.display = 'none';
             if (omnivoiceCloneArea) omnivoiceCloneArea.style.display = 'none';
             if (ai33proApiArea) ai33proApiArea.style.display = 'none';
+            if (voicevoxConfigArea) voicevoxConfigArea.style.display = 'none';
         }
     });
     // Trigger initial state mapping on load
     ttsVoiceIdInput.dispatchEvent(new Event('change'));
+}
+
+// Market Preset Auto-Configuration Handler
+const marketPresetSelect = document.getElementById('market-preset');
+if (marketPresetSelect) {
+    marketPresetSelect.addEventListener('change', () => {
+        const preset = marketPresetSelect.value;
+        const vlmLang = document.getElementById('vlm-language');
+        const burnSubs = document.getElementById('burn-subtitles');
+        
+        if (preset === 'korea_apocalypse') {
+            if (vlmLang) vlmLang.value = 'ko';
+            if (ttsVoiceIdInput) {
+                ttsVoiceIdInput.value = 'edge-tts_ko-KR-InJoonNeural';
+                ttsVoiceIdInput.dispatchEvent(new Event('change'));
+            }
+            if (burnSubs) burnSubs.checked = true;
+            appendLog('Đã áp dụng cấu hình nhánh: Hàn Quốc (종말 · 생존 몰아보기) - Giọng InJoonNeural, Ngôn ngữ Korean, Subtitles Bật.', 'success');
+        } else if (!preset) {
+            if (vlmLang) vlmLang.value = 'en';
+            if (ttsVoiceIdInput) {
+                ttsVoiceIdInput.value = 'ai33pro';
+                ttsVoiceIdInput.dispatchEvent(new Event('change'));
+            }
+            appendLog('Đã hoàn tác cấu hình về Mặc định (Toàn cầu / Tiếng Anh).', 'system');
+        }
+    });
+}
+
+// Auto-detect Naver Webtoon and switch to korea_apocalypse preset
+const manhwaUrlInput = document.getElementById('manhwa-url');
+if (manhwaUrlInput && marketPresetSelect) {
+    const handleUrlChange = () => {
+        const val = (manhwaUrlInput.value || '').trim().toLowerCase();
+        if (val.includes('comic.naver.com')) {
+            if (marketPresetSelect.value !== 'korea_apocalypse') {
+                marketPresetSelect.value = 'korea_apocalypse';
+                marketPresetSelect.dispatchEvent(new Event('change'));
+                appendLog('Phát hiện link Naver Webtoon: Tự động kích hoạt Market Preset Hàn Quốc (korea_apocalypse)', 'info');
+            }
+        }
+    };
+    manhwaUrlInput.addEventListener('input', handleUrlChange);
+    manhwaUrlInput.addEventListener('paste', () => setTimeout(handleUrlChange, 100));
 }
 
 // Custom Logo & Overlay Upload Logic

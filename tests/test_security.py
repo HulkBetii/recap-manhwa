@@ -158,6 +158,24 @@ def test_ai33_voice_is_normalized_to_environment_mode():
     assert normalize_tts_voice_mode("elevenlabs_example") == "ai33pro"
     assert normalize_tts_voice_mode("ai33pro") == "ai33pro"
     assert normalize_tts_voice_mode("female, low pitch") == "female, low pitch"
+    assert normalize_tts_voice_mode("voicevox_3") == "voicevox_3"
+    assert normalize_tts_voice_mode("voicevox") == "voicevox"
+    assert normalize_tts_voice_mode("edge-tts") == "edge-tts"
+
+
+def test_voicevox_settings_helpers():
+    from tts_settings import is_voicevox, parse_voicevox_speaker_id
+    assert is_voicevox("voicevox") is True
+    assert is_voicevox("voicevox_3") is True
+    assert is_voicevox("voicevox_76") is True
+    assert is_voicevox("ai33pro") is False
+    assert is_voicevox(None) is False
+
+    assert parse_voicevox_speaker_id("voicevox_3") == 3
+    assert parse_voicevox_speaker_id("voicevox_76") == 76
+    assert parse_voicevox_speaker_id("voicevox_invalid") == 3
+    assert parse_voicevox_speaker_id("voicevox") == 3
+
 
 
 def test_log_redaction_covers_credentials_signed_urls_and_paths(monkeypatch):

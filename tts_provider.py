@@ -29,7 +29,7 @@ except ImportError:
 from datetime import timedelta
 import logging
 from security_utils import redact_sensitive_text
-from tts_settings import get_ai33pro_voice_id, uses_ai33pro
+from tts_settings import get_ai33pro_voice_id, uses_ai33pro, is_voicevox, parse_voicevox_speaker_id
 
 
 # Load configuration
@@ -318,10 +318,17 @@ async def generate_ai33pro_tts(text: str, output_audio_path: str, output_srt_pat
             logger.error(f"Exception during AI33Pro request: {e}", exc_info=True)
             return False
 
-async def generate_edge_tts(text: str, output_audio_path: str, output_srt_path: str, voice_name: str = "en-US-ChristopherNeural") -> bool:
+async def generate_edge_tts(
+    text: str,
+    output_audio_path: str,
+    output_srt_path: str,
+    voice_name: str = "en-US-ChristopherNeural",
+    rate: str = "+0%",
+    pitch: str = "+0Hz",
+) -> bool:
     try:
         import edge_tts
-        communicate = edge_tts.Communicate(text, voice_name)
+        communicate = edge_tts.Communicate(text, voice_name, rate=rate, pitch=pitch)
         with open(output_audio_path, "wb") as file:
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
@@ -333,20 +340,159 @@ async def generate_edge_tts(text: str, output_audio_path: str, output_srt_path: 
         logger.error(f"EdgeTTS generation failed: {e}", exc_info=True)
         return False
 
-async def generate_tts(text: str, output_audio_path: str, output_srt_path: str, voice_id: str = None, ref_audio_path: str = None) -> bool:
+def concat_wav_bytes(wav_bytes_list: list[bytes]) -> bytes:
+    if not wav_bytes_list:
+        return b""
+    if len(wav_bytes_list) == 1:
+        return wav_bytes_list[0]
+    import io
+    out_io = io.BytesIO()
+    with wave.open(io.BytesIO(wav_bytes_list[0]), "rb") as first_wav:
+        params = first_wav.getparams()
+        first_frames = first_wav.readframes(first_wav.getnframes())
+    with wave.open(out_io, "wb") as out_wav:
+        out_wav.setparams(params)
+        out_wav.writeframes(first_frames)
+        for wb in wav_bytes_list[1:]:
+            with wave.open(io.BytesIO(wb), "rb") as w:
+                out_wav.writeframes(w.readframes(w.getnframes()))
+    return out_io.getvalue()
+
+
+def split_text_for_voicevox(text: str, max_chunk_len: int = 150) -> list[str]:
+    import re
+    raw_sentences = re.split(r'([。\n！？!?；;\.]+)', text)
+    chunks = []
+    current = ""
+    for piece in raw_sentences:
+        if not piece:
+            continue
+        if len(current) + len(piece) <= max_chunk_len:
+            current += piece
+        else:
+            if current.strip():
+                chunks.append(current.strip())
+            current = piece
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks if chunks else [text.strip()]
+
+
+async def generate_voicevox_tts(
+    text: str,
+    output_audio_path: str,
+    output_srt_path: str,
+    speaker_id: int = 3,
+    speed_scale: float = 1.0,
+    base_url: str | None = None,
+) -> bool:
+    import httpx
+    url = (base_url or os.getenv("VOICEVOX_URL", "http://127.0.0.1:50021")).rstrip("/")
+    logger.info(f"VOICEVOX: Synthesizing speech with speaker_id={speaker_id} via {url}...")
+
+    chunks = split_text_for_voicevox(text)
+    wav_bytes_list = []
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for idx, chunk in enumerate(chunks, 1):
+                clean_chunk = chunk.strip()
+                if not clean_chunk:
+                    continue
+                logger.debug(f"VOICEVOX: Processing chunk {idx}/{len(chunks)} ({len(clean_chunk)} chars)")
+
+                # 1. audio_query
+                q_resp = await client.post(
+                    f"{url}/audio_query",
+                    params={"text": clean_chunk, "speaker": speaker_id}
+                )
+                if q_resp.status_code != 200:
+                    logger.error(f"VOICEVOX audio_query failed with HTTP {q_resp.status_code}: {q_resp.text}")
+                    return False
+                query_data = q_resp.json()
+                if speed_scale != 1.0:
+                    query_data["speedScale"] = speed_scale
+
+                # 2. synthesis
+                s_resp = await client.post(
+                    f"{url}/synthesis",
+                    params={"speaker": speaker_id},
+                    json=query_data
+                )
+                if s_resp.status_code != 200:
+                    logger.error(f"VOICEVOX synthesis failed with HTTP {s_resp.status_code}: {s_resp.text}")
+                    return False
+                wav_bytes_list.append(s_resp.content)
+
+        if not wav_bytes_list:
+            logger.error("VOICEVOX: No audio synthesized.")
+            return False
+
+        merged_wav = concat_wav_bytes(wav_bytes_list)
+        temp_wav_path = output_audio_path + ".voicevox.temp.wav"
+        with open(temp_wav_path, "wb") as f:
+            f.write(merged_wav)
+
+        # Convert WAV to MP3 using FFmpeg
+        await asyncio.to_thread(convert_wav_to_mp3, temp_wav_path, output_audio_path)
+        try:
+            os.remove(temp_wav_path)
+        except Exception:
+            pass
+
+        logger.info("VOICEVOX audio generated successfully. Generating Whisper SRT transcript...")
+        await asyncio.to_thread(generate_transcript, output_audio_path, output_srt_path)
+        return True
+    except Exception as e:
+        logger.error(f"VOICEVOX generation failed: {e}", exc_info=True)
+        return False
+
+
+async def generate_tts(
+    text: str,
+    output_audio_path: str,
+    output_srt_path: str,
+    voice_id: str = None,
+    ref_audio_path: str = None,
+    rate: str = "+0%",
+    pitch: str = "+0Hz",
+) -> bool:
     """
-    Generates local TTS audio (MP3) and its SRT transcript using OmniVoice.
-    Supports Voice Cloning (via ref_audio_path) and Voice Design (via voice_id / instruct).
+    Generates local TTS audio (MP3) and its SRT transcript.
+    Supports VOICEVOX (local GPU), Direct EdgeTTS, AI33Pro, and OmniVoice.
     """
+    v_id = (voice_id or "").strip()
+
+    # 1. VOICEVOX Mode (Local GPU)
+    if is_voicevox(v_id):
+        speaker_id = parse_voicevox_speaker_id(v_id)
+        ok = await generate_voicevox_tts(text, output_audio_path, output_srt_path, speaker_id=speaker_id)
+        if ok:
+            return True
+        logger.warning("VOICEVOX failed or engine not running. Falling back to EdgeTTS (ja-JP-NanamiNeural)...")
+        return await generate_edge_tts(text, output_audio_path, output_srt_path, voice_name="ja-JP-NanamiNeural", rate=rate, pitch=pitch)
+
+    # 2. Direct EdgeTTS Mode
+    if v_id == "edge-tts" or v_id.startswith("edge-tts_"):
+        edge_voice = "en-US-ChristopherNeural"
+        if v_id.startswith("edge-tts_"):
+            edge_voice = v_id.split("_", 1)[1]
+        if edge_voice == "ko-KR-InJoonNeural" and rate == "+0%" and pitch == "+0Hz":
+            rate = "+12%"
+            pitch = "-2Hz"
+        return await generate_edge_tts(text, output_audio_path, output_srt_path, voice_name=edge_voice, rate=rate, pitch=pitch)
+
+    # 3. AI33Pro Mode
     if uses_ai33pro(voice_id):
         ok = await generate_ai33pro_tts(text, output_audio_path, output_srt_path)
         if ok:
             return True
         logger.warning("AI33Pro failed or quota reached (402). Falling back to EdgeTTS...")
-        return await generate_edge_tts(text, output_audio_path, output_srt_path)
+        return await generate_edge_tts(text, output_audio_path, output_srt_path, rate=rate, pitch=pitch)
 
     try:
         model = get_omnivoice_model()
+
         kwargs = {
             "num_step": config.OMNIVOICE_NUM_STEPS
         }
