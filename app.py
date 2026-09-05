@@ -5453,83 +5453,15 @@ async def run_video_pipeline(
                     seg["episode"] = ep_num
                     summary_segments.append(seg)
 
-            def clean_w(word):
-                return re.sub(r'[^a-z0-9]', '', word.lower())
+            from workflow_stages_2 import align_subtitles_to_segments, get_video_duration
+            audio_dur = 0.0
+            if os.path.exists(audio_path):
+                try:
+                    audio_dur = get_video_duration(audio_path, ffmpeg_exe)
+                except Exception:
+                    pass
 
-            # Compute cumulative word boundaries for segments
-            segment_word_counts = []
-            for seg in summary_segments:
-                speech = seg.get("speech", "")
-                words = [clean_w(w) for w in speech.split() if clean_w(w)]
-                segment_word_counts.append(len(words))
-
-            segment_ranges = []
-            current_idx = 0
-            for count in segment_word_counts:
-                segment_ranges.append((current_idx, current_idx + count))
-                current_idx += count
-            total_segment_words = current_idx
-
-            # Map subtitles to segments
-            if len(subtitles) == len(summary_segments):
-                for idx_sub, sub in enumerate(subtitles):
-                    sub["matched_segment_idx"] = idx_sub
-            else:
-                # Compute subtitle words and running totals
-                sub_word_counts = []
-                total_subtitle_words = 0
-                for sub in subtitles:
-                    words = [clean_w(w) for w in sub["text"].split() if clean_w(w)]
-                    sub_word_counts.append(len(words))
-                    total_subtitle_words += len(words)
-
-                ratio = total_segment_words / total_subtitle_words if total_subtitle_words > 0 else 1
-
-                prev_words = 0
-                for idx, sub in enumerate(subtitles):
-                    count = sub_word_counts[idx]
-                    if count == 0:
-                        mid_word_idx = prev_words
-                    else:
-                        mid_word_idx = prev_words + count // 2
-
-                    # Scale word pointer to segment space to be invariant to deletions/inserts
-                    scaled_word_idx = mid_word_idx * ratio
-                    
-                    # Find which segment contains this scaled word index
-                    matched_seg = len(summary_segments) - 1
-                    for seg_idx, (start, end) in enumerate(segment_ranges):
-                        if start <= scaled_word_idx < end:
-                            matched_seg = seg_idx
-                            break
-                    sub["matched_segment_idx"] = matched_seg
-                    prev_words += count
-
-            # 4b. Subtitle Normalization & Re-alignment (matching segments count and text)
-            from tts_provider import format_timestamp
-            normalized_srt_entries = []
-            last_end_time = 0.0
-            
-            for seg_idx, seg in enumerate(summary_segments):
-                matched_subs = [sub for sub in subtitles if sub.get("matched_segment_idx") == seg_idx]
-                if matched_subs:
-                    start_time = min(sub["start"] for sub in matched_subs)
-                    end_time = max(sub["end"] for sub in matched_subs)
-                else:
-                    start_time = last_end_time
-                    word_count = len(seg.get("speech", "").split())
-                    estimated_dur = max(2.0, word_count * 0.4)
-                    end_time = start_time + estimated_dur
-                
-                if start_time < last_end_time: start_time = last_end_time
-                if end_time <= start_time: end_time = start_time + 1.0
-                
-                last_end_time = end_time
-                normalized_srt_entries.append({
-                    "start": start_time,
-                    "end": end_time,
-                    "text": seg.get("speech", "")
-                })
+            normalized_srt_entries = align_subtitles_to_segments(subtitles, summary_segments, audio_dur)
 
             # Overwrite the srt_path with normalized subtitles
             try:

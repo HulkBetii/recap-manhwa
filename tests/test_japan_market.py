@@ -76,3 +76,31 @@ def test_api_markets_endpoint_includes_japan():
         assert isinstance(data, list)
         ids = [item["id"] for item in data]
         assert "japan_isekai_territory" in ids
+
+
+def test_align_subtitles_to_segments_japanese():
+    from workflow_stages_2 import align_subtitles_to_segments, count_meaningful_units
+
+    # Verify Japanese and diacritics character counting
+    assert count_meaningful_units("転生貴族、鑑定スキル！") == 9
+    assert count_meaningful_units("Tiếng Việt có dấu 123") == 17
+    assert count_meaningful_units("Hello, World! [speed_123]") == 10
+
+    segments = [
+        {"speech": "無能な弱小貴族など滅びるのみ！少年アルスは鑑定スキルを覚醒させた。"},
+        {"speech": "隠れた逸材を発掘し、弱小領地を最強へと導く成り上がり記が開幕する。"},
+    ]
+    subtitles = [
+        {"start": 0.0, "end": 4.5, "text": "無能な弱小貴族など滅びるのみ！少年アルスは鑑定スキルを覚醒させた。"},
+        {"start": 4.8, "end": 9.2, "text": "隠れた逸材を発掘し、弱小領地を最強へと導く成り上がり記が開幕する。"},
+    ]
+    aligned = align_subtitles_to_segments(subtitles, segments, 10.0)
+    assert len(aligned) == 2
+    assert aligned[0]["start"] == 0.0
+    assert aligned[0]["end"] == 4.5
+    assert aligned[1]["start"] == 4.8
+    assert aligned[1]["end"] == 9.2
+    # Ensure neither segment collapsed to the buggy 2.0s duration
+    assert aligned[0]["end"] - aligned[0]["start"] > 4.0
+    assert aligned[1]["end"] - aligned[1]["start"] > 4.0
+

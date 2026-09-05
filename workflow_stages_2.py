@@ -235,6 +235,109 @@ class Stage8_LocalTTS(BaseStage):
         return all(results)
 
 
+def count_meaningful_units(text: str) -> int:
+    """
+    Counts meaningful alphanumeric / phonetic units in text across ANY language:
+    - Latin (English): counts letters & digits
+    - Vietnamese: counts letters with diacritics & digits
+    - CJK (Japanese, Chinese): counts kanji, kana, hanzi (each is a syllable/mora)
+    - Korean: counts hangul syllables
+    Strips inline bracket tags like [speed_...] or [1, 9] annotations.
+    """
+    cleaned = re.sub(r'\[.*?\]', '', text)
+    chars = [c for c in cleaned if c.isalnum()]
+    return len(chars)
+
+
+def align_subtitles_to_segments(subtitles: list, segments: list, audio_duration: float = 0.0) -> list:
+    """
+    Aligns Whisper subtitle cues to recap segments using cumulative phonetic/character ratio.
+    Works universally across all languages (Japanese, Korean, Chinese, Vietnamese, English).
+    Returns normalized_srt_entries: list of {"start": float, "end": float, "text": str}.
+    """
+    if not segments:
+        return []
+
+    if not subtitles:
+        total_chars = sum(max(1, count_meaningful_units(s.get("speech", ""))) for s in segments)
+        dur = audio_duration if audio_duration > 0 else len(segments) * 5.0
+        curr = 0.0
+        result = []
+        for s in segments:
+            c = max(1, count_meaningful_units(s.get("speech", "")))
+            seg_dur = max(2.5, (c / max(1, total_chars)) * dur)
+            result.append({
+                "start": curr,
+                "end": curr + seg_dur,
+                "text": s.get("speech", "")
+            })
+            curr += seg_dur
+        return result
+
+    segment_counts = [max(1, count_meaningful_units(seg.get("speech", ""))) for seg in segments]
+    total_segment_units = sum(segment_counts)
+
+    segment_ranges = []
+    current_idx = 0
+    for count in segment_counts:
+        segment_ranges.append((current_idx, current_idx + count))
+        current_idx += count
+
+    if len(subtitles) == len(segments):
+        for idx_sub, sub in enumerate(subtitles):
+            sub["matched_segment_idx"] = idx_sub
+    else:
+        sub_counts = [max(1, count_meaningful_units(sub.get("text", ""))) for sub in subtitles]
+        total_sub_units = sum(sub_counts)
+
+        ratio = total_segment_units / total_sub_units if total_sub_units > 0 else 1.0
+
+        prev_units = 0
+        for s_idx, sub in enumerate(subtitles):
+            count = sub_counts[s_idx]
+            mid_unit_idx = prev_units + count / 2.0
+            scaled_unit_idx = mid_unit_idx * ratio
+
+            matched_seg = len(segments) - 1
+            for seg_idx, (start, end) in enumerate(segment_ranges):
+                if start <= scaled_unit_idx < end:
+                    matched_seg = seg_idx
+                    break
+            sub["matched_segment_idx"] = matched_seg
+            prev_units += count
+
+    normalized_entries = []
+    last_end_time = 0.0
+
+    for seg_idx, seg in enumerate(segments):
+        matched_subs = [sub for sub in subtitles if sub.get("matched_segment_idx") == seg_idx]
+        if matched_subs:
+            start_time = min(sub["start"] for sub in matched_subs)
+            end_time = max(sub["end"] for sub in matched_subs)
+        else:
+            start_time = last_end_time
+            char_count = max(1, count_meaningful_units(seg.get("speech", "")))
+            if total_segment_units > 0 and audio_duration > 0:
+                estimated_dur = max(2.5, (char_count / total_segment_units) * audio_duration)
+            else:
+                estimated_dur = max(2.5, char_count * 0.15)
+            end_time = start_time + estimated_dur
+
+        if start_time < last_end_time:
+            start_time = last_end_time
+        if end_time <= start_time:
+            end_time = start_time + 2.5
+
+        last_end_time = end_time
+        normalized_entries.append({
+            "start": start_time,
+            "end": end_time,
+            "text": seg.get("speech", "")
+        })
+
+    return normalized_entries
+
+
 class Stage9_SubtitleNormalization(BaseStage):
     @property
     def name(self) -> str: return "Stage 9 - Subtitle Normalization"
@@ -242,7 +345,7 @@ class Stage9_SubtitleNormalization(BaseStage):
     def weight(self) -> float: return 0.03
 
     async def execute(self, context: WorkflowContext) -> bool:
-        from app import parse_time_to_seconds
+        from app import parse_time_to_seconds, find_ffmpeg
         task = context.task
         from_ep = task.from_episode
         to_ep = task.to_episode
@@ -310,72 +413,14 @@ class Stage9_SubtitleNormalization(BaseStage):
                 await context.fail_episode(ep, "Không thể phân tích tệp SRT.")
                 return False
 
-            def clean_w(word):
-                return re.sub(r'[^a-z0-9]', '', word.lower())
+            audio_dur = 0.0
+            if os.path.exists(audio_path):
+                try:
+                    audio_dur = get_video_duration(audio_path, find_ffmpeg())
+                except Exception:
+                    pass
 
-            segment_word_counts = []
-            for seg in segments:
-                speech = seg.get("speech", "")
-                words = [clean_w(w) for w in speech.split() if clean_w(w)]
-                segment_word_counts.append(len(words))
-
-            segment_ranges = []
-            current_idx = 0
-            for count in segment_word_counts:
-                segment_ranges.append((current_idx, current_idx + count))
-                current_idx += count
-            total_segment_words = current_idx
-
-            if len(subtitles) == len(segments):
-                for idx_sub, sub in enumerate(subtitles):
-                    sub["matched_segment_idx"] = idx_sub
-            else:
-                sub_word_counts = []
-                total_subtitle_words = 0
-                for sub in subtitles:
-                    words = [clean_w(w) for w in sub["text"].split() if clean_w(w)]
-                    sub_word_counts.append(len(words))
-                    total_subtitle_words += len(words)
-
-                ratio = total_segment_words / total_subtitle_words if total_subtitle_words > 0 else 1
-
-                prev_words = 0
-                for s_idx, sub in enumerate(subtitles):
-                    count = sub_word_counts[s_idx]
-                    mid_word_idx = prev_words + count // 2 if count > 0 else prev_words
-                    scaled_word_idx = mid_word_idx * ratio
-                    
-                    matched_seg = len(segments) - 1
-                    for seg_idx, (start, end) in enumerate(segment_ranges):
-                        if start <= scaled_word_idx < end:
-                            matched_seg = seg_idx
-                            break
-                    sub["matched_segment_idx"] = matched_seg
-                    prev_words += count
-
-            normalized_srt_entries = []
-            last_end_time = 0.0
-            
-            for seg_idx, seg in enumerate(segments):
-                matched_subs = [sub for sub in subtitles if sub.get("matched_segment_idx") == seg_idx]
-                if matched_subs:
-                    start_time = min(sub["start"] for sub in matched_subs)
-                    end_time = max(sub["end"] for sub in matched_subs)
-                else:
-                    start_time = last_end_time
-                    word_count = len(seg.get("speech", "").split())
-                    estimated_dur = max(2.0, word_count * 0.4)
-                    end_time = start_time + estimated_dur
-                
-                if start_time < last_end_time: start_time = last_end_time
-                if end_time <= start_time: end_time = start_time + 1.0
-                
-                last_end_time = end_time
-                normalized_srt_entries.append({
-                    "start": start_time,
-                    "end": end_time,
-                    "text": seg.get("speech", "")
-                })
+            normalized_srt_entries = align_subtitles_to_segments(subtitles, segments, audio_dur)
 
             srt_temp_path = srt_path + ".tmp"
             with open(srt_temp_path, "w", encoding="utf-8") as sf:
@@ -1039,6 +1084,24 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     segment_duration = 1.0
                 
                 seg_images = seg.get("images", [])
+
+                # Guardrail against rapid image transitions:
+                # Ensure each image is displayed for a comfortable duration (minimum 2.5 seconds).
+                # If a segment is too short for multiple images, keep only the highest-priority image(s).
+                min_image_duration = 2.5
+                if seg_images and len(seg_images) > 1 and (segment_duration / len(seg_images)) < min_image_duration:
+                    max_allowed = max(1, int(segment_duration // min_image_duration))
+                    sorted_indices = sorted(
+                        range(len(seg_images)),
+                        key=lambda i: float(seg_images[i].get("priority", 0)),
+                        reverse=True
+                    )
+                    kept_indices = set(sorted_indices[:max_allowed])
+                    seg_images = [img for idx, img in enumerate(seg_images) if idx in kept_indices]
+                    tot_p = sum(float(img.get("priority", 1.0)) for img in seg_images)
+                    for img in seg_images:
+                        img["priority"] = float(img.get("priority", 1.0)) / max(0.001, tot_p)
+
                 for img_obj in seg_images:
                     page = int(img_obj["page"])
                     priority = float(img_obj["priority"])
@@ -1059,6 +1122,16 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         "segment_index": s_idx
                     })
                     current_time += img_dur
+
+            # Merge consecutive displays of the exact same image to avoid redundant cross-fading
+            merged_page_displays = []
+            for pd in page_displays:
+                if merged_page_displays and merged_page_displays[-1]["image_file"] == pd["image_file"]:
+                    merged_page_displays[-1]["duration"] += pd["duration"]
+                    merged_page_displays[-1]["end_time"] = merged_page_displays[-1]["start_time"] + merged_page_displays[-1]["duration"]
+                else:
+                    merged_page_displays.append(pd)
+            page_displays = merged_page_displays
 
             # Precompute bounds, focal points, and plans
             bounds_cache_path = os.path.join(ep_dir, "content_bounds_cache.json")
