@@ -1114,8 +1114,14 @@ class Stage4_PDFGeneration(BaseStage):
                 return False
 
             pdf_quality = task.payload.get("pdf_quality", 30)
+
             await context.log(f"Tập {ep}: Tạo PDF gốc trực tiếp từ images_pdf...", "info")
-            await asyncio.to_thread(create_numbered_pdf, images_pdf_dir, pdf_path, pdf_quality)
+            await asyncio.to_thread(
+                create_numbered_pdf,
+                images_pdf_dir,
+                pdf_path,
+                pdf_quality,
+            )
             await context.complete_episode(ep)
             cache.commit(stage="pdf", fingerprint=fingerprint, outputs=[pdf_path])
             completed_eps += 1
@@ -1142,7 +1148,7 @@ class Stage5_GeminiAutomation(BaseStage):
     def weight(self) -> float: return 0.15
 
     async def execute(self, context: WorkflowContext) -> bool:
-        from app import get_browser_context, NavigationManager, textbox_selectors, send_selectors, response_selectors, generate_gemini_prompt, extract_json_from_text, parse_gemini_recap_text, clean_gemini_response
+        from app import get_browser_context, NavigationManager, textbox_selectors, send_selectors, response_selectors, generate_gemini_prompt, generate_intro_prompt, extract_json_from_text, parse_gemini_recap_text, clean_gemini_response
         from playwright.async_api import async_playwright
         import uuid
         import base64
@@ -1168,7 +1174,8 @@ class Stage5_GeminiAutomation(BaseStage):
 
         async def get_local_context():
             from app import check_and_rotate_profiles_until_ready, NavigationManager
-            br, shared_ctx = await check_and_rotate_profiles_until_ready(context, force_check=False)
+            target_vlm_model = task.payload.get("vlm_model", "3.8 Flash")
+            br, shared_ctx = await check_and_rotate_profiles_until_ready(context, force_check=False, target_model=target_vlm_model)
             ctx_id = f"ctx_{int(time.time() * 1000) % 10000}"
             nm = NavigationManager(context)
             nm.context = shared_ctx
@@ -1220,7 +1227,30 @@ class Stage5_GeminiAutomation(BaseStage):
 
             image_files = list_image_files(images_pdf_dir)
             market_id = task.payload.get("market_id")
-            prompt_content = generate_gemini_prompt(comic_title, ep, len(image_files), language, market_id=market_id)
+
+            # Load rolling story context from previous episode if available
+            previous_context = None
+            try:
+                from story_memory import StoryMemory
+                memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
+                previous_context = memory.get_previous_context(ep, download_dir=download_dir)
+                if previous_context:
+                    name_part = f" | MC: {previous_context.get('protagonist_name')}" if previous_context.get('protagonist_name') else ""
+                    gender_part = f" ({previous_context.get('protagonist_gender')})" if previous_context.get('protagonist_gender') and previous_context.get('protagonist_gender') != 'auto' else ""
+                    await context.log(f"Tập {ep}: Đã đồng bộ ngữ cảnh từ Tập {ep-1} (Cliffhanger: \"{previous_context.get('closing_cliffhanger', '')[:60]}...\"{name_part}{gender_part})", "info", episode=ep)
+            except Exception as mem_err:
+                await context.log(f"Cảnh báo: Không thể tải StoryMemory cho tập {ep}: {mem_err}", "warning", episode=ep)
+
+            prompt_content = generate_gemini_prompt(
+                comic_title,
+                ep,
+                len(image_files),
+                language,
+                market_id=market_id,
+                previous_context=previous_context,
+            )
+
+            # Prompt already contains Episode 1 hook instructions and recap rules
             cache = EpisodeStageCache(ep_dir)
             safe_bundle_dir = os.path.join(ep_dir, "gemini_safe")
             safe_pdf_path = os.path.join(safe_bundle_dir, pdf_name)
@@ -1267,6 +1297,16 @@ class Stage5_GeminiAutomation(BaseStage):
                 validate=lambda: validate_recap_json(recap_json_path),
             ):
                 await context.log(f"Tập {ep}: Cache Gemini hợp lệ. Bỏ qua automation.", "success")
+                try:
+                    from story_memory import StoryMemory
+                    memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
+                    if str(ep) not in memory.episodes and os.path.exists(recap_json_path):
+                        with open(recap_json_path, "r", encoding="utf-8") as f:
+                            cached_recap = json.load(f)
+                        memory.add_episode_recap(ep, cached_recap, language=language)
+                        memory.save(download_dir)
+                except Exception:
+                    pass
                 await context.complete_episode(ep)
                 completed_eps_count += 1
                 await context.update_stage_progress(self.name, (completed_eps_count / total_eps) * 100.0)
@@ -1349,31 +1389,19 @@ class Stage5_GeminiAutomation(BaseStage):
                     await local_nm.safe_goto(page, vlm_url, reason=f"Load {vlm_name} ep {ep}", caller=f"Ep_{ep}")
                     await asyncio.sleep(2.0)
                     
-                    # Ensure 3.6 Flash is selected and check rate-limit status on this page before prompting
+                    # Ensure target model (3.8 Flash) is selected and check rate-limit status on this page before prompting
                     try:
                         from app import check_gemini_login_and_limit_status
-                        status = await check_gemini_login_and_limit_status(page, context)
+                        target_vlm_model = task.payload.get("vlm_model", "3.8 Flash")
+                        status = await check_gemini_login_and_limit_status(page, context, target_model=target_vlm_model)
                         if status == "limited":
-                            raise Exception("Tài khoản đang bị giới hạn model 3.6 Flash.")
+                            raise Exception(f"Tài khoản đang bị giới hạn model {target_vlm_model}.")
                         elif status == "needs_login":
-                            await context.log("Tài khoản chưa đăng nhập. Đang chờ đăng nhập thủ công (tối đa 180s)...", "warning", episode=ep)
-                            login_success = False
-                            for _ in range(90):
-                                await asyncio.sleep(2)
-                                new_status = await check_gemini_login_and_limit_status(page, None)
-                                if new_status != "needs_login":
-                                    login_success = True
-                                    status = new_status
-                                    await context.log("Đăng nhập thành công!", "success", episode=ep)
-                                    break
-                            if not login_success:
-                                raise Exception("Bỏ qua tài khoản do hết thời gian chờ đăng nhập.")
-                            if status == "limited":
-                                raise Exception("Tài khoản đang bị giới hạn model 3.6 Flash.")
+                            raise Exception(f"Tài khoản chưa đăng nhập Gemini. Tự động xoay vòng sang profile đã đăng nhập khác...")
                     except Exception as select_err:
                         if "giới hạn" in str(select_err) or "đăng nhập" in str(select_err):
                             raise select_err
-                        await context.log(f"Cảnh báo: Không thể kiểm tra/chọn model 3.6 Flash: {select_err}", "warning", episode=ep)
+                        await context.log(f"Cảnh báo: Không thể kiểm tra/chọn model {target_vlm_model}: {select_err}", "warning", episode=ep)
                         
                     nav_time = round(time.time() - nav_start, 1)
 
@@ -1591,15 +1619,23 @@ class Stage5_GeminiAutomation(BaseStage):
                         is_generating = False
                         stop_button_selectors = [
                             "button[aria-label='Stop generating']",
+                            "button[aria-label*='Stop generating']",
+                            "button[aria-label*='Stop response']",
                             "button[aria-label*='Stop']",
                             "button[aria-label*='stop']",
+                            "button[aria-label*='Dừng phản hồi']",
+                            "button[aria-label*='Dừng câu trả lời']",
                             "button[aria-label*='Dừng']",
                             "button[aria-label*='dừng']",
                             "button[data-testid='stop-button']",
                             "[data-testid='stop-button']",
                             "[aria-label='Stop generating']",
+                            "[aria-label='Stop response']",
                             "[aria-label='Stop']",
                             "[aria-label='stop']",
+                            "button.stop-button",
+                            ".stop-button",
+                            "button:has(svg rect)",
                             "mat-icon:has-text('stop')",
                             "mat-icon[fonticon='stop']",
                             "gem-icon-button[aria-label*='Stop']",
@@ -1616,6 +1652,27 @@ class Stage5_GeminiAutomation(BaseStage):
                             except Exception:
                                 pass
 
+                        # Check for message completion actions (indicates Gemini has finished output)
+                        has_completed_actions = False
+                        completion_action_selectors = [
+                            "button[aria-label*='Good response']",
+                            "button[aria-label*='Bad response']",
+                            "button[aria-label*='Copy']",
+                            "button[aria-label*='Sao chép']",
+                            "button[aria-label*='Share']",
+                            "button[aria-label*='Chia sẻ']",
+                            "button[aria-label*='Thích']",
+                            "button[aria-label*='Modify response']",
+                        ]
+                        for act_sel in completion_action_selectors:
+                            try:
+                                loc = page.locator(act_sel).last
+                                if await loc.count() > 0 and await loc.is_visible():
+                                    has_completed_actions = True
+                                    break
+                            except Exception:
+                                pass
+
                         # As long as Gemini is thinking or generating, keep extending deadline
                         if is_generating or is_still_thinking:
                             response_deadline = max(response_deadline, time.monotonic() + 90)
@@ -1628,7 +1685,15 @@ class Stage5_GeminiAutomation(BaseStage):
                             if await loc.count() > 0:
                                 txt = await loc.inner_text()
                                 if txt.strip():
-                                    if "you are an elite" in txt.lower():
+                                    txt_lower = txt.lower()
+                                    if any(p_kw in txt_lower for p_kw in [
+                                        "you are an elite",
+                                        "you are a professional short-form",
+                                        "total provided pages:",
+                                        "story coverage & dense pacing",
+                                        "golden content ratio",
+                                        "output format:"
+                                    ]):
                                         continue
                                     text_content = txt
                                     break
@@ -1645,25 +1710,34 @@ class Stage5_GeminiAutomation(BaseStage):
                                 extend_attempt_timeout(90)
 
                             cleaned_response = clean_gemini_response(response_text).strip()
-                            can_check_completion = True
-                            if is_generating:
+                            can_check_completion = False
+                            if is_generating or is_still_thinking:
                                 can_check_completion = False
+                            elif has_completed_actions:
+                                can_check_completion = True
+                            elif unchanged_seconds >= 20:
+                                can_check_completion = True
 
                             if has_thinking:
                                 if is_still_thinking or not has_finished_thinking:
-                                    if not cleaned_response.endswith("#"):
-                                        can_check_completion = False
-
-                            # Safety backup check: if response has not changed for at least 9 seconds, we can treat it as done.
-                            if not can_check_completion and unchanged_seconds >= 9:
-                                can_check_completion = True
+                                    can_check_completion = False
 
                             if can_check_completion:
                                 try:
                                     parsed = parse_gemini_recap_text(response_text)
-                                    if parsed and len(parsed) > 0:
-                                        if cleaned_response.endswith("#") or unchanged_seconds >= 6:
-                                            break
+                                    if parsed:
+                                        if len(parsed) >= 15:
+                                            # Complete recap script generated
+                                            if has_completed_actions and unchanged_seconds >= 6:
+                                                break
+                                            if cleaned_response.endswith("#") and unchanged_seconds >= 12:
+                                                break
+                                            if unchanged_seconds >= 30:
+                                                break
+                                        else:
+                                            # Partial stream (e.g. hook or first few segments), do NOT break early
+                                            if unchanged_seconds >= 60:
+                                                break
                                 except Exception:
                                     pass
                                     
@@ -1678,11 +1752,18 @@ class Stage5_GeminiAutomation(BaseStage):
                                                     valid_schema = False
                                                     break
                                             if valid_schema:
-                                                break
+                                                if len(parsed) >= 15:
+                                                    if has_completed_actions and unchanged_seconds >= 6:
+                                                        break
+                                                    if unchanged_seconds >= 30:
+                                                        break
+                                                else:
+                                                    if unchanged_seconds >= 60:
+                                                        break
                                     except Exception:
                                         pass
                             
-                            if unchanged_seconds >= 45:
+                            if unchanged_seconds >= 60:
                                 break
 
                     if error_reason:
@@ -1693,7 +1774,13 @@ class Stage5_GeminiAutomation(BaseStage):
 
                     parsed_data = parse_gemini_recap_text(response_text)
                     if not parsed_data:
+                        preview = response_text[:200].replace("\n", " ") if response_text else "EMPTY"
+                        await context.log(f"[DEBUG] Phản hồi Gemini không parse được (độ dài {len(response_text)}): {preview}", "warning", episode=ep)
                         raise Exception(f"Không thể trích xuất kịch bản recap từ phản hồi của {vlm_name}.")
+                    if len(parsed_data) < 10:
+                        preview = response_text[:200].replace("\n", " ") if response_text else "EMPTY"
+                        await context.log(f"[DEBUG] Phản hồi Gemini quá ngắn ({len(parsed_data)} phân đoạn): {preview}", "warning", episode=ep)
+                        raise Exception(f"Kịch bản recap từ {vlm_name} quá ngắn ({len(parsed_data)} phân đoạn), yêu cầu ít nhất 10 phân đoạn.")
                     
                     from recap_schema import parse_recap_data
                     normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
@@ -1706,6 +1793,22 @@ class Stage5_GeminiAutomation(BaseStage):
                     os.replace(raw_temp_path, raw_response_path)
                     os.replace(recap_temp_path, recap_json_path)
                     cache.commit(stage="gemini", fingerprint=fingerprint, outputs=[raw_response_path, recap_json_path])
+
+                    # Update Rolling Story Memory for subsequent episodes
+                    try:
+                        from story_memory import StoryMemory
+                        memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
+                        memory.add_episode_recap(ep, normalized_data, language=language)
+                        memory.save(download_dir)
+                        mc_log = f" (Nhân vật chính: {memory.protagonist_name}" if memory.protagonist_name else ""
+                        if mc_log:
+                            if memory.protagonist_gender and memory.protagonist_gender != "auto":
+                                mc_log += f", Giới tính: {memory.protagonist_gender})"
+                            else:
+                                mc_log += ")"
+                        await context.log(f"Tập {ep}: Đã cập nhật Rolling Story Memory{mc_log} (nối tiếp ngữ cảnh cho các tập tiếp theo).", "info", episode=ep)
+                    except Exception as mem_err:
+                        await context.log(f"Cảnh báo: Không thể cập nhật StoryMemory cho tập {ep}: {mem_err}", "warning", episode=ep)
 
                     gen_time = round(time.time() - gen_start, 1)
                     total_dur = round(time.time() - start_time, 1)
@@ -2473,7 +2576,7 @@ class Stage2b_IntelligentRepagination(BaseStage):
                         "cut_y_end": int(y_crop_end),
                         "sources": sources
                     })
-                    
+
                 # Write metadata
                 metadata = {
                     "source_images": offsets,

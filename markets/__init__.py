@@ -34,4 +34,10 @@ def _init_default_markets():
     except ImportError:
         pass
 
+    try:
+        from markets.us_apocalypse import US_APOCALYPSE_MARKET
+        register_market(US_APOCALYPSE_MARKET)
+    except ImportError:
+        pass
+
 _init_default_markets()

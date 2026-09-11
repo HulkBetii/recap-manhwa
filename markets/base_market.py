@@ -14,6 +14,7 @@ class BaseMarketProfile:
     voice_rate: str = '+0%'
     voice_pitch: str = '+0Hz'
     preferred_fonts: List[str] = field(default_factory=list)
+    point_score_threshold: int = 65
 
     def get_gemini_prompt(
         self,
@@ -21,6 +22,7 @@ class BaseMarketProfile:
         ep: int,
         total_pages: int,
         glossary: Optional[str] = None,
+        previous_context: Optional[dict] = None,
     ) -> str:
         raise NotImplementedError('Subclasses must implement get_gemini_prompt')
 
@@ -29,6 +31,8 @@ class BaseMarketProfile:
         comic_title: str,
         from_ep: int,
         to_ep: int,
+        chapters: Optional[list] = None,
+        **kwargs,
     ) -> dict:
         return {
             'title': f'[{self.name}] {comic_title} Ep {from_ep}~{to_ep}',

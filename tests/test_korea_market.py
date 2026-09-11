@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 from fastapi.testclient import TestClient
 import markets
 from markets.base_market import BaseMarketProfile
@@ -26,10 +26,10 @@ def test_korea_apocalypse_prompt_generation_ep1():
     prompt = market.get_gemini_prompt("멸망한 세계", ep=1, total_pages=25)
     
     assert "EPISODE 1 HIGH-RETENTION HOOK" in prompt
-    assert "종말 · 아포칼립스 · 생존" in prompt
+    assert "Apocalypse/Survival genre" in prompt
     assert "~하는데요" in prompt
     assert "~하게 됩니다" in prompt
-    assert "<페이지번호> - <한국어 나레이션 문장>.#" in prompt
+    assert "<page_number> - <Korean narration>.#" in prompt
     assert "멸망한 세계" in prompt
 
 
@@ -39,7 +39,7 @@ def test_korea_apocalypse_prompt_generation_ep2():
     
     assert "EPISODE CONTINUATION" in prompt
     assert "EPISODE 1 HIGH-RETENTION HOOK" not in prompt
-    assert "클리프행어" in prompt
+    assert "cliffhanger" in prompt
 
 
 def test_korea_apocalypse_metadata_generation():
@@ -64,7 +64,7 @@ def test_generate_gemini_prompt_delegation():
 
     # With korea_apocalypse market_id
     p_kr = generate_gemini_prompt("Default Comic", 1, 20, market_id="korea_apocalypse")
-    assert "종말 · 아포칼립스 · 생존" in p_kr
+    assert "Apocalypse/Survival genre" in p_kr
     assert "~하는데요" in p_kr
 
 

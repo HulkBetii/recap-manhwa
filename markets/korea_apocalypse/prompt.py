@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -10,6 +10,7 @@ def get_korea_apocalypse_prompt(
     ep: int,
     total_pages: int,
     glossary: Optional[str] = None,
+    point_score_threshold: int = 60,
 ) -> str:
     if not glossary:
         try:
@@ -28,53 +29,77 @@ def get_korea_apocalypse_prompt(
 
     if ep == 1:
         intro_rule = """
-EPISODE 1 HIGH-RETENTION HOOK (0–5초 골든 룰):
-첫 번째 문장은 시청자의 이탈을 막는 압도적인 긴장감의 오프닝 훅(Hook)이어야 합니다.
-- 충격적인 위기 상황 + 숨겨진 반전/각성 능력 암시.
-- 불필요한 인사말(안녕하세요, 오늘 소개할 등)은 절대 금지합니다.
-- 예시: "인류의 99%가 괴물로 변해버린 멸망의 날, 최하급 헌터였던 그가 유일하게 절대 능력을 각성했습니다."
+EPISODE 1 HIGH-RETENTION HOOK (0-5s GOLDEN RULE):
+The first sentence must be an overwhelming tension-filled opening hook.
+- Shocking crisis + hidden awakening ability hint.
+- No greetings. Example: "On the day 99% of humanity turned into monsters, the lowest-rank hunter awakened the one absolute power."
 """
     else:
         intro_rule = """
-EPISODE CONTINUATION (몰아보기 연속 감상 규칙):
-이전 화에서 이어지는 긴박한 상황을 바로 시작하십시오.
-- 인사말이나 전편 줄거리 요약 없이 사건의 중심부로 바로 진입합니다.
-- 마지막 문장은 다음 화로 끊김 없이 이어지는 클리프행어(Cliffhanger)로 마무리합니다.
+EPISODE CONTINUATION:
+Start immediately with the ongoing high-stakes action from the previous chapter.
+- No greetings, no recap. Jump straight into the scene.
+- End with a cliffhanger that seamlessly connects to the next chapter.
 """
+
+    pt = point_score_threshold
 
     return f"""
 ROLE:
-당신은 대한민국 1티어 유튜브 웹툰 몰아보기 전문 스토리텔러이자 대본 작가입니다.
-제공된 웹툰 이미지들을 분석하여, 종말 · 아포칼립스 · 생존 장르 특유의 숨 막히는 긴장감과 사이다(통쾌함)를 살린 몰입도 100%의 한국어 나레이션 대본을 작성하십시오.
+You are a top-tier Korean YouTube webtoon binge-watching specialist and scriptwriter.
+Analyze the provided webtoon images and create a 100% immersive Korean narration script with the breathtaking tension and satisfaction unique to the Apocalypse/Survival genre.
 
 SOURCE:
-제목: "{comic_title}"
-에피소드: {ep}화
-제공된 페이지 수: {total_pages}장
+Title: "{comic_title}"
+Episode: {ep}
+Total provided pages: {total_pages}
 
 {intro_rule}
 
-CORE TONE & NARRATION RULES (생존/아포칼립스 몰아보기 전문 문체):
-1. 어미 규칙 (문장의 끝맺음):
-   - 유튜브 몰아보기 특유의 긴장감 넘치는 종결 어미를 적극 활용하십시오:
-     * ~하는데요, ~하게 됩니다, ~하고 맙니다, ~그 순간!, ~상황입니다.
-2. 속도감과 호흡:
-   - 한 문장은 35자 내외로 짧고 간결하게 작성하여 TTS 음성이 dứt khoát và dồn dập.
-   - 피동형(~되어지다)보다는 능동형 동사(처단하다, 각성하다, 돌파하다, 압도하다)를 사용하십시오.
-3. 안전 가이드라인 (유튜브 수익 창출 보장):
-   - 유튜브 노란딱지(광고 제한)를 피하기 위해 살인, 자살, 유혈, 학살 등의 직접적 단어 대신 [처치하다, 소멸시키다, 제압하다, 쓰러뜨리다, 응징하다] 등의 안전하고 역동적인 표현으로 대체하십시오.
-4. 용어 사용:
-   - 아포칼립스/웹툰 전문 용어(시스템 창, 등급, 각성, 쉘터, 몬스터, 돌연변이 등)를 자연스럽게 녹여내십시오.
-   - 용어집(Glossary): {glossary}
+STORY BEAT FIRST WORKFLOW:
+For EVERY segment, follow this workflow:
+  Step 1 - STORY BEAT:   Identify the next important story event.
+  Step 2 - FIND PAGE:    Scan PDF for candidate pages showing it.
+  Step 3 - SELECT PAGE:  Pick page or multi-page range [<start>, <end>] with clear visual evidence.
+  Step 4 - WRITE:        Write 1-2 concise narration sentences based on the page.
 
-FORMAT REQUIREMENTS (엄격 준수):
-- 각 줄은 반드시 다음 형식을 따라야 합니다:
-  <페이지번호> - <한국어 나레이션 문장>.#
-- 복수 페이지 결합 시:
-  [<시작페이지>, <끝페이지>] - <한국어 나레이션 문장>.#
-- 모든 문장의 끝에는 반드시 마침표와 샵(.#)을 붙여야 합니다.
+STRICT ASCENDING PAGE ORDER:
+All page numbers must appear in strictly ascending order.
+Never go backward, never repeat, never rearrange.
 
-대본 예시:
+CORE TONE & NARRATION RULES:
+1. Sentence endings:
+   - Use tension-filled Korean endings: ~하는데요, ~하게 됩니다, ~하고 맙니다, ~그 순간!, ~상황입니다.
+2. Pacing:
+   - Keep sentences around 35 characters, short and punchy for TTS.
+   - Use active verbs (처단하다, 각성하다, 돌파하다, 압도하다) over passive forms.
+3. YouTube Safety:
+   - Avoid demonetization words. Use: 처치하다, 소멸시키다, 제압하다, 쓰러뜨리다, 응징하다.
+4. Terminology:
+   - Naturally integrate: 시스템 창, 등급, 각성, 쉘터, 몬스터, 돌연변이.
+   - Glossary: {glossary}
+
+5. PAGE SELECTION & VISUAL EVIDENCE:
+   - Direct Visual Alignment: Select panels showing clear character faces, action, combat, or key plot turning points.
+   - Multi-page ranges: Use [<start>, <end>] for action-reaction sequences.
+   - Zero filler: Never select blank backgrounds, pure credits, or empty cards.
+
+6. ONE PAGE = ONE PRIMARY BEAT:
+   Each segment = ONE primary story event.
+
+7. NARRATION MUST FOLLOW THE PAGE:
+   Describe only what the selected page shows. Never fabricate unseen details.
+
+8. GOLDEN CONTENT RATIO:
+   85%% Plot/Context + 10%% Natural Humor + 5%% Punchline.
+   ZERO CTA: Never open with greetings or channel promotions.
+
+FORMAT REQUIREMENTS:
+- Each line must follow: <page_number> - <Korean narration>.#
+- Multi-page: [<start>, <end>] - <Korean narration>.#
+- Every line MUST end with .#
+
+SCRIPT EXAMPLE:
 1 - 붉은 안개와 함께 전 세계가 괴물들의 사냥터로 변해버렸습니다.#
 [2, 3] - 생존자들조차 서로를 배신하는 지옥 속에서, 주인공은 홀로 몬스터의 소굴로 몰리게 되는데요.#
 5 - 바로 그 순간, 그의 눈앞에 알 수 없는 푸른색 시스템 창이 떠오릅니다.#

@@ -201,6 +201,56 @@ def is_junk_or_title_page(
     return False, "valid_story_panel"
 
 
+def is_text_bubble_dominant(
+    img_bgr: Any,
+    bg_val: int | None = None,
+    tol: int = 15,
+) -> tuple[bool, str]:
+    """
+    Detects whether an image slice is dominated by an isolated speech bubble or text box,
+    with minimal or no character art/faces, intended to be merged with adjacent panels.
+    """
+    import cv2
+    import numpy as np
+
+    if img_bgr is None or (hasattr(img_bgr, "size") and img_bgr.size == 0):
+        return False, "empty_image"
+    h, w = img_bgr.shape[:2]
+    if h < 20 or w < 20:
+        return False, "too_small"
+    if h > 1400:
+        return False, "too_tall_for_isolated_bubble"
+
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV) if img_bgr.ndim == 3 else None
+
+    if hsv is not None:
+        sat = hsv[:, :, 1]
+        val = hsv[:, :, 2]
+        art_color_ratio = float(np.mean((sat > 25) & (val > 45)))
+    else:
+        art_color_ratio = 0.0
+
+    white_ratio = float(np.mean(gray > 205))
+    black_ratio = float(np.mean(gray < 35))
+    void_ratio = white_ratio + black_ratio
+    mid_gray_ratio = float(np.mean((gray >= 35) & (gray <= 205)))
+
+    canny = cv2.Canny(gray, 40, 120)
+    edge_ratio = float(np.mean(canny > 0))
+
+    is_color_source = (hsv is not None) and (float(np.mean(sat > 20)) > 0.02)
+    if is_color_source:
+        if (void_ratio >= 0.80 and art_color_ratio < 0.12) or (white_ratio >= 0.85 and art_color_ratio < 0.10):
+            return True, "text_bubble_dominant"
+    else:
+        # Grayscale / Manga source
+        if (void_ratio >= 0.85 and mid_gray_ratio < 0.12 and edge_ratio < 0.08):
+            return True, "text_bubble_dominant"
+
+    return False, "art_dominant"
+
+
 def selected_page_numbers(segments: Iterable[dict[str, Any]], *, max_page: int) -> list[int]:
     if max_page < 1:
         raise ValueError("max_page must be positive")
@@ -231,7 +281,7 @@ def should_use_safety_fallback(*, safe_mode: bool, attempt: int, response: str) 
     return safe_mode and attempt == 1 and is_safety_refusal(response)
 
 
-def create_numbered_pdf(image_dir: str | Path, pdf_path: str | Path, quality: int) -> None:
+def create_numbered_pdf(image_dir: str | Path, pdf_path: str | Path, quality: int, page_scores: Optional[dict[int, int]] = None, **kwargs) -> None:
     source = Path(image_dir)
     destination = Path(pdf_path)
     image_files = list_image_files(source)
@@ -241,6 +291,7 @@ def create_numbered_pdf(image_dir: str | Path, pdf_path: str | Path, quality: in
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp_path = destination.with_name(f"{destination.name}.{uuid.uuid4().hex}.tmp.pdf")
     converted: list[Image.Image] = []
+    from visual_scorer import VisualSemanticScorer
     try:
         for index, file_name in enumerate(image_files, 1):
             with Image.open(source / file_name) as image:
@@ -250,8 +301,15 @@ def create_numbered_pdf(image_dir: str | Path, pdf_path: str | Path, quality: in
                 resampling = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
                 page = page.resize((700, int(page.height * (700 / page.width))), resampling)
 
+            point = page_scores.get(index) if page_scores else None
+            if point is None:
+                try:
+                    point, _ = VisualSemanticScorer.calculate_score_from_pil(page)
+                except Exception:
+                    point = 70
+
             draw = ImageDraw.Draw(page)
-            label = f"Page: {index}"
+            label = f"Page: {index} - Point: {point}"
             try:
                 font = ImageFont.truetype("arial.ttf", 36)
             except Exception:

@@ -62,9 +62,10 @@ def test_camera_planner_never_uses_scroll_down():
         for kf in plan["keyframes"]:
             assert 0 <= kf["x"] <= W_c
             assert 0 <= kf["y"] <= H_c
-            assert 1.0 <= kf["scale"] <= 1.05, f"Scale {kf['scale']} exceeded micro-motion limit 1.05"
+            assert 1.0 <= kf["scale"] <= 1.40, f"Scale {kf['scale']} exceeded subject-zoom limit 1.40"
+            # focal_x is now unlocked (subject-tracked), so only verify it's within safe bounds
             if plan["animation_type"] != "cinematic_pan_horizontal":
-                assert abs(kf["x"] - W_c / 2.0) < 1e-3, f"Keyframe X {kf['x']} must be center-locked to {W_c / 2.0}"
+                assert 0.10 * W_c <= kf["x"] <= 0.90 * W_c, f"Keyframe X {kf['x']} outside safe margins"
 
 
 def test_camera_planner_mode_selection():

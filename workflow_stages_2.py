@@ -3,6 +3,7 @@ import json
 import asyncio
 import re
 import time
+import config
 import subprocess
 import shutil
 import math
@@ -144,11 +145,23 @@ class Stage8_LocalTTS(BaseStage):
             voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else DEFAULT_JA_VOICE_ID
             rate = DEFAULT_JA_VOICE_RATE
             pitch = DEFAULT_JA_VOICE_PITCH
+        elif language in ("vi", "vietnamese"):
+            import config
+            default_vi_voice = getattr(config, "DEFAULT_VI_VOICE_ID", "clone")
+            voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else default_vi_voice
+            rate = getattr(config, "DEFAULT_VI_VOICE_RATE", "+0%")
+            pitch = getattr(config, "DEFAULT_VI_VOICE_PITCH", "+0Hz")
         else:
             default_voice = "auto"
             voice_id = normalize_tts_voice_mode(raw_voice_id or default_voice, default=default_voice)
 
         ref_audio_path = task.payload.get("ref_audio_path")
+        if not ref_audio_path and voice_id in ("auto", "clone", "omnivoice", "default"):
+            import config
+            if language in ("vi", "vietnamese"):
+                ref_audio_path = getattr(config, "DEFAULT_VI_REF_AUDIO", getattr(config, "DEFAULT_REF_AUDIO_PATH", None))
+            else:
+                ref_audio_path = getattr(config, "DEFAULT_REF_AUDIO_PATH", None)
 
         total_episodes = to_ep - from_ep + 1
         completed_eps = 0
@@ -604,13 +617,15 @@ def draw_subtitles_on_frame(image, text, font_size=42):
         y_cursor += line_height
 
 
-def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple]:
+def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple, float, tuple]:
     """
     Detects the character focal point (with speech bubble suppression and skin tone boost)
     and automatically isolates the active comic panel (excluding neighboring panels and solid gutters).
-    Returns (bounds, focal_point) where:
+    Returns (bounds, focal_point, skin_ratio, bubble_centroid) where:
       bounds = (cb_x, cb_y, W_c, H_c)
-      focal_point = (focal_x, focal_y) relative to bounds.
+      focal_point = (focal_x, focal_y) relative to bounds — real subject position, NOT center-locked.
+      skin_ratio = float [0..1] fraction of panel pixels with skin tone (drives adaptive zoom strength).
+      bubble_centroid = (bx, by) centroid of speech bubble region relative to bounds (for repulsion).
     """
     import cv2
     import numpy as np
@@ -643,9 +658,9 @@ def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple]:
     saliency[bubble_mask_dilated] *= 0.05
     saliency[skin_mask] *= 3.5
 
-    # 5. Eye-line vertical prior
+    # 5. Subject / eye-line vertical prior (centered around 40% height for face/torso/action)
     y_idx, x_idx = np.indices((h_full, w_full))
-    y_prior = np.exp(-((y_idx - 0.35 * h_full) ** 2) / (2 * (0.32 * h_full) ** 2))
+    y_prior = np.exp(-((y_idx - 0.40 * h_full) ** 2) / (2 * (0.35 * h_full) ** 2))
     weighted_map = saliency * y_prior
 
     if np.max(weighted_map) > 1.0:
@@ -714,16 +729,34 @@ def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple]:
         clean_bounds = (0, panel_top, w_full, h_panel)
         local_focal_x = w_full / 2.0
         local_focal_y = float(np.clip(raw_focal_y - panel_top, 0.20 * h_panel, 0.80 * h_panel))
+        panel_region = bubble_mask_dilated[panel_top:panel_bot, :]
     else:
         clean_bounds = (0, top_gutter, w_full, max(20, bot_gutter - top_gutter))
         local_focal_x = w_full / 2.0
         local_focal_y = float(np.clip(raw_focal_y - top_gutter, 0.20 * clean_bounds[3], 0.80 * clean_bounds[3]))
+        panel_region = bubble_mask_dilated[top_gutter:bot_gutter, :]
 
-    return clean_bounds, (local_focal_x, local_focal_y)
+    # Compute skin_ratio within the active panel region
+    panel_h = clean_bounds[3]
+    panel_skin = skin_mask[clean_bounds[1]:clean_bounds[1] + panel_h, :]
+    total_panel_pixels = max(1, panel_skin.size)
+    skin_ratio = float(np.count_nonzero(panel_skin)) / total_panel_pixels
+
+    # Compute bubble_centroid (center of mass of speech bubble region) for repulsion
+    bubble_coords = np.argwhere(panel_region)
+    if len(bubble_coords) > 0:
+        bubble_cy = float(np.mean(bubble_coords[:, 0]))
+        bubble_cx = float(np.mean(bubble_coords[:, 1]))
+    else:
+        # No bubbles detected — centroid at panel center (neutral repulsion)
+        bubble_cx = w_full / 2.0
+        bubble_cy = panel_h / 2.0
+
+    return clean_bounds, (local_focal_x, local_focal_y), skin_ratio, (bubble_cx, bubble_cy)
 
 
 def detect_content_bounds(img: Image) -> tuple:
-    bounds, _ = detect_clean_panel_and_focal_point(img)
+    bounds, _, _, _ = detect_clean_panel_and_focal_point(img)
     return bounds
 
 
@@ -840,11 +873,14 @@ class CameraPlanner:
         duration: float,
         bounds: tuple,
         focal_point: tuple = None,
-        transition: str = "cross_fade"
+        transition: str = "cross_fade",
+        skin_ratio: float = 0.0,
+        bubble_centroid: tuple = None,
     ) -> dict:
         """
-        Generates a cinematic camera plan that preserves full panel width and text readability,
-        centering the X-axis and applying subtle micro-motion zoom (1.00x -> 1.035x).
+        Generates a balanced, clear cinematic camera plan that focuses on the subject
+        (characters, objects, events) with subtle, non-intrusive micro-motion (1.00x -> 1.025x-1.055x).
+        Preserves full subject clarity and panel context without aggressive cropping.
         """
         cb_x, cb_y, W_c, H_c = bounds
 
@@ -1013,7 +1049,19 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             overlay_path = os.path.join(project_dir, "images", "overlay.png")
         subtitles_enabled = bool(task.payload.get("burn_subtitles", False))
 
-        def render_episode_video_sync(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30):
+        bgm_path = task.payload.get("bgm_path")
+        enable_bgm = task.payload.get("enable_bgm", False)
+        if not bgm_path and enable_bgm:
+            market_id = (task.payload.get("market_id") or "").strip().lower()
+            bgm_genre = task.payload.get("bgm_genre", "")
+            if market_id in ("us_apocalypse", "korea_apocalypse") or bgm_genre == "apocalypse":
+                default_bgm = os.path.join(project_dir, "static", "bgm", "apocalypse", "01_dark_wasteland_ambient.mp3")
+                if os.path.exists(default_bgm):
+                    bgm_path = default_bgm
+
+        bgm_volume = float(task.payload.get("bgm_volume", 0.18))
+
+        def render_episode_video_sync(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, bgm_path=None, bgm_volume=0.18):
             from PIL import Image, ImageFilter, ImageEnhance, ImageDraw
             import subprocess
             import numpy as np
@@ -1033,11 +1081,27 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             logo_rel = os.path.relpath(logo_path, ep_dir).replace('\\', '/')
             overlay_rel = os.path.relpath(overlay_path, ep_dir).replace('\\', '/')
             
-            filter_complex_str = (
-                f"movie={logo_rel} [logo_raw]; [logo_raw]scale=50:50[logo]; "
-                f"movie={overlay_rel} [ol_raw]; [ol_raw]scale=1920:1080,format=rgba,colorchannelmixer=aa=0.005[ol]; "
-                f"[0:v][ol]overlay[temp1]; [temp1][logo]overlay=25:25[v]"
-            )
+            has_bgm = bool(bgm_path and os.path.exists(bgm_path))
+            if has_bgm:
+                filter_complex_str = (
+                    f"movie={logo_rel} [logo_raw]; [logo_raw]scale=50:50[logo]; "
+                    f"movie={overlay_rel} [ol_raw]; [ol_raw]scale=1920:1080,format=rgba,colorchannelmixer=aa=0.005[ol]; "
+                    f"[0:v][ol]overlay[temp1]; [temp1][logo]overlay=25:25[v]; "
+                    f"[1:a]aformat=channel_layouts=stereo,aresample=44100,asplit=2[voice_main][voice_sidechain]; "
+                    f"[2:a]aformat=channel_layouts=stereo,aresample=44100,volume={bgm_volume}[bgm_raw]; "
+                    f"[bgm_raw][voice_sidechain]sidechaincompress=threshold=0.08:ratio=4:attack=100:release=600[ducked_bgm]; "
+                    f"[voice_main][ducked_bgm]amix=inputs=2:duration=first:dropout_transition=2,aformat=channel_layouts=stereo[aout]"
+                )
+                audio_inputs = ["-i", audio_path, "-stream_loop", "-1", "-i", bgm_path]
+                audio_maps = ["-map", "[aout]"]
+            else:
+                filter_complex_str = (
+                    f"movie={logo_rel} [logo_raw]; [logo_raw]scale=50:50[logo]; "
+                    f"movie={overlay_rel} [ol_raw]; [ol_raw]scale=1920:1080,format=rgba,colorchannelmixer=aa=0.005[ol]; "
+                    f"[0:v][ol]overlay[temp1]; [temp1][logo]overlay=25:25[v]"
+                )
+                audio_inputs = ["-i", audio_path]
+                audio_maps = ["-map", "1:a"]
 
             cmd = [
                 ffmpeg_exe, "-y",
@@ -1046,13 +1110,14 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 "-s", "1920x1080",
                 "-r", str(fps),
                 "-i", "-",               # Raw video from stdin [0:v]
-                "-i", audio_path,        # Audio [1:a]
+            ] + audio_inputs + [
                 "-filter_complex", filter_complex_str,
-                "-map", "[v]", "-map", "1:a",
+                "-map", "[v]",
+            ] + audio_maps + [
                 "-c:v", working_encoder,
                 "-pix_fmt", "yuv420p"
             ] + extra_args + [
-                "-c:a", "aac", "-b:a", "192k", "-shortest", output_video_path
+                "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100", "-shortest", output_video_path
             ]
             
             stderr_log_path = os.path.join(os.path.dirname(output_video_path), "ffmpeg_render_stderr.log")
@@ -1084,6 +1149,30 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     segment_duration = 1.0
                 
                 seg_images = seg.get("images", [])
+
+                # Guardrail against meaningless / text-bubble panels when multi-images exist:
+                if seg_images and len(seg_images) > 1:
+                    from visual_scorer import VisualSemanticScorer
+                    scored_candidates = []
+                    for img_obj in seg_images:
+                        p_idx = int(img_obj["page"]) - 1
+                        if 0 <= p_idx < len(image_files):
+                            im_path = os.path.join(images_blur_dir, image_files[p_idx])
+                            if not os.path.exists(im_path):
+                                im_path = os.path.join(images_pdf_dir, image_files[p_idx])
+                            try:
+                                im_bgr = cv2.imread(im_path)
+                                sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
+                                is_bad = bd.get("is_meaningless", False) or sc < 40
+                            except Exception:
+                                sc, is_bad = 70, False
+                            scored_candidates.append((img_obj, sc, is_bad))
+                    valid_art = [item[0] for item in scored_candidates if not item[2]]
+                    if valid_art:
+                        seg_images = valid_art
+                        tot_p = sum(float(img.get("priority", 1.0)) for img in seg_images)
+                        for img in seg_images:
+                            img["priority"] = float(img.get("priority", 1.0)) / max(0.001, tot_p)
 
                 # Guardrail against rapid image transitions:
                 # Ensure each image is displayed for a comfortable duration (minimum 2.5 seconds).
@@ -1150,32 +1239,64 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 img_path = os.path.join(images_blur_dir, img_file)
                 
                 cached_data = bounds_cache.get(img_file)
-                if isinstance(cached_data, dict) and "bounds" in cached_data and "focal_point" in cached_data:
+                if isinstance(cached_data, dict) and "bounds" in cached_data and "focal_point" in cached_data and "skin_ratio" in cached_data:
                     bounds = tuple(cached_data["bounds"])
                     focal_point = tuple(cached_data["focal_point"])
+                    skin_ratio = float(cached_data["skin_ratio"])
+                    bubble_centroid = tuple(cached_data["bubble_centroid"]) if "bubble_centroid" in cached_data else None
+                elif isinstance(cached_data, dict) and "bounds" in cached_data and "focal_point" in cached_data:
+                    # Legacy cache entry without skin_ratio — recompute
+                    try:
+                        with Image.open(img_path) as img:
+                            bounds, focal_point, skin_ratio, bubble_centroid = detect_clean_panel_and_focal_point(img)
+                            bounds_cache[img_file] = {
+                                "bounds": list(bounds), "focal_point": list(focal_point),
+                                "skin_ratio": skin_ratio, "bubble_centroid": list(bubble_centroid)
+                            }
+                            dirty_cache = True
+                    except Exception:
+                        bounds = tuple(cached_data["bounds"])
+                        focal_point = tuple(cached_data["focal_point"])
+                        skin_ratio = 0.0
+                        bubble_centroid = None
                 elif isinstance(cached_data, list) and len(cached_data) == 4:
                     bounds = tuple(cached_data)
                     try:
                         with Image.open(img_path) as img:
-                            focal_point = detect_focal_point(img, bounds)
+                            _, focal_point_new, skin_ratio, bubble_centroid = detect_clean_panel_and_focal_point(img)
+                            focal_point = focal_point_new
                     except Exception:
                         focal_point = (bounds[2] / 2.0, bounds[3] / 2.0)
-                    bounds_cache[img_file] = {"bounds": list(bounds), "focal_point": list(focal_point)}
+                        skin_ratio = 0.0
+                        bubble_centroid = None
+                    bounds_cache[img_file] = {
+                        "bounds": list(bounds), "focal_point": list(focal_point),
+                        "skin_ratio": skin_ratio, "bubble_centroid": list(bubble_centroid) if bubble_centroid else [bounds[2] / 2.0, bounds[3] / 2.0]
+                    }
                     dirty_cache = True
                 else:
                     try:
                         with Image.open(img_path) as img:
-                            bounds, focal_point = detect_clean_panel_and_focal_point(img)
-                            bounds_cache[img_file] = {"bounds": list(bounds), "focal_point": list(focal_point)}
+                            bounds, focal_point, skin_ratio, bubble_centroid = detect_clean_panel_and_focal_point(img)
+                            bounds_cache[img_file] = {
+                                "bounds": list(bounds), "focal_point": list(focal_point),
+                                "skin_ratio": skin_ratio, "bubble_centroid": list(bubble_centroid)
+                            }
                             dirty_cache = True
                     except Exception:
                         bounds = (0, 0, 1920, 1080)
                         focal_point = (960.0, 540.0)
+                        skin_ratio = 0.0
+                        bubble_centroid = None
                 
                 is_last_page = (idx == len(page_displays) - 1)
                 trans = "dip_to_black" if is_last_page else "cross_fade"
                 
-                plan = CameraPlanner.generate_camera_plan(pd["page"], pd["duration"], bounds, focal_point=focal_point, transition=trans)
+                plan = CameraPlanner.generate_camera_plan(
+                    pd["page"], pd["duration"], bounds,
+                    focal_point=focal_point, transition=trans,
+                    skin_ratio=skin_ratio, bubble_centroid=bubble_centroid
+                )
                 plans.append(plan)
                 
             if dirty_cache:
@@ -1268,7 +1389,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     W_c = max(10, W_c)
                     H_c = max(10, H_c)
                     aspect_nat = W_c / float(H_c)
-                    aspect_card = max(0.50, min(16.0 / 9.0, aspect_nat))
+                    aspect_card = max(0.25, min(16.0 / 9.0, aspect_nat))
 
                     card_h = 1080
                     card_w = max(10, min(1920, int(round(card_h * aspect_card))))
@@ -1618,7 +1739,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     render_episode_video_sync,
                     images_blur_dir, image_files, segments, timings, temp_video_path,
                     ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path,
-                    subtitles_enabled, "transcript.srt", fps
+                    subtitles_enabled, "transcript.srt", fps,
+                    bgm_path, bgm_volume
                 )
             except Exception as render_error:
                 if not can_recover_ffmpeg_pipe_output(render_error, temp_video_path):
@@ -1820,7 +1942,102 @@ class Stage11_FinalVideoAssembly(BaseStage):
 
         total_episodes = to_ep - from_ep + 1
         episodes_processed = list(range(from_ep, to_ep + 1))
-        
+
+        # Flash-Forward Teaser Intro (Disabled by default per user request)
+        import config
+        enable_flash_forward = task.payload.get(
+            "enable_flash_forward_intro",
+            getattr(config, "ENABLE_FLASH_FORWARD_INTRO", False)
+        )
+        if enable_flash_forward:
+            try:
+                await context.log("Đang khởi tạo Flash-Forward Teaser Intro (15s In Medias Res hook)...", "info")
+                from arc_intro_engine import ArcClimaxMiner, DynamicHookDirector, MicroIntroRenderer, FastIntroPrepender
+                
+                climax_info = ArcClimaxMiner.scan_climax_episode(download_dir, from_ep=from_ep, to_ep=to_ep)
+                climax_ep = climax_info["climax_episode"]
+                await context.log(f"  -> Phát hiện tập cao trào đỉnh cao: Tập {climax_ep} (Score: {climax_info['climax_score']})", "info")
+
+                top_images = ArcClimaxMiner.select_top_climax_images(download_dir, climax_ep, num_images=3)
+                top_paths = [img["path"] for img in top_images]
+
+                comic_title = task.comic_title or "Comic"
+                protagonist_name = task.payload.get("protagonist_name", "")
+                language = task.payload.get("language", "en")
+                custom_hook = task.payload.get("flash_forward_custom_hook")
+
+                hook_res = await DynamicHookDirector.generate_dynamic_retention_hook(
+                    comic_title=comic_title,
+                    protagonist_name=protagonist_name,
+                    climax_episode=climax_ep,
+                    climax_text=climax_info.get("climax_narration_sample", ""),
+                    origin_text=climax_info.get("origin_narration_sample", ""),
+                    language=language,
+                    custom_hook=custom_hook
+                )
+                hook_script = hook_res["hook_script"]
+                await context.log(f"  -> Kịch bản Hook [{hook_res['archetype']}]: \"{hook_script}\"", "info")
+
+                intro_dir = os.path.join(download_dir, "intro")
+                voice_id = task.payload.get("voice_id", "ai33pro")
+                ref_audio = task.payload.get("ref_audio_path")
+
+                intro_artifacts = await MicroIntroRenderer.render_intro_clip(
+                    intro_dir=intro_dir,
+                    hook_script=hook_script,
+                    image_paths=top_paths,
+                    language=language,
+                    voice_id=voice_id,
+                    ref_audio_path=ref_audio,
+                    enable_bgm=False,
+                    enable_sfx=True
+                )
+
+                intro_vid = intro_artifacts["video_path"]
+                intro_srt = intro_artifacts["srt_path"]
+                intro_dur = intro_artifacts["duration"]
+
+                ep1_dir = os.path.join(download_dir, f"episode_{from_ep}")
+                ep1_vid = os.path.join(ep1_dir, "video.mp4")
+                ep1_srt = os.path.join(ep1_dir, "transcript.srt")
+                ep1_backup_vid = os.path.join(ep1_dir, "video_no_intro.mp4")
+                ep1_backup_srt = os.path.join(ep1_dir, "transcript_no_intro.srt")
+
+                if os.path.exists(ep1_vid):
+                    if not os.path.exists(ep1_backup_vid):
+                        shutil.copy2(ep1_vid, ep1_backup_vid)
+                    if os.path.exists(ep1_srt) and not os.path.exists(ep1_backup_srt):
+                        shutil.copy2(ep1_srt, ep1_backup_srt)
+
+                    target_base_vid = ep1_backup_vid if os.path.exists(ep1_backup_vid) else ep1_vid
+                    target_base_srt = ep1_backup_srt if os.path.exists(ep1_backup_srt) else ep1_srt
+
+                    prepended_ok = FastIntroPrepender.prepend_intro(
+                        intro_video_path=intro_vid,
+                        intro_srt_path=intro_srt,
+                        intro_duration=intro_dur,
+                        target_video_path=target_base_vid,
+                        target_srt_path=target_base_srt,
+                        output_video_path=ep1_vid,
+                        output_srt_path=ep1_srt
+                    )
+                    if prepended_ok:
+                        task.artifacts["flash_forward_intro"] = {
+                            "enabled": True,
+                            "duration": intro_dur,
+                            "archetype": hook_res["archetype"],
+                            "hook_script": hook_script,
+                            "climax_episode": climax_ep,
+                            "images": [os.path.basename(p) for p in top_paths],
+                            "intro_video_url": f"/downloads/{folder_name}/intro/video.mp4" if folder_name else ""
+                        }
+                        await context.log(f"Đã ghép nối Flash-Forward Intro thành công vào đầu tập {from_ep} (+{intro_dur:.2f}s).", "success")
+                    else:
+                        await context.log("Không thể ghép Flash-Forward Intro bằng faststream copy, tiếp tục ghép video thông thường.", "warning")
+            except Exception as intro_err:
+                logger.warning(f"Flash-Forward Intro generation skipped due to: {intro_err}")
+                await context.log(f"Bỏ qua tạo Flash-Forward Intro do cảnh báo: {intro_err}", "warning")
+
         video_durations = []
         srt_paths = []
         for ep in episodes_processed:
@@ -1829,6 +2046,23 @@ class Stage11_FinalVideoAssembly(BaseStage):
             srt_path = os.path.join(ep_dir, "transcript.srt")
             video_durations.append(get_video_duration(video_path, ffmpeg_exe))
             srt_paths.append(srt_path)
+
+        chapters = []
+        curr_ts = 0.0
+        for idx, ep in enumerate(episodes_processed):
+            dur = video_durations[idx]
+            hrs = int(curr_ts // 3600)
+            mins = int((curr_ts % 3600) // 60)
+            secs = int(curr_ts % 60)
+            ts_str = f"{hrs:02d}:{mins:02d}:{secs:02d}" if hrs > 0 else f"{mins:02d}:{secs:02d}"
+            chapters.append({
+                "episode": ep,
+                "timestamp": ts_str,
+                "title": f"Episode {ep}",
+                "duration_seconds": dur
+            })
+            curr_ts += dur
+        task.artifacts["chapters"] = chapters
 
         if total_episodes == 1:
             single_video = os.path.join(download_dir, f"episode_{from_ep}", "video.mp4")
@@ -1932,7 +2166,8 @@ class Stage12_MetadataReports(BaseStage):
             "to_episode": task.to_episode,
             "generation_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "overall_progress": task.overall_progress,
-            "elapsed_time_seconds": task.elapsed_time
+            "elapsed_time_seconds": task.elapsed_time,
+            "flash_forward_intro": task.artifacts.get("flash_forward_intro")
         }
 
         market_id = task.payload.get("market_id")
@@ -1941,14 +2176,48 @@ class Stage12_MetadataReports(BaseStage):
                 from markets import get_market
                 m = get_market(market_id)
                 if m:
+                    chapters = task.artifacts.get("chapters")
                     metadata["youtube_metadata"] = m.generate_youtube_metadata(
                         task.comic_title or "Comic",
                         task.from_episode or 1,
-                        task.to_episode or 1
+                        task.to_episode or 1,
+                        chapters=chapters
                     )
             except Exception as e:
                 logger.warning(f"Failed to generate market YouTube metadata: {e}")
         
+        yt_meta = metadata.get("youtube_metadata")
+        if yt_meta:
+            kit_path = os.path.join(output_dir, "youtube_upload_kit.txt")
+            folder_name = task.artifacts.get("download_folder_name")
+            kit_lines = [
+                "=" * 80,
+                f"YOUTUBE UPLOAD KIT: {task.comic_title or 'Comic'}",
+                f"Episodes: {task.from_episode} - {task.to_episode} | Market: {market_id}",
+                "=" * 80,
+                "",
+                "[1. TITLE CANDIDATES (Pick one for YouTube Title)]",
+            ]
+            for i, opt in enumerate(yt_meta.get("title_options", [yt_meta.get("title", "")]), 1):
+                kit_lines.append(f"{i}. {opt}")
+            
+            kit_lines.extend([
+                "",
+                "[2. DESCRIPTION & TIMESTAMPS (Copy & paste into YouTube Description)]",
+                yt_meta.get("description", ""),
+                "",
+                "[3. TAGS (Copy & paste directly into YouTube Studio Tag Box)]",
+                ", ".join(yt_meta.get("tags", [])) if isinstance(yt_meta.get("tags"), list) else str(yt_meta.get("tags", "")),
+                "",
+                "=" * 80
+            ])
+            with open(kit_path, "w", encoding="utf-8") as kf:
+                kf.write("\n".join(kit_lines))
+            task.artifacts["youtube_upload_kit_path"] = kit_path
+            if folder_name:
+                task.artifacts["youtube_upload_kit_url"] = f"/downloads/{folder_name}/output/youtube_upload_kit.txt"
+            await context.log("Đã tạo bộ công cụ YouTube Upload Kit (youtube_upload_kit.txt).", "success")
+
         metadata_path = os.path.join(output_dir, "metadata.json")
         metadata_temp_path = metadata_path + ".tmp"
         with open(metadata_temp_path, "w", encoding="utf-8") as mf:
@@ -1994,6 +2263,37 @@ class Stage13_Cleanup(BaseStage):
                 if os.path.exists(stitched_mask): os.remove(stitched_mask)
                 gemini_prompt = os.path.join(ep_dir, "gemini_prompt.txt")
                 if os.path.exists(gemini_prompt): os.remove(gemini_prompt)
+
+                # Clean debug_repaging directory (large repagination debug images)
+                debug_repaging_dir = os.path.join(ep_dir, "debug_repaging")
+                if os.path.isdir(debug_repaging_dir):
+                    try:
+                        import shutil
+                        shutil.rmtree(debug_repaging_dir, ignore_errors=True)
+                        await context.log(f"Tập {ep}: Đã dọn debug_repaging/", "info")
+                    except Exception:
+                        pass
+
+                # Clean gemini_safe directory (moderation fallback PDFs)
+                gemini_safe_dir = os.path.join(ep_dir, "gemini_safe")
+                if os.path.isdir(gemini_safe_dir):
+                    try:
+                        import shutil
+                        shutil.rmtree(gemini_safe_dir, ignore_errors=True)
+                        await context.log(f"Tập {ep}: Đã dọn gemini_safe/", "info")
+                    except Exception:
+                        pass
+
+                # Clean PDF files (no longer needed after video is generated)
+                pdf_dir = os.path.join(ep_dir, "pdf")
+                if os.path.isdir(pdf_dir):
+                    try:
+                        for pdf_file in os.listdir(pdf_dir):
+                            if pdf_file.lower().endswith(".pdf"):
+                                os.remove(os.path.join(pdf_dir, pdf_file))
+                        await context.log(f"Tập {ep}: Đã dọn pdf/", "info")
+                    except Exception:
+                        pass
 
         # Clear static/uploads files associated with this task
         for path_key in ["logo_path", "overlay_path"]:

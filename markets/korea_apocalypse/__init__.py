@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Optional
 from markets.base_market import BaseMarketProfile
@@ -23,6 +23,7 @@ class KoreaApocalypseMarket(BaseMarketProfile):
             voice_rate=DEFAULT_KR_VOICE_RATE,
             voice_pitch=DEFAULT_KR_VOICE_PITCH,
             preferred_fonts=PREFERRED_KR_FONTS,
+            point_score_threshold=60,
         )
 
     def get_gemini_prompt(
@@ -31,8 +32,12 @@ class KoreaApocalypseMarket(BaseMarketProfile):
         ep: int,
         total_pages: int,
         glossary: Optional[str] = None,
+        previous_context: Optional[dict] = None,
     ) -> str:
-        return get_korea_apocalypse_prompt(comic_title, ep, total_pages, glossary)
+        return get_korea_apocalypse_prompt(
+            comic_title, ep, total_pages, glossary,
+            point_score_threshold=self.point_score_threshold,
+        )
 
     def generate_youtube_metadata(
         self,

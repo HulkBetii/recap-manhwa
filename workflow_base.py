@@ -2,6 +2,7 @@ import abc
 import asyncio
 import json
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -240,7 +241,29 @@ class JSONWorkflowRepository(BaseWorkflowRepository):
                 temp_filepath = self.file_path + ".tmp"
                 with open(temp_filepath, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
-                os.replace(temp_filepath, self.file_path)
+                
+                # Robust replace on Windows (avoid WinError 5 Access is denied during rapid writes)
+                replaced = False
+                for attempt in range(10):
+                    try:
+                        os.replace(temp_filepath, self.file_path)
+                        replaced = True
+                        break
+                    except (PermissionError, OSError):
+                        time.sleep(0.08 * (attempt + 1))
+                if not replaced:
+                    for copy_attempt in range(5):
+                        try:
+                            shutil.copyfile(temp_filepath, self.file_path)
+                            replaced = True
+                            break
+                        except (PermissionError, OSError):
+                            time.sleep(0.1 * (copy_attempt + 1))
+                try:
+                    if os.path.exists(temp_filepath):
+                        os.remove(temp_filepath)
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"Error saving tasks: {e}", flush=True)
 

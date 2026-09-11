@@ -41,3 +41,22 @@ async def test_generate_voicevox_tts_unreachable_endpoint(tmp_path):
         base_url='http://127.0.0.1:59999',
     )
     assert success is False
+
+
+def test_preprocess_narration_cadence():
+    from tts_provider import preprocess_narration_cadence
+    raw_en = "Turns out our boy was ready!! Look he stepped forward."
+    res_en = preprocess_narration_cadence(raw_en)
+    assert "Turns out, our boy was ready!" in res_en
+    assert "Look, he stepped forward." in res_en
+    assert "!!" not in res_en
+
+    raw_vi = "Hóa ra anh chàng nhà ta đã tính trước... Đúng lúc này quái vật xuất hiện."
+    res_vi = preprocess_narration_cadence(raw_vi)
+    assert "Hóa ra, anh chàng nhà ta" in res_vi
+    assert "Đúng lúc này, quái vật" in res_vi
+
+    raw_dash = "He didn't blink—he was ready."
+    res_dash = preprocess_narration_cadence(raw_dash)
+    assert "He didn't blink — he was ready." in res_dash
+

@@ -232,6 +232,13 @@ function renderWorkflowDashboard() {
                         </button>
                     `;
                 });
+            if (w.artifacts && w.artifacts.youtube_upload_kit_url) {
+                cardContent += `
+                    <a href="${w.artifacts.youtube_upload_kit_url}" target="_blank" download="youtube_upload_kit.txt" class="btn" style="font-size: 0.7rem; padding: 0.25rem 0.6rem; height: 24px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; color: #fff; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem; font-weight: bold; text-decoration: none; box-shadow: 0 2px 6px rgba(16,185,129,0.3);">
+                        <span>📋</span>
+                        <span>YouTube Kit</span>
+                    </a>
+                `;
             }
             
             cardContent += `
@@ -1024,7 +1031,7 @@ btnCrawl.addEventListener('click', async () => {
                     : (ttsMode === 'voicevox' 
                         ? `voicevox_${document.getElementById('voicevox-speaker-id') ? document.getElementById('voicevox-speaker-id').value : '3'}` 
                         : ttsMode),
-                ref_audio_path: ttsMode === 'clone' ? uploadedRefAudioPath : null,
+                ref_audio_path: ttsMode === 'clone' ? (uploadedRefAudioPath || '/uploads/jessa - easygoing and effortless.mp3') : null,
                 logo_path: uploadedLogoPath,
                 overlay_path: uploadedOverlayPath,
                 burn_subtitles: document.getElementById('burn-subtitles').checked,
@@ -1032,7 +1039,9 @@ btnCrawl.addEventListener('click', async () => {
                 remove_text_conf: 0.3,
                 remove_text_radius: 3,
                 comix_group_id: document.getElementById('comix-group-id') ? document.getElementById('comix-group-id').value.trim() || null : null,
-                market_id: document.getElementById('market-preset') ? document.getElementById('market-preset').value.trim() || null : null
+                market_id: document.getElementById('market-preset') ? document.getElementById('market-preset').value.trim() || null : null,
+                enable_bgm: document.getElementById('enable-bgm') ? document.getElementById('enable-bgm').checked : false,
+                enable_flash_forward_intro: document.getElementById('enable-flash-forward-intro') ? document.getElementById('enable-flash-forward-intro').checked : false
             })
         });
 
@@ -1431,6 +1440,28 @@ if (marketPresetSelect) {
                 ttsVoiceIdInput.dispatchEvent(new Event('change'));
             }
             appendLog('Đã hoàn tác cấu hình về Mặc định (Toàn cầu / Tiếng Anh).', 'system');
+        }
+    });
+}
+
+// Language Selection Change Handler (auto-select default language voice)
+const vlmLanguageSelect = document.getElementById('vlm-language');
+if (vlmLanguageSelect && ttsVoiceIdInput) {
+    vlmLanguageSelect.addEventListener('change', () => {
+        const selectedLang = vlmLanguageSelect.value;
+        if (selectedLang === 'vi') {
+            ttsVoiceIdInput.value = 'clone';
+            ttsVoiceIdInput.dispatchEvent(new Event('change'));
+            appendLog('Đã chọn ngôn ngữ Tiếng Việt: Tự động dùng giọng mặc định OmniVoice Jessa (jessa - easygoing and effortless).', 'info');
+        } else if (selectedLang === 'ko') {
+            ttsVoiceIdInput.value = 'edge-tts_ko-KR-InJoonNeural';
+            ttsVoiceIdInput.dispatchEvent(new Event('change'));
+        } else if (selectedLang === 'ja') {
+            ttsVoiceIdInput.value = 'edge-tts_ja-JP-KeitaNeural';
+            ttsVoiceIdInput.dispatchEvent(new Event('change'));
+        } else if (selectedLang === 'en') {
+            ttsVoiceIdInput.value = 'ai33pro';
+            ttsVoiceIdInput.dispatchEvent(new Event('change'));
         }
     });
 }

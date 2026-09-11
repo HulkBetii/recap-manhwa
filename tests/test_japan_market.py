@@ -26,11 +26,11 @@ def test_japan_isekai_prompt_generation_ep1():
     prompt = market.get_gemini_prompt("追放された領主", ep=1, total_pages=30)
     
     assert "EPISODE 1 HIGH-RETENTION HOOK" in prompt
-    assert "異世界転生 × 領地経営 × 成り上がり" in prompt
+    assert "Isekai Reincarnation x Territory Management" in prompt
     assert "追放" in prompt
     assert "現代知識" in prompt
-    assert "です・ます調" in prompt
-    assert "<ページ番号> - <日本語ナレーション文章>.#" in prompt
+    assert "desu/masu style" in prompt
+    assert "<page_number> - <Japanese narration>.#" in prompt
     assert "追放された領主" in prompt
 
 
@@ -40,7 +40,7 @@ def test_japan_isekai_prompt_generation_ep2():
     
     assert "EPISODE CONTINUATION" in prompt
     assert "EPISODE 1 HIGH-RETENTION HOOK" not in prompt
-    assert "クリフハンガー" in prompt
+    assert "cliffhanger" in prompt
 
 
 def test_japan_isekai_metadata_generation():
@@ -61,7 +61,7 @@ def test_japan_isekai_metadata_generation():
 
 def test_generate_gemini_prompt_delegation_japan():
     p_ja = generate_gemini_prompt("Isekai Lord", 1, 20, market_id="japan_isekai_territory")
-    assert "異世界転生 × 領地経営 × 成り上がり" in p_ja
+    assert "Isekai Reincarnation x Territory Management" in p_ja
     assert "EPISODE 1 HIGH-RETENTION HOOK" in p_ja
 
 

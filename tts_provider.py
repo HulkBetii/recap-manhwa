@@ -326,19 +326,35 @@ async def generate_edge_tts(
     rate: str = "+0%",
     pitch: str = "+0Hz",
 ) -> bool:
-    try:
-        import edge_tts
-        communicate = edge_tts.Communicate(text, voice_name, rate=rate, pitch=pitch)
-        with open(output_audio_path, "wb") as file:
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    file.write(chunk["data"])
-        logger.info("EdgeTTS audio generated successfully. Generating Whisper SRT transcript...")
-        await asyncio.to_thread(generate_transcript, output_audio_path, output_srt_path)
-        return True
-    except Exception as e:
-        logger.error(f"EdgeTTS generation failed: {e}", exc_info=True)
-        return False
+    max_attempts = 4
+    for attempt in range(1, max_attempts + 1):
+        try:
+            import edge_tts
+            communicate = edge_tts.Communicate(text, voice_name, rate=rate, pitch=pitch)
+            with open(output_audio_path, "wb") as file:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        file.write(chunk["data"])
+
+            if os.path.exists(output_audio_path) and os.path.getsize(output_audio_path) > 1000:
+                logger.info(f"EdgeTTS audio generated successfully ({os.path.getsize(output_audio_path)} bytes) on attempt {attempt}. Generating Whisper SRT transcript...")
+                await asyncio.to_thread(generate_transcript, output_audio_path, output_srt_path)
+                return True
+            else:
+                raise Exception("Generated audio file is missing or too small.")
+        except Exception as e:
+            logger.warning(f"EdgeTTS attempt {attempt}/{max_attempts} failed: {e}")
+            if os.path.exists(output_audio_path):
+                try:
+                    os.remove(output_audio_path)
+                except Exception:
+                    pass
+            if attempt < max_attempts:
+                await asyncio.sleep(2 * attempt)
+            else:
+                logger.error(f"EdgeTTS generation failed after {max_attempts} attempts: {e}", exc_info=True)
+                return False
+    return False
 
 def concat_wav_bytes(wav_bytes_list: list[bytes]) -> bytes:
     if not wav_bytes_list:
@@ -448,6 +464,41 @@ async def generate_voicevox_tts(
         return False
 
 
+def preprocess_narration_cadence(text: str) -> str:
+    """
+    Normalizes punctuation and cadence for voice cloning / TTS to ensure natural
+    spoken breath pauses around sarcastic remarks, punchlines, and connectors.
+    """
+    if not text or not isinstance(text, str):
+        return text or ""
+    import re
+    cleaned = text.strip()
+    
+    # 1. Normalize repeated punctuation
+    cleaned = re.sub(r'!+', '!', cleaned)
+    cleaned = re.sub(r'\?+', '?', cleaned)
+    cleaned = re.sub(r'\.{3,}', '...', cleaned)
+    
+    # 2. Normalize em-dashes and long dashes with proper pause spacing
+    cleaned = re.sub(r'\s*[—–]\s*', ' — ', cleaned)
+    
+    # 3. Ensure punctuation followed by letters has space: e.g. "điều này,nhưng" -> "điều này, nhưng"
+    cleaned = re.sub(r'([,;:\.!?])([A-Za-zÀ-ỹ0-9])', r'\1 \2', cleaned)
+    
+    # 4. Spoken connector breath pauses (English & Vietnamese)
+    en_connectors = r"(?:Look|Turns out|Here\'s the thing|And guess what|Speaking of which|To be honest|Naturally|Unfortunately for them)"
+    cleaned = re.sub(rf'(?i)\b({en_connectors})\s+(?![,\.!\?—])', r'\1, ', cleaned)
+    
+    vi_connectors = r"(?:Hóa ra|Và đoán xem|Nhìn xem|Thế nhưng|Đúng lúc này|Chưa kịp thở phào thì|Nói thật thì|Khổ nỗi)"
+    cleaned = re.sub(rf'(?i)\b({vi_connectors})\s+(?![,\.!\?—])', r'\1, ', cleaned)
+    
+    # 5. Deduplicate multiple spaces or accidental duplicate commas
+    cleaned = re.sub(r',\s*,+', ',', cleaned)
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+    
+    return cleaned.strip()
+
+
 async def generate_tts(
     text: str,
     output_audio_path: str,
@@ -461,6 +512,7 @@ async def generate_tts(
     Generates local TTS audio (MP3) and its SRT transcript.
     Supports VOICEVOX (local GPU), Direct EdgeTTS, AI33Pro, and OmniVoice.
     """
+    text = preprocess_narration_cadence(text)
     v_id = (voice_id or "").strip()
 
     # 1. VOICEVOX Mode (Local GPU)
@@ -500,20 +552,29 @@ async def generate_tts(
             "num_step": config.OMNIVOICE_NUM_STEPS
         }
         
-        if (not voice_id or voice_id == "auto") and not ref_audio_path:
-            jessa_ref = os.path.join(os.getcwd(), "static", "jessa - easygoing and effortless.mp3")
-            if os.path.exists(jessa_ref):
-                ref_audio_path = jessa_ref
-                logger.info(f"Auto Voice selected: Using default reference audio for cloning: {ref_audio_path}")
+        # Resolve default reference audio for cloning (Jessa voice default)
+        default_ref = getattr(config, "DEFAULT_REF_AUDIO_PATH", None)
+        if not default_ref or not os.path.exists(default_ref):
+            default_ref = os.path.join(os.getcwd(), "static", "jessa - easygoing and effortless.mp3")
+
+        if (not voice_id or voice_id in ("auto", "clone", "omnivoice", "default")) and not ref_audio_path:
+            if default_ref and os.path.exists(default_ref):
+                ref_audio_path = default_ref
+                logger.info(f"OmniVoice: Using default reference audio for cloning: {ref_audio_path}")
 
         if ref_audio_path and os.path.exists(ref_audio_path):
             logger.info(f"OmniVoice: Generating TTS with Voice Cloning from reference audio: {ref_audio_path}")
             ref_text = await asyncio.to_thread(get_ref_audio_text, ref_audio_path)
             kwargs["ref_audio"] = ref_audio_path
             kwargs["ref_text"] = ref_text
-        elif voice_id and voice_id != "auto" and voice_id.strip() != "":
+        elif voice_id and voice_id not in ("auto", "clone", "omnivoice", "default") and voice_id.strip() != "":
             logger.info(f"OmniVoice: Generating TTS with Voice Design instruct: {voice_id}")
             kwargs["instruct"] = voice_id
+        elif default_ref and os.path.exists(default_ref):
+            logger.info(f"OmniVoice: Fallback to default reference audio for cloning: {default_ref}")
+            ref_text = await asyncio.to_thread(get_ref_audio_text, default_ref)
+            kwargs["ref_audio"] = default_ref
+            kwargs["ref_text"] = ref_text
         else:
             logger.info("OmniVoice: Generating TTS with Auto Voice")
 

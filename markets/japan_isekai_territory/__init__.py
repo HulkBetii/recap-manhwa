@@ -23,6 +23,7 @@ class JapanIsekaiTerritoryMarket(BaseMarketProfile):
             voice_rate=DEFAULT_JA_VOICE_RATE,
             voice_pitch=DEFAULT_JA_VOICE_PITCH,
             preferred_fonts=PREFERRED_JA_FONTS,
+            point_score_threshold=55,
         )
 
     def get_gemini_prompt(
@@ -31,8 +32,12 @@ class JapanIsekaiTerritoryMarket(BaseMarketProfile):
         ep: int,
         total_pages: int,
         glossary: Optional[str] = None,
+        previous_context: Optional[dict] = None,
     ) -> str:
-        return get_japan_isekai_prompt(comic_title, ep, total_pages, glossary)
+        return get_japan_isekai_prompt(
+            comic_title, ep, total_pages, glossary,
+            point_score_threshold=self.point_score_threshold,
+        )
 
     def generate_youtube_metadata(
         self,

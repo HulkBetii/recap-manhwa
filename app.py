@@ -851,6 +851,9 @@ class CrawlRequest(BaseModel):
     remove_text_radius: int = 3
     comix_group_id: Optional[str] = None
     market_id: Optional[str] = None
+    enable_bgm: bool = False
+    enable_flash_forward_intro: bool = False
+    flash_forward_custom_hook: Optional[str] = None
 
 
 def _validated_asset_reference(value: str | None) -> str | None:
@@ -1168,9 +1171,9 @@ async def get_shared_browser_context(headless=False, start_maximized=False, temp
         _shared_profile_path = target_profile_path
         return _shared_browser, _shared_context
 
-async def check_and_rotate_profiles_until_ready(context_logger=None, force_check=False):
+async def check_and_rotate_profiles_until_ready(context_logger=None, force_check=False, target_model="3.8 Flash"):
     """
-    Checks if the active Chrome Profile's Gemini model 3.6 Flash is limited.
+    Checks if the active Chrome Profile's Gemini target model (default: 3.8 Flash) is limited.
     If it is limited, rotates to the next available profile in config.json.
     Repeats until a working profile is found or all profiles are checked.
     Returns: (browser, context) of the working profile, or raises Exception if all limited.
@@ -1186,16 +1189,6 @@ async def check_and_rotate_profiles_until_ready(context_logger=None, force_check
     if start_idx >= len(profiles):
         start_idx = 0
         
-    # Optimization: if not force_check and we already have a validated context, reuse it directly
-    if not force_check and _shared_context:
-        active_profile = profiles[start_idx]
-        if _shared_profile_path == active_profile:
-            try:
-                await _shared_context.cookies()
-                return _shared_browser, _shared_context
-            except Exception:
-                pass
-                
     num_profiles = len(profiles)
     
     for i in range(num_profiles):
@@ -1222,44 +1215,31 @@ async def check_and_rotate_profiles_until_ready(context_logger=None, force_check
         try:
             await page.goto("https://gemini.google.com/app", timeout=60000)
             
-            # Check login and rate-limit status
-            status = await check_gemini_login_and_limit_status(page, context_logger)
+            # Check login and rate-limit status for target model
+            status = await check_gemini_login_and_limit_status(page, context_logger, target_model=target_model)
             
             if status == "needs_login":
+                skip_msg = f"Profile {profile_path} chưa đăng nhập. Bỏ qua để chỉ sử dụng các profile đã đăng nhập..."
                 if context_logger:
-                    await context_logger.log("Chưa đăng nhập trên Gemini. Đang chờ bạn đăng nhập thủ công trên cửa sổ trình duyệt (Tối đa 180s)...", "warning")
+                    await context_logger.log(skip_msg, "warning")
                 else:
-                    print("Needs login. Waiting for manual login...")
-                    
-                login_success = False
-                for _ in range(90):  # 90 * 2s = 180s
-                    await asyncio.sleep(2)
-                    new_status = await check_gemini_login_and_limit_status(page, None)
-                    if new_status != "needs_login":
-                        login_success = True
-                        status = new_status
-                        if context_logger:
-                            await context_logger.log("Đăng nhập thành công!", "success")
-                        break
-                if not login_success:
-                    if context_logger:
-                        await context_logger.log(f"Bỏ qua profile {profile_path} do hết thời gian chờ đăng nhập.", "warning")
-                    await page.close()
-                    continue
+                    print(skip_msg)
+                await page.close()
+                continue
             
             if status == "limited":
                 if context_logger:
-                    await context_logger.log(f"Tài khoản {profile_path} bị giới hạn (Rate limit) model 3.6 Flash. Đang xoay vòng...", "warning")
+                    await context_logger.log(f"Tài khoản {profile_path} bị giới hạn (Rate limit) model {target_model}. Đang xoay vòng...", "warning")
                 else:
-                    print(f"Profile {profile_path} is limited. Rotating...")
+                    print(f"Profile {profile_path} is limited for {target_model}. Rotating...")
                 await page.close()
                 continue
                 
             # If status == "ok"
             if context_logger:
-                await context_logger.log(f"Tài khoản {profile_path} KHÔNG bị giới hạn. Tiếp tục thực thi với tài khoản này.", "success")
+                await context_logger.log(f"Tài khoản {profile_path} KHÔNG bị giới hạn ({target_model}). Tiếp tục thực thi với tài khoản này.", "success")
             else:
-                print(f"Profile {profile_path} is ready.")
+                print(f"Profile {profile_path} is ready for {target_model}.")
             
             # Keep this profile context and close verification page
             await page.close()
@@ -1277,12 +1257,12 @@ async def check_and_rotate_profiles_until_ready(context_logger=None, force_check
             continue
             
     # If we exited the loop, all profiles are limited
-    err_msg = "Tất cả các tài khoản/Chrome Profiles đều đang bị giới hạn (Rate limited) hoặc chưa đăng nhập. Vui lòng thêm tài khoản mới trên giao diện Web UI hoặc đợi hết giới hạn."
+    err_msg = f"Tất cả các tài khoản/Chrome Profiles đều đang bị giới hạn (Rate limited) model {target_model} hoặc chưa đăng nhập. Vui lòng thêm tài khoản mới trên giao diện Web UI hoặc đợi hết giới hạn."
     if context_logger:
         await context_logger.log(err_msg, "error")
     raise Exception(err_msg)
 
-async def check_gemini_login_and_limit_status(page, context_logger=None):
+async def check_gemini_login_and_limit_status(page, context_logger=None, target_model="3.8 Flash"):
     # Wait for page elements to load
     await asyncio.sleep(2)
     
@@ -1311,36 +1291,55 @@ async def check_gemini_login_and_limit_status(page, context_logger=None):
     except Exception:
         return "ok"
         
-    check_js = """
-    (() => {
-        const flashItem = document.querySelector('gem-menu-item[data-mode-id="56fdd199312815e2"]') 
-                       || Array.from(document.querySelectorAll('gem-menu-item')).find(el => el.textContent.includes('3.6 Flash'));
+    check_js = f"""
+    (() => {{
+        const targetModel = "{target_model}";
+        const items = Array.from(document.querySelectorAll('gem-menu-item, [role="menuitem"], [role="option"], .mat-mdc-menu-item'));
+        let targetItem = null;
+        
+        if (targetModel.includes("Pro")) {{
+            targetItem = items.find(el => /3\\.1\\s*Pro/i.test(el.textContent))
+                      || items.find(el => /Pro/i.test(el.textContent) && !/Lite|Flash|Thinking/i.test(el.textContent));
+        }} else {{
+            targetItem = items.find(el => /3\\.8\\s*Flash/i.test(el.textContent))
+                      || items.find(el => /3\\.6\\s*Flash/i.test(el.textContent))
+                      || items.find(el => /Flash/i.test(el.textContent) && !/Lite|Pro|Thinking/i.test(el.textContent))
+                      || document.querySelector('gem-menu-item[data-mode-id="56fdd199312815e2"]');
+        }}
+        
+        if (!targetItem) {{
+            // General fallback
+            targetItem = items.find(el => /3\\.1\\s*Pro/i.test(el.textContent))
+                      || items.find(el => /Pro/i.test(el.textContent))
+                      || items.find(el => /3\\.8\\s*Flash/i.test(el.textContent))
+                      || items.find(el => /Flash/i.test(el.textContent));
+        }}
                        
-        if (!flashItem) {
-            return { error: "3.6 Flash model option not found in menu" };
-        }
+        if (!targetItem) {{
+            return {{ error: targetModel + " model option not found in menu" }};
+        }}
         
-        const ariaDisabled = flashItem.getAttribute('aria-disabled') === 'true';
-        const hasDisabledClass = flashItem.classList.contains('disabled') 
-                              || flashItem.classList.contains('gmat-disabled')
-                              || flashItem.querySelector('.disabled') !== null;
+        const ariaDisabled = targetItem.getAttribute('aria-disabled') === 'true';
+        const hasDisabledClass = targetItem.classList.contains('disabled') 
+                              || targetItem.classList.contains('gmat-disabled')
+                              || targetItem.querySelector('.disabled') !== null;
         
-        const sublabelEl = flashItem.querySelector('.sublabel');
+        const sublabelEl = targetItem.querySelector('.sublabel');
         const sublabel = sublabelEl ? sublabelEl.textContent.trim() : "";
         
-        const isLimitText = /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(sublabel);
+        const isLimitText = /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(sublabel) || /limit|giới hạn|reached|resets/i.test(targetItem.textContent);
         const isLimited = ariaDisabled || hasDisabledClass || isLimitText;
         
-        if (!isLimited) {
-            flashItem.click();
-        }
+        if (!isLimited) {{
+            targetItem.click();
+        }}
         
-        return {
+        return {{
             isLimited: isLimited,
             sublabel: sublabel,
             clicked: !isLimited
-        };
-    })()
+        }};
+    }})()
     """
     try:
         result = await page.evaluate(check_js)
@@ -1361,54 +1360,69 @@ async def check_gemini_login_and_limit_status(page, context_logger=None):
             
     return "ok"
 
-async def ensure_model_selected(page, context_logger=None):
+async def ensure_model_selected(page, context_logger=None, target_model="3.8 Flash"):
     dropdown_btn = await page.query_selector("button.input-area-switch")
     if not dropdown_btn:
         return
         
     try:
         btn_text = await page.eval_on_selector("button.input-area-switch", "el => el.textContent")
-        if "3.6 Flash" in btn_text or ("Flash" in btn_text and "lite" not in btn_text.lower()):
+        if "Flash" in target_model and ("Flash" in btn_text and "Pro" not in btn_text):
+            return
+        elif target_model == "3.1 Pro" and ("3.1 Pro" in btn_text or ("Pro" in btn_text and "Flash" not in btn_text)):
             # Already selected, no need to click
+            return
+        elif target_model in btn_text:
             return
             
         await dropdown_btn.click()
         await page.wait_for_timeout(1000)
         
-        check_js = """
-        (() => {
-            const flashItem = document.querySelector('gem-menu-item[data-mode-id="56fdd199312815e2"]') 
-                           || Array.from(document.querySelectorAll('gem-menu-item')).find(el => el.textContent.includes('3.6 Flash'));
-                           
-            if (flashItem) {
-                const ariaDisabled = flashItem.getAttribute('aria-disabled') === 'true';
-                const hasDisabledClass = flashItem.classList.contains('disabled') 
-                                      || flashItem.classList.contains('gmat-disabled');
-                const sublabelEl = flashItem.querySelector('.sublabel');
+        check_js = f"""
+        (() => {{
+            const targetModel = "{target_model}";
+            const items = Array.from(document.querySelectorAll('gem-menu-item, [role="menuitem"], [role="option"], .mat-mdc-menu-item'));
+            let targetItem = null;
+            
+            if (targetModel.includes("Pro")) {{
+                targetItem = items.find(el => /3\\.1\\s*Pro/i.test(el.textContent))
+                          || items.find(el => /Pro/i.test(el.textContent) && !/Lite|Flash|Thinking/i.test(el.textContent));
+            }} else {{
+                targetItem = items.find(el => /3\\.8\\s*Flash/i.test(el.textContent))
+                          || items.find(el => /3\\.6\\s*Flash/i.test(el.textContent))
+                          || items.find(el => /Flash/i.test(el.textContent) && !/Lite|Pro|Thinking/i.test(el.textContent))
+                          || document.querySelector('gem-menu-item[data-mode-id="56fdd199312815e2"]');
+            }}
+                            
+            if (targetItem) {{
+                const ariaDisabled = targetItem.getAttribute('aria-disabled') === 'true';
+                const hasDisabledClass = targetItem.classList.contains('disabled') 
+                                      || targetItem.classList.contains('gmat-disabled');
+                const sublabelEl = targetItem.querySelector('.sublabel');
                 const sublabel = sublabelEl ? sublabelEl.textContent.trim() : "";
                 const isLimitText = /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(sublabel);
                 
-                if (!ariaDisabled && !hasDisabledClass && !isLimitText) {
-                    flashItem.click();
-                    return { success: true };
-                }
-            }
-            return { success: false };
-        })()
+                if (!ariaDisabled && !hasDisabledClass && !isLimitText) {{
+                    targetItem.click();
+                    return {{ success: true }};
+                }}
+            }}
+            return {{ success: false }};
+        }})()
         """
         result = await page.evaluate(check_js)
         
         if not result or not isinstance(result, dict) or not result.get("success"):
             await dropdown_btn.click()
             if context_logger:
-                await context_logger.log("Không thể tự động chọn model 3.6 Flash (có thể bị giới hạn hoặc lỗi giao diện).", "warning")
+                await context_logger.log(f"Không thể tự động chọn model {target_model} (có thể bị giới hạn hoặc lỗi giao diện).", "warning")
         else:
             if context_logger:
-                await context_logger.log("Đã tự động chuyển đổi sang model 3.6 Flash trên trang hiện tại.", "success")
+                await context_logger.log(f"Đã tự động chuyển đổi sang model {target_model} trên trang hiện tại.", "success")
                 
     except Exception as e:
         if context_logger:
-            await context_logger.log(f"Lỗi khi đảm bảo chọn model 3.6 Flash: {e}", "warning")
+            await context_logger.log(f"Lỗi khi đảm bảo chọn model {target_model}: {e}", "warning")
 
 async def clear_gemini_activity(page, context_logger=None):
     try:
@@ -3226,8 +3240,28 @@ async def crawl(payload: CrawlRequest):
         from markets.korea_apocalypse.tts import DEFAULT_KR_VOICE_ID
         if not payload.voice_id or payload.voice_id in ("ai33pro", "auto", "default"):
             v_id = DEFAULT_KR_VOICE_ID
+    elif lang in ("vi", "vietnamese"):
+        import config as app_cfg
+        default_vi = getattr(app_cfg, "DEFAULT_VI_VOICE_ID", "clone")
+        if not payload.voice_id or payload.voice_id in ("ai33pro", "auto", "default"):
+            v_id = default_vi
+        else:
+            v_id = normalize_tts_voice_mode(payload.voice_id)
     else:
         v_id = normalize_tts_voice_mode(payload.voice_id)
+
+    resolved_ref_audio = _validated_asset_reference(payload.ref_audio_path)
+    if not resolved_ref_audio and v_id in ("clone", "auto", "omnivoice", "default"):
+        import config as app_cfg
+        if lang in ("vi", "vietnamese"):
+            default_ref = getattr(app_cfg, "DEFAULT_VI_REF_AUDIO", getattr(app_cfg, "DEFAULT_REF_AUDIO_PATH", None))
+        else:
+            default_ref = getattr(app_cfg, "DEFAULT_REF_AUDIO_PATH", None)
+        if default_ref:
+            try:
+                resolved_ref_audio = _validated_asset_reference(default_ref)
+            except Exception:
+                resolved_ref_audio = default_ref
 
     config = {
         "safe_mode": payload.safe_mode,
@@ -3241,7 +3275,7 @@ async def crawl(payload: CrawlRequest):
         "language": lang,
         "vlm_provider": payload.vlm_provider,
         "voice_id": v_id,
-        "ref_audio_path": _validated_asset_reference(payload.ref_audio_path),
+        "ref_audio_path": resolved_ref_audio,
         "logo_path": _validated_asset_reference(payload.logo_path),
         "overlay_path": _validated_asset_reference(payload.overlay_path),
         "burn_subtitles": payload.burn_subtitles,
@@ -3250,6 +3284,9 @@ async def crawl(payload: CrawlRequest):
         "remove_text_radius": payload.remove_text_radius,
         "comix_group_id": payload.comix_group_id,
         "market_id": market_id,
+        "enable_bgm": payload.enable_bgm,
+        "enable_flash_forward_intro": payload.enable_flash_forward_intro,
+        "flash_forward_custom_hook": payload.flash_forward_custom_hook,
     }
 
     task_id = await workflow_manager.queue_task(
@@ -3430,12 +3467,14 @@ def generate_gemini_prompt(
     target_language: str = "en",
     glossary: str = None,
     market_id: str = None,
+    point_score_threshold: int = 65,
+    previous_context: dict = None,
 ) -> str:
     if market_id:
         from markets import get_market
         market = get_market(market_id)
         if market:
-            return market.get_gemini_prompt(comic_title, ep, total_pages, glossary)
+            return market.get_gemini_prompt(comic_title, ep, total_pages, glossary, previous_context=previous_context)
 
     language_map = {
         "vi": "Vietnamese",
@@ -3485,7 +3524,7 @@ def generate_gemini_prompt(
             glossary = "No glossary provided."
 
     # ---------------------------------------------------------
-    # Episode 1 hook
+    # Episode 1 hook or Continuation
     # ---------------------------------------------------------
     if ep == 1:
         intro_rule = f"""
@@ -3493,13 +3532,18 @@ EPISODE 1 HIGH-RETENTION HOOK (0–5s GOLDEN RULE):
 
 The very first output line MUST be an intense, high-retention opening hook that instantly grips the viewer's curiosity and prevents drop-off in the first 5 seconds.
 
+- PROTAGONIST NAME IDENTIFICATION & ANCHORING (CRITICAL):
+  * Identify the protagonist's actual name from the comic pages (e.g. dialogue, character status window, subtitles, or title, such as 'Paran', 'Jinwoo', etc.).
+  * The opening hook (Segment 1 or 2, 0-15s) MUST explicitly introduce the protagonist by their actual name so the audience immediately knows who the central character is.
+  * NEVER leave the audience guessing who the protagonist is.
+
 Hook Formula:
-[Shocking Paradox / Dire Crisis] + [Mysterious Twist / Hidden Power / High Stakes Teaser]
+[Shocking Paradox / Dire Crisis] + [Protagonist Name] + [Mysterious Twist / Hidden Power / High Stakes Teaser]
 
 Examples of Top US Recap Hooks:
-- "Branded the weakest hunter on Earth and left for dead in a double dungeon, he's about to wake up with a power that defies the gods."
-- "Betrayed by the very guild he built from scratch, he was executed in silence—only to open his eyes ten years in the past."
-- "Everyone called his unique ability utterly useless, until the apocalypse arrived and turned his skill into the ultimate cheat code."
+- "Branded the weakest hunter on Earth and left for dead in a double dungeon, Jinwoo is about to wake up with a power that defies the gods."
+- "Betrayed by the very guild he built from scratch, Arthur was executed in silence—only to open his eyes ten years in the past."
+- "Everyone called Paran's survival bunker completely insane, until the apocalypse arrived and made him the sole ruler of the wasteland."
 
 Requirements:
 - Write in punchy, natural {lang_name} (< 18 words, 2.5s–4.0s spoken).
@@ -3507,6 +3551,43 @@ Requirements:
 - Zero throat-clearing (NEVER start with "Welcome", "Today we", or generic introductions).
 - Assign this hook to the most visually striking opening page showing the protagonist or the inciting incident.
 - No comedy or sarcasm in this opening line—keep it tense, cinematic, and high-stakes.
+"""
+
+    elif previous_context:
+        prev_cliffhanger = previous_context.get("closing_cliffhanger", "")
+        prev_summary = previous_context.get("summary", "")
+        macro_ctx = previous_context.get("macro_context", "")
+        protagonist_name = previous_context.get("protagonist_name", "")
+        protagonist_gender = previous_context.get("protagonist_gender", "auto")
+
+        context_blocks = []
+        if protagonist_name:
+            context_blocks.append(f'- Protagonist Name Anchor: "{protagonist_name}" (Giữ tên nhân vật chính này xuyên suốt các tập / Maintain this protagonist name consistently!)')
+        if protagonist_gender == "female":
+            context_blocks.append('- Protagonist Gender: FEMALE (Bắt buộc dùng bộ đại từ Nữ: "she/her", "our girl", "cô/nàng/cô ấy". CẤM gọi là anh chàng/our boy!)')
+        elif protagonist_gender == "male":
+            context_blocks.append('- Protagonist Gender: MALE (Dùng bộ đại từ Nam: "he/him", "our boy", "cậu/anh", "anh chàng nhà ta".)')
+        if prev_cliffhanger:
+            context_blocks.append(f'- Previous Chapter Cliffhanger / Final Scene: "{prev_cliffhanger}"')
+        if prev_summary:
+            context_blocks.append(f'- Recent Events Leading To This Chapter: "{prev_summary}"')
+        if macro_ctx:
+            context_blocks.append(f'- Overall Story Arc Context: "{macro_ctx}"')
+
+        formatted_context = "\n".join(context_blocks)
+
+        intro_rule = f"""
+EPISODE CONTINUATION & BINGE-WATCHING NARRATIVE CONTINUITY:
+
+This is not Episode 1. Start directly in media res with the immediate action or cliffhanger resolution.
+Do NOT include any greetings, episode announcements, recaps of past episodes, or generic welcoming statements.
+
+PREVIOUS CHAPTER CONTEXT (ROLLING STORY MEMORY):
+{formatted_context}
+
+BINGE TRANSITION RULE FOR LINE 1:
+- Your very first narration line of this episode MUST directly address, resolve, or seamlessly react to the previous chapter's ending cliffhanger.
+- Maintain uninterrupted narrative velocity so that when all episodes are watched together in one long video, the audience experiences one smooth, cohesive movie without disconnect or repetition.
 """
 
     else:
@@ -3522,25 +3603,84 @@ Do NOT include any greetings, episode announcements, recaps of past episodes, or
     # ---------------------------------------------------------
     if lang_key in {"vi", "vietnamese"}:
         language_rules = """
-LANGUAGE RULES:
-- Write the entire output in natural Vietnamese.
-- Use standard Vietnamese Latin script.
-- Do not mix Chinese characters, Japanese characters, Korean characters,
-  or untranslated foreign phrases into Vietnamese sentences.
-- Character names and established proper nouns may remain unchanged when
-  translating them would make the name unnatural, unless the glossary
-  explicitly provides a Vietnamese equivalent.
-- Vietnamese Sino-Vietnamese terminology should be written normally in
-  Vietnamese Latin script.
+LANGUAGE & VIETNAMESE CONVERSATIONAL STORYTELLING RULES:
+- Write the entire output in natural, conversational spoken Vietnamese (giọng kể chuyện tự nhiên như người thật đang nói trực tiếp với bạn bè).
+- Thể hiện phong cách "Sarcastic Bro-Commentary": 80% bám sát tình tiết kịch tính, căng thẳng sinh tồn của thế giới Tận thế + 20% châm biếm sâu cay (deadpan sarcasm), thực tế và hóm hỉnh.
+- ĐỊNH DANH THEO NGỮ CẢNH & KỂ CHUYỆN HỮU CƠ (CONTEXTUAL PROTAGONIST ANCHORING):
+  * TUYỆT ĐỐI KHÔNG máy móc lặp lại tên nhân vật cứ mỗi 2-3 câu! Việc lặp tên liên tục khiến câu văn rập khuôn, gượng gạo và nồng nặc mùi AI.
+  * CHỈ GỌI TÊN RIÊNG Ở 4 VỊ TRÍ THẬT SỰ CẦN THIẾT:
+    1. Hook mở đầu tập (0-15s): Xướng tên thật ngay câu 1 để định danh nhân vật chính.
+    2. Chuyển cảnh / Bước nhảy thời gian: Gọi tên khi nhảy cóc không gian/thời gian để định vị lại cho người xem (ví dụ: 'Ba tháng sau, Seongho bắt đầu cuộc sống mới...', 'Quay trở lại căn hầm, Seongho...').
+    3. Phân biệt chủ thể trong cảnh đông người / combat: Khi có đồng đội, NPC hoặc quái vật trong cùng khung hình, gọi tên để người nghe không bị lẫn giữa hành động của MC và đối thủ (ví dụ: 'Trong khi gã chỉ huy còn đang lúng túng, Seongho đã âm thầm luồn ra sau...').
+    4. Cột mốc chiến tích & Flexing cao trào: Khắc ghi tên tuổi khi nhận thưởng hệ thống, hạ trùm hoặc tạo bước ngoặt lớn.
+  * 80% THỜI LƯỢNG CÒN LẠI — GIẢI PHÓNG SỰ TỰ NHIÊN:
+    - Trong các phân cảnh hành động liên tục, sinh tồn một mình hoặc rà soát trang bị: CẤM lặp lại tên riêng!
+    - Hãy dùng CHỦ NGỮ ẨN (cực kỳ tự nhiên trong tiếng Việt): Thay vì viết 'Để không bị lạc, Tổng rút dao gọt vỏ cây...', hãy viết: 'Rút dao gọt từng mảng vỏ cây làm dấu, anh cẩn thận tiến sâu vào trong...'.
+    - Để SỰ KIỆN / MÔI TRƯỜNG dẫn dắt: Thay vì viết 'Tổng nhận thấy quả táo hồi phục...', hãy viết: 'Một quả táo rực sáng rơi dưới gốc cây. Vừa cắn một miếng, thanh thể lực đã đầy ắp trở lại.'
+    - Dùng đại từ tự nhiên lướt nhẹ: 'anh', 'cậu', 'hắn' (nam) hoặc 'cô', 'nàng' (nữ).
+- BỘ LỌC CHỐNG VĂN MẪU AI (ANTI-AI CLICHÉ FILTER):
+  * CẤM TUYỆT ĐỐI các mẫu câu sáo rỗng, sến súa kinh điển của AI:
+    - CẤM: 'khiến anh chàng/thanh niên nhà ta chẳng còn lý do gì để...'
+    - CẤM: 'không hề vội vàng liều lĩnh mà cẩn thận...'
+    - CẤM: 'chứng minh bản năng... đang thức tỉnh mạnh mẽ hơn bao giờ hết'
+    - CẤM: 'nhận thức rõ ngày tàn sắp giáng xuống...'
+    - CẤM: 'cảm thấy tình hình tương đối khả quan...'
+  * TIẾT CHẾ DANH XƯNG CÁ TÍNH: 'anh chàng nhà ta', 'cô nàng nhà ta', 'thanh niên nhà ta' CHỈ ĐƯỢC PHÉP xuất hiện tối đa 1–2 lần trong TOÀN BỘ tập phim, chỉ bung ra ở các pha flex ao trình hoặc châm biếm thật sự đắt giá. Tuyệt đối không câu nào cũng chêm vào!
+- MA TRẬN ĐẠI TỪ THÍCH ỨNG GIỚI TÍNH (ZERO MISGENDERING MANDATE):
+  * Tự động nhận diện giới tính nhân vật chính từ tranh truyện (nét vẽ, trang phục) và ngữ cảnh:
+  * NẾU LÀ NAM CHÍNH: Dùng bộ đại từ Nam ('cậu', 'anh', 'hắn').
+  * NẾU LÀ NỮ CHÍNH: Dùng bộ đại từ Nữ ('cô', 'nàng', 'cô ấy', 'nữ chính', 'chị đại').
+  * CẤM TIỆT việc gọi Nữ chính là 'anh chàng', 'thanh niên', 'ông bạn'. CẤM TIỆT việc gọi Nam chính là 'cô nàng', 'nàng'.
+- RÀO CẢN ĐỊNH DANH NHÂN VẬT PHỤ (SIDE CHARACTER ISOLATION SHIELD):
+  * CẤM TUYỆT ĐỐI dùng các từ danh xưng của MC ('thanh niên', 'anh chàng', 'cô nàng', 'chị đại') để gọi nhân vật phụ (đồng đội, quái vật, NPC qua đường).
+  * Nhân vật phụ BẮT BUỘC phải có nhãn định danh cụ thể: 'hai đồng đội hám danh', 'gã láng giềng biến dị', 'tên cầm đầu', 'cô em gái'. Không bao giờ để khán giả nhầm lẫn giữa MC và nhân vật phụ!
+- Từ nối văn nói tự nhiên: Dùng linh hoạt 'Hóa ra', 'Và đoán xem', 'Nhìn xem', 'Thế nhưng', 'Đúng lúc này', 'Chưa kịp thở phào thì'.
+- CẤM TUYỆT ĐỐI văn phong dịch thô kiểu Google Translate:
+  * Không dùng cấu trúc bị động rườm rà: 'đã được nhìn thấy đang...', 'bị làm cho bất ngờ'. Thay bằng câu chủ động giàu năng lượng.
+  * Câu văn phải có nhịp thở ngắn gọn (1–2 câu ngắn, 3.0s–4.5s nói), tối ưu cho giọng đọc AI (Voice Cloning / OmniVoice / Jessa).
+- An toàn YouTube & Tránh từ cấm: Thay các từ nhạy cảm bằng từ ngữ hành động mạnh mẽ an toàn:
+  * Dùng 'tiêu diệt', 'hạ gục', 'tiễn lên đường', 'xử đẹp', 'quét sạch', 'cho đo ván'.
+- Use standard Vietnamese Latin script. Do not mix foreign or Chinese characters.
+- Preserve proper names from the glossary when provided.
 """
     else:
         language_rules = f"""
 LANGUAGE & US MANHWA/WEBTOON CULTURE RULES:
-- Write like a top US YouTube Manhwa Recap narrator (e.g. Manga Recaps, Plot Armor, Manhwa Clan).
+- Write like a top-tier US YouTube Manhwa Recap storyteller (in the signature style of Manhwa Fresh, Plot Armor, Manga Recaps, and Manhwa Clan).
+- Adopt the "Sarcastic Bro-Commentary" standard: 80% immersive survival tension + 20% deadpan sarcasm and conversational wit.
+- The "Couch Companion Persona": Speak directly to the viewer like a knowledgeable friend watching together on the couch.
+- Conversational Spoken Connectors: Seamlessly integrate natural speech transitions: 'Look,', 'You know,', 'Turns out,', 'Speaking of which,', 'Here's the kicker,', 'And guess what?'.
+- CONTEXTUAL PROTAGONIST ANCHORING (ORGANIC FLOW & ZERO FORMULAIC REPETITION):
+  * DO NOT mechanically force the protagonist's proper name into every 2nd or 3rd sentence! Robotic name repetition destroys immersion and sounds like an AI algorithm.
+  * Restrict direct proper name usage to ONLY 4 CRITICAL CONTEXTUAL ANCHORS:
+    1. Opening Hook (0-15s): Anchor the protagonist's identity immediately in the very first sentence.
+    2. Scene & Time Transitions: Re-anchor the protagonist when jumping across time or shifting locations (e.g., 'Three months later, Paran settled into...', 'Back at the underground vault, Paran...').
+    3. Multi-Character Disambiguation: When teammates, monsters, or raiders share the scene, explicitly use the protagonist's name so the viewer clearly knows who takes the action (e.g., 'While the party leader panicked, Paran quietly drew his dagger...').
+    4. Climax Milestone & Signature Flex: During pivotal boss takedowns, major system level-ups, or epic plot revelations.
+  * THE 80% NARRATIVE FREEDOM: During continuous solo action, exploration, crafting, and standard story progression, NEVER repeat the proper name! Instead, seamlessly use natural direct pronouns ('he', 'his' / 'she', 'her'), participial action clauses ('Kicking open the rusted door...', 'Inspecting the fresh tracks...'), or let the event/world drive the sentence ('A muffled growl echoed through the corridor...', 'One bite of the glowing fruit filled his stamina gauge completely.').
+- ANTI-AI CLICHÉ FILTER (BAN FORMULAIC AI STEREOTYPES):
+  * NEVER use repetitive, predictable AI tropes and filler phrasing:
+    - BANNED: 'leaving our boy/our MC with no choice but to...'
+    - BANNED: 'proving his/her instincts were sharper than ever...'
+    - BANNED: 'without wasting a single second, he/she decided to...'
+    - BANNED: 'little did they know...' / 'unbeknownst to everyone...'
+    - BANNED: 'could not help but wonder...'
+  * Instead, write authentic, punchy conversational reactions: 'Jackpot.', 'Easy pickings.', 'Classic amateur mistake.', 'Not on his watch.', 'And just like that, problem solved.'
+- SENTENCE VARIETY & CADENCE:
+  * Ban structural monotony! Do NOT start every sentence with an adverbial participle clause followed by a pronoun.
+  * Alternate between sharp, high-impact one-liners and descriptive tactical observations to create a cinematic, human rhythm.
+- GENDER-ADAPTIVE PRONOUN MATRIX (ZERO MISGENDERING MANDATE):
+  * Accurately identify the protagonist's gender from character design, attire, visual cues, dialogue, or provided context.
+  * If Male MC: Use standard pronouns ('he', 'him', 'his'). Casual epithets like 'our boy', 'our guy', or 'this dude' must be used SPARINGLY (at most 1–2 times per entire episode, reserved only for peak flexing or hilarious deadpan moments).
+  * If Female MC: Use standard pronouns ('she', 'her', 'hers'). Casual epithets like 'our girl', 'our heroine', or 'the queen herself' must be used SPARINGLY (at most 1–2 times per entire episode).
+  * ZERO MISGENDERING: If the protagonist is FEMALE, NEVER use 'he', 'him', 'boy', or 'dude'! If MALE, NEVER use 'she', 'her', or 'girl'.
+- SIDE CHARACTER ISOLATION SHIELD:
+  * NEVER refer to teammates, raiders, party members, or monsters as 'boy', 'girl', 'dude', or 'our guy'. Those terms are strictly reserved for the protagonist.
+  * Side characters MUST ALWAYS have distinct, descriptive labels: 'the greedy teammates', 'the party leader', 'the mutated neighbor', 'the arrogant bandit', 'his/her younger sister'.
 - Use natural Western manhwa community terminology and tropes where appropriate:
   * Awakened abilities, Hunter rankings (S-Rank, E-Rank), Dungeon Break, Status Window / System Prompt, Leveling Up;
   * Overpowered (OP) Protagonist, Regressor, Reincarnator, Hidden Mastermind, Aura / Killing Intent, flexing / humbled.
-- Verbal Velocity: Use strong, active transitive verbs (e.g., 'obliterates', 'outsmarts', 'unleashes', 'corners', 'exposes', 'shatters', 'ambushes') rather than passive explanations ('is seen doing', 'was attacked by').
+- Verbal Velocity: Use strong, active transitive verbs (e.g., 'obliterates', 'stockpiles', 'outsmarts', 'dispatches', 'unleashes', 'corners', 'exposes', 'shatters', 'ambushes') rather than passive explanations ('is seen doing', 'was attacked by').
 
 YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY:
 - To prevent YouTube demonetization or age-restrictions, NEVER use raw graphic or prohibited terms (such as suicide, murder, massacre, slaughter, bloodbath, kill).
@@ -3551,15 +3691,15 @@ YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY:
 """
 
     if lang_key in {"en", "english"}:
-        prompt_examples = """5 - He thought the nightmare was finally over, but the real dungeon boss just spawned.#
-[12, 13] - As the beast lunges forward, he dodges instantly and slices off its arm.#
-[14, 15, 16] - With a single devastating strike, the monster roars in agony before crashing down.#
-24 - And in the end, an ominous system alert warns him of an even deadlier crisis.#"""
+        prompt_examples = """5 - Turns out, Paran wasn't crazy after all—the moment the sirens blare, he's the only one ready.#
+[12, 13] - A mutated beast lunges straight for him, but Paran simply sidesteps and slices off its arm like butter.#
+[14, 15, 16] - With one clean strike, our boy drops the monster cold, while his greedy teammates are left completely speechless.#
+24 - But just as he catches his breath, an ominous red system alert warns him that the real nightmare has only begun.#"""
     else:
-        prompt_examples = """5 - Cậu vừa tưởng mọi chuyện đã kết thúc, nhưng hóa ra rắc rối mới chỉ bắt đầu.#
-[12, 13] - Trong lúc mọi người còn hoang mang, anh lập tức rút kiếm chém đứt cánh tay đối thủ.#
-[14, 15, 16] - Đòn tấn công uy lực khiến quái vật gầm rú dữ dội rồi đổ gục hoàn toàn xuống đất.#
-24 - Và đến cuối cùng, thứ chờ đợi họ lại là một biến cố còn nguy hiểm hơn nữa.#"""
+        prompt_examples = """5 - Hóa ra Paran chẳng hề gàn dở—ngay khi còi báo động vang lên, cậu là người duy nhất sẵn sàng nghênh đón thảm họa.#
+[12, 13] - Một con quái vật đột biến lao thẳng tới, nhưng Paran chỉ nhẹ nhàng né sang một bên rồi chém đứt cánh tay nó trong chớp mắt.#
+[14, 15, 16] - Một đòn dứt khoát của thanh niên nhà ta tiễn con quái vật đo ván tại chỗ, khiến hai gã đồng đội hám danh chỉ biết đứng hình há hốc mồm.#
+24 - Thế nhưng vừa mới kịp thở phào, một dòng cảnh báo đỏ rực từ hệ thống bất ngờ hiện lên, báo hiệu cơn ác mộng thực sự mới chỉ bắt đầu.#"""
 
     # ---------------------------------------------------------
     # Main prompt
@@ -3567,13 +3707,14 @@ YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY:
     return f"""
 ROLE:
 
-You are a professional short-form comic recap scriptwriter.
+You are an elite YouTube Manhwa Recap storyteller and scriptwriter (in the style of Manhwa Fresh, Plot Armor, Manga Recaps).
 
-Your job is to analyze the provided comic pages and create a concise,
-transformative story recap in {lang_name} for a TikTok/Shorts-style video.
+Your job is to analyze the provided comic pages and create a high-retention,
+binge-worthy story recap script in {lang_name} for YouTube audiences using
+the "Sarcastic Bro-Commentary" standard (80% immersive tension + 20% witty, pragmatic human commentary).
 
-The goal is to help the viewer understand the story while using original
-wording, natural narration, and entertaining commentary.
+The goal is to captivate the audience with natural spoken narration,
+authentic human-like pacing, and relatable deadpan observations.
 
 SOURCE:
 Title: "{comic_title}"
@@ -3586,9 +3727,29 @@ The provided pages are the primary source of truth.
 Do not invent events, characters, motivations, dialogue, outcomes, or
 future plot developments that are not supported by the provided material.
 
-If a page is unclear, unreadable, or ambiguous, do not guess.
+If something is ambiguous, describe only what can be confidently established.
 Use only information that can reasonably be established from the visual
 content and readable text.
+
+--------------------------------------------------
+STORY BEAT WORKFLOW & STRICT ASCENDING PAGE ORDER
+--------------------------------------------------
+
+For EVERY segment you produce, follow this natural workflow:
+  Step 1 — STORY BEAT:   Identify the next important story event or beat.
+  Step 2 — FIND PAGE(S): Scan the PDF for candidate pages that depict the action/reaction.
+  Step 3 — SELECT:       Pick the page or multi-page range [start, end] with clear visual evidence.
+  Step 4 — WRITE:        Write 1-2 concise narration sentences describing what the selected page(s) show.
+
+All selected page numbers across the ENTIRE output must appear in STRICTLY
+ASCENDING order.
+
+  Correct: 5 → 12 → 17 → 25 → 38
+  WRONG:   5 → 12 → 8 → 25   (page 8 goes backward)
+  WRONG:   5 → 12 → 12 → 25  (page 12 repeats)
+
+Never go backward, never repeat, never rearrange page order for dramatic
+effect. The story must flow forward exactly as the comic presents it.
 
 --------------------------------------------------
 1. TRANSFORMATIVE RECAP
@@ -3645,32 +3806,32 @@ The final segment must represent the latest meaningful story development
 shown in the provided material.
 
 --------------------------------------------------
-3. NATURAL SHORT-FORM STYLE & CULTURE
+3. NATURAL STORYTELLING STYLE & SPOKEN FLOW
 --------------------------------------------------
 
-Write like a native {lang_name} short-form content creator telling a story.
+Write like a seasoned YouTube recap narrator telling a story to an audience of peers.
 
 {language_rules}
 
 Style:
 - fast-paced and punchy;
-- conversational;
-- concise (each segment approximately 1–2 short sentences, 2.5s–3.5s spoken);
-- dramatic when appropriate;
+- conversational spoken flow;
+- concise (each segment approximately 1–2 short sentences, 2.5s–4.0s spoken);
+- dramatic tension balanced with deadpan wit;
 - easy to understand;
-- optimized for TTS;
+- optimized for natural TTS breath pauses;
 - short sentences with active verbs;
-- natural pauses;
+- natural pauses and conversational cadence;
 - minimal complicated sentence structures.
 
 Avoid:
 - literal translation style;
-- academic language;
+- academic language or stiff book narration;
 - excessive exposition;
 - repetitive sentence structures;
 - unnecessary descriptions of artwork.
 
-The narration should sound natural when spoken aloud.
+The narration should sound like an authentic human speaking aloud to a friend.
 
 --------------------------------------------------
 4. HUMOR
@@ -3738,12 +3899,22 @@ Crucial Visual Grounding & Expressiveness Rules:
 - Multi-Panel Density on Key Scenes: Select multi-panel ranges (e.g. [5, 6] or
   [12, 13]) whenever describing consecutive character actions, reactions, or
   combats within the same meaningful scene.
+- POINT SCORE HARD REQUIREMENT (STRICT ANTI-FILLER):
+  * Check the watermark header on every page in the PDF: "Page: <number> - Point: <score>".
+  * Point >= {point_score_threshold} is a HARD REQUIREMENT for normal page selection.
+  * NEVER select a page with Point < {point_score_threshold}. Low-point pages (< {point_score_threshold}) are filler, speech bubbles, empty text boxes, or low-detail panels.
+  * Art clarity, character expressions, and combat action completely override raw point scores as long as Point >= {point_score_threshold}.
+- VISUAL EVIDENCE HIERARCHY:
+  * LEVEL A — DIRECT VISUAL (HIGHEST PRIORITY): The page clearly displays the character's face, active combat, monster attacks, emotional reactions, physical actions, or dynamic apocalypse environments.
+  * LEVEL B — ESSENTIAL INFORMATIONAL VISUAL (USE SPARINGLY): The page shows an essential status/system window or world map critical to the plot (MUST still have Point >= {point_score_threshold}).
+  * LEVEL C & D — WEAK / NO EVIDENCE (STRICTLY FORBIDDEN): Do NOT use.
 - NO FILLER / NO MEANINGLESS IMAGES (STRICT RULE):
   * NEVER select empty dark skies, ambient background textures, speed lines,
     sound effect text bubbles, transition slivers, or solid black/white backgrounds.
   * NEVER select pure text cards, floating narrator text boxes without characters,
     or single word splash pages (e.g. 'WAR', 'PEACE', 'BOOM'). Always select panels
     showing characters, faces, monsters, powers, or actions.
+  * CRITICAL DIRECTIVE: You are directing a YouTube VIDEO recap, NOT an audiobook! The audience watches to SEE stunning comic artwork, combat, and expressive characters, NOT to read static text boxes while the voiceover talks. NEVER choose a page merely because its text box contains words matching your narration. ALWAYS choose the page with character art and action!
   * DO NOT mechanically pair pages in numerical sequence (e.g. [1, 2], [3, 4], [5, 6]).
   * Only select multi-panel ranges if BOTH panels contain meaningful story visuals.
   * If a page lacks meaningful story or character visuals, SKIP IT completely.
@@ -3754,6 +3925,18 @@ Crucial Visual Grounding & Expressiveness Rules:
   * Key character interactions and dialogue scenes.
 - Zero non-story pages: Never assign any segment to a cover, chapter title,
   production info, credit, or pure text card.
+
+ONE PAGE = ONE PRIMARY BEAT:
+  Each output segment represents exactly ONE primary story event.
+  Do not cram multiple distant story events into a single narration line.
+  Structure: [event] + [brief context] + [immediate consequence].
+
+NARRATION MUST FOLLOW THE PAGE:
+  The narration text MUST describe what the selected page visually shows.
+  If the page shows a sword, describe the sword.
+  If the page shows a punch, describe the punch.
+  If the page shows a system status window, explain the stats.
+  NEVER fabricate details that are not visible on the selected page.
 
 --------------------------------------------------
 8. ENDING ANCHOR
@@ -3793,7 +3976,23 @@ Avoid unnecessary graphic descriptions.
 Do not exaggerate the severity of an event beyond what is shown.
 
 --------------------------------------------------
-11. OUTPUT FORMAT
+11. GOLDEN CONTENT RATIO & ZERO CTA
+--------------------------------------------------
+
+Content balance for EVERY recap:
+  85%% Plot / Context — Focus on story events, character actions, reveals
+  10%% Natural Humor — Light, character-driven humor that flows naturally
+   5%% Punchline — Witty observations, ironic twists, or clever commentary
+
+ZERO CTA / ZERO THROAT-CLEARING:
+  ABSOLUTELY FORBIDDEN opening lines:
+    "Let's dive in...", "Welcome back...", "In today's episode...",
+    "Cùng theo dõi...", "Hãy cùng xem...", "Chào mừng các bạn..."
+  Jump straight into the story from the VERY FIRST line.
+  The first segment must be a story event or hook, never a greeting.
+
+--------------------------------------------------
+12. OUTPUT FORMAT
 --------------------------------------------------
 
 The output is consumed by an automated parser.
@@ -3832,6 +4031,56 @@ Silently verify that:
 7. Page references correspond strictly to visually relevant pages/panels.
 8. There are no greetings, titles, explanations, or Markdown.
 9. The result sounds natural when read aloud.
+"""
+
+
+def generate_intro_prompt(
+    comic_title: str,
+    total_pages: int,
+    target_language: str = "en",
+    market_id: str = None,
+    point_score_threshold: int = 65,
+) -> str:
+    """Generate a specialized prompt for Episode 1 Intro Hook only.
+
+    This prompt is used in Dual-Session mode: Session 1 generates only
+    a single explosive hook line, while Session 2 generates the full
+    story recap separately.
+    """
+    lang_map = {
+        "vi": "Vietnamese", "en": "English", "ko": "Korean", "ja": "Japanese",
+        "zh": "Chinese", "th": "Thai", "id": "Indonesian",
+    }
+    lang_key = str(target_language).lower().strip()
+    lang_name = lang_map.get(lang_key, target_language)
+    pt = point_score_threshold
+
+    return f"""
+ROLE:
+You are a hook-writing specialist for comic recap videos.
+
+TASK:
+Analyze the provided PDF of "{comic_title}" (Episode 1, {total_pages} pages).
+Your ONLY job is to produce exactly ONE explosive opening hook line.
+
+RULES:
+1. Find the BEST character portrait page (the page with the most striking,
+   dramatic depiction of the main protagonist).
+
+2. Write exactly ONE hook sentence in {lang_name}:
+   - Formula: [Shocking Paradox / Dire Crisis] + [Mysterious Twist / Hidden Power]
+   - MUST be under 18 words (2.5s-4.0s spoken)
+   - ZERO throat-clearing: no "Welcome", no "Today we...", no "Let's dive in"
+   - Make it cinematic, attention-grabbing, and impossible to scroll past
+
+3. Output format (EXACTLY one line):
+   <page_number> - <hook text>#
+
+EXAMPLE:
+7 - Everyone laughed at the weakest hunter, until he awakened a power that shattered the S-Rank ceiling.#
+
+OUTPUT:
+Produce ONLY the single hook line. Nothing else.
 """
 
 
@@ -4923,6 +5172,10 @@ class VideoRequest(BaseModel):
     remove_text_conf: float = 0.3
     remove_text_radius: int = 3
     ref_audio_path: Optional[str] = None
+    enable_bgm: bool = False
+    enable_flash_forward_intro: bool = False
+    flash_forward_custom_hook: Optional[str] = None
+
 
 def find_ffmpeg() -> str:
     import shutil
@@ -5834,6 +6087,9 @@ async def generate_video(payload: VideoRequest):
         "remove_text_conf": payload.remove_text_conf,
         "remove_text_radius": payload.remove_text_radius,
         "ref_audio_path": _validated_asset_reference(payload.ref_audio_path),
+        "enable_bgm": payload.enable_bgm,
+        "enable_flash_forward_intro": payload.enable_flash_forward_intro,
+        "flash_forward_custom_hook": payload.flash_forward_custom_hook,
     }
     atomic_write_json(job_dir / "input.json", worker_input)
     command = [sys.executable, "-m", "video_worker", "--job-dir", str(job_dir)]

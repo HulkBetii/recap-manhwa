@@ -10,6 +10,7 @@ def get_japan_isekai_prompt(
     ep: int,
     total_pages: int,
     glossary: Optional[str] = None,
+    point_score_threshold: int = 55,
 ) -> str:
     if not glossary:
         try:
@@ -28,53 +29,77 @@ def get_japan_isekai_prompt(
 
     if ep == 1:
         intro_rule = """
-EPISODE 1 HIGH-RETENTION HOOK (0–5秒の黄金ルール):
-第1文は視聴者の離脱を絶対に防ぐ、強烈なインパクトと理不尽な絶望からの逆転を予感させるオープニングフックにしてください。
-- 理不尽な追放・婚約破棄・無能宣告 ＋ 秘められた現代知識や規格外チートスキルの覚醒を暗示。
-- 「こんにちは」「今回は〜」などの挨拶や前置きは【完全禁止】です。
-- 例: "「お前のような無能は我が領地に不要だ！」――そう理不尽に追放された少年は、誰も想像し得ない規格外の現代知識を秘めていたのです。"
+EPISODE 1 HIGH-RETENTION HOOK (0-5s GOLDEN RULE):
+The first sentence must be a powerful opening hook with an overwhelming sense of injustice followed by a hint of reversal.
+- Unjust banishment/broken engagement/declaration of incompetence + hidden modern knowledge or overpowered cheat skill awakening.
+- No greetings like "Hello" or "Today we...". ABSOLUTELY FORBIDDEN.
 """
     else:
         intro_rule = """
-EPISODE CONTINUATION (一気見・総集編の連続視聴ルール):
-前話の緊迫した展開や領地発展の熱気をそのまま引き継ぎ、即座に本編を開始してください。
-- 挨拶や前話の長いあらすじ説明は一切挟まず、物語の核心から始めます。
-- 最終文は次回への期待感を最高潮に高めるクリフハンガー(Cliffhanger)で締めくくってください。
+EPISODE CONTINUATION:
+Continue directly from the previous chapter's tension or territory development momentum.
+- No greetings, no recap. Jump straight into the scene.
+- End with a cliffhanger that maximizes anticipation for the next chapter.
 """
+
+    pt = point_score_threshold
 
     return f"""
 ROLE:
-あなたはYouTubeでトップクラスの人気を誇る「漫画解説・一気見総集編」専門のプロのストーリーテラー兼シナリオライターです。
-提供された漫画の画像を詳細に分析し、【異世界転生 × 領地経営 × 成り上がり】ジャンル特有の「圧倒的な爽快感」「内政チートによる発展の快感」「理不尽な敵を見返す爽快なざまぁ」を極限まで引き出した、日本語ナレーション原稿を作成してください。
+You are a top-tier YouTube manga recap specialist and scriptwriter for the binge-watching format.
+Analyze the provided manga images and create a Japanese narration script that maximizes the satisfying feeling unique to Isekai Reincarnation x Territory Management x Rise to Power genres.
 
 SOURCE:
-作品名: "{comic_title}"
-エピソード: 第{ep}話
-ページ数: {total_pages}ページ
+Title: "{comic_title}"
+Episode: {ep}
+Total provided pages: {total_pages}
 
 {intro_rule}
 
-CORE TONE & NARRATION RULES (異世界領地経営・成り上がり専門の文体規律):
-1. 文末表現 (です・ます調の徹底):
-   - YouTube漫画解説特有の、落ち着きつつも高揚感を煽る丁寧な語り口を採用してください:
-     * 〜なのです、〜ことになります、〜してしまうのです、〜その瞬間！、〜状況でした。
-2. テンポとリズム (視聴維持率の最大化):
-   - 1文は30〜40文字程度で簡潔にまとめ、TTS音声が淀みなく歯切れよく聞こえるようにしてください。
-   - 主人公の圧倒的な機転、内政の快進撃、敵の狼狽ぶりを対比させてドラマチックに描写してください。
-3. YouTube収益化セーフティ (広告制限回避):
-   - 残酷描写や過激な出血表現は避け、[撃退する、無力化する、制裁を下す、平伏させる、圧倒する] 等のスマートで爽快な表現に置き換えてください。
-4. 専門用語とキーワード:
-   - 領地経営・成り上がり頻出用語(追放, 領主, 現代知識, 規格外スキル, 開拓, ざまぁ, 内政, 生産チート, 特産品, 防衛都市)を自然に織り交ぜてください。
-   - 用語集(Glossary): {glossary}
+STORY BEAT FIRST WORKFLOW:
+For EVERY segment, follow this workflow:
+  Step 1 - STORY BEAT:   Identify the next important story event.
+  Step 2 - FIND PAGE:    Scan PDF for candidate pages showing it.
+  Step 3 - SELECT PAGE:  Pick page or multi-page range [<start>, <end>] with clear visual evidence.
+  Step 4 - WRITE:        Write 1-2 concise narration sentences based on the page.
 
-FORMAT REQUIREMENTS (厳格遵守):
-- 各行は必ず以下のフォーマットに従ってください:
-  <ページ番号> - <日本語ナレーション文章>.#
-- 複数ページを結合する場合:
-  [<開始ページ>, <終了ページ>] - <日本語ナレーション文章>.#
-- すべての文末には必ず「句点とシャープ(.#)」を付与してください。
+STRICT ASCENDING PAGE ORDER:
+All page numbers must appear in strictly ascending order.
+Never go backward, never repeat, never rearrange.
 
-台本例:
+CORE TONE & NARRATION RULES:
+1. Sentence endings (desu/masu style):
+   - Use YouTube manga recap-style polite narration: ~なのです、~ことになります、~してしまうのです、~その瞬間！、~状況でした。
+2. Pacing:
+   - Keep sentences 30-40 characters, concise for TTS clarity.
+   - Dramatize the protagonist's brilliance, territory development, and enemies' dismay.
+3. YouTube Safety:
+   - Avoid graphic descriptions. Use: 撃退する、無力化する、制裁を下す、平伏させる、圧倒する.
+4. Terminology:
+   - Naturally integrate: 追放, 領主, 現代知識, 規格外スキル, 開拓, ざまぁ, 内政, 生産チート, 特産品, 防衛都市.
+   - Glossary: {glossary}
+
+5. PAGE SELECTION & VISUAL EVIDENCE:
+   - Direct Visual Alignment: Select panels showing clear character faces, action, combat, or key plot turning points.
+   - Multi-page ranges: Use [<start>, <end>] for action-reaction sequences.
+   - Zero filler: Never select blank backgrounds, pure credits, or empty cards.
+
+6. ONE PAGE = ONE PRIMARY BEAT:
+   Each segment = ONE primary story event.
+
+7. NARRATION MUST FOLLOW THE PAGE:
+   Describe only what the selected page shows. Never fabricate unseen details.
+
+8. GOLDEN CONTENT RATIO:
+   85%% Plot/Context + 10%% Natural Humor + 5%% Punchline.
+   ZERO CTA: Never open with greetings or channel promotions.
+
+FORMAT REQUIREMENTS:
+- Each line must follow: <page_number> - <Japanese narration>.#
+- Multi-page: [<start>, <end>] - <Japanese narration>.#
+- Every line MUST end with .#
+
+SCRIPT EXAMPLE:
 1 - 「お前のような無能は追放だ！」理不尽な宣告を受け、最果ての不毛な荒野へと追放されてしまった主人公。#
 [2, 3] - しかし絶望する周囲をよそに、彼は前世の記憶と規格外のチートスキルを密かに覚醒させていたのです。#
 5 - 誰もが見捨てた荒れ果てた大地に、現代の農業知識と土木魔法を一気に注ぎ込んでいきます。#

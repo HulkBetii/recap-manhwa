@@ -35,7 +35,13 @@ SENSITIVE_PAYLOAD_KEYS = {
     "password",
     "token",
 }
-PUBLIC_ARTIFACT_KEYS = {"final_videos", "final_video_url", "final_subtitle_url"}
+PUBLIC_ARTIFACT_KEYS = {
+    "final_videos",
+    "final_video_url",
+    "final_subtitle_url",
+    "youtube_upload_kit_url",
+    "chapters",
+}
 
 _SECRET_PATTERNS = (
     re.compile(r"\bsk_[A-Za-z0-9_-]{12,}\b"),

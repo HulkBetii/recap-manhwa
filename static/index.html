@@ -177,6 +177,7 @@
                                 <div class="input-wrapper">
                                     <select id="market-preset" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,174,110,0.4); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
                                         <option value="" selected>Mặc định (Toàn cầu / Tuỳ chỉnh)</option>
+                                        <option value="us_apocalypse">🇺🇸 US: Apocalypse & Survival (Cold Open Hook + Badass Narration + BGM Ducking)</option>
                                         <option value="korea_apocalypse">🇰🇷 Hàn Quốc: Sinh tồn · Tận thế (종말 · 생존 몰아보기)</option>
                                         <option value="japan_isekai_territory">🇯🇵 Nhật Bản: 異世界転生 × 領地経営 × 成り上がり</option>
                                     </select>
@@ -201,24 +202,32 @@
                                 <label for="tts-voice-id" style="font-size: 0.7rem; color: var(--text-secondary);">Chế độ giọng đọc (TTS Mode)</label>
                                 <div class="input-wrapper">
                                     <select id="tts-voice-id" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
-                                        <option value="ai33pro" selected>API AI33Pro (ElevenLabs / EdgeTTS Auto Fallback)</option>
+                                        <option value="clone" selected>OmniVoice Voice Cloning (Jessa - Mặc định Tiếng Việt: easygoing and effortless)</option>
+                                        <option value="edge-tts_vi-VN-NamMinhNeural">EdgeTTS Tiếng Việt (Nam Minh - Nam trầm)</option>
+                                        <option value="edge-tts_vi-VN-HoaiMyNeural">EdgeTTS Tiếng Việt (Hoài My - Nữ nhẹ nhàng)</option>
+                                        <option value="ai33pro">API AI33Pro (ElevenLabs / EdgeTTS Auto Fallback)</option>
                                         <option value="edge-tts_ko-KR-InJoonNeural">EdgeTTS Hàn Quốc (ko-KR-InJoonNeural - Nam trầm kịch tính)</option>
                                         <option value="edge-tts_ko-KR-SunHiNeural">EdgeTTS Hàn Quốc (ko-KR-SunHiNeural - Nữ chuẩn)</option>
                                         <option value="voicevox">VOICEVOX Local GPU (Tiếng Nhật - Zundamon / Anime)</option>
                                         <option value="edge-tts">EdgeTTS Trực tiếp (en-US Christopher)</option>
                                         <option value="auto">OmniVoice Auto (Tự động thiết kế giọng)</option>
                                         <option value="design">OmniVoice Prompt Design (Thiết kế giọng bằng văn bản)</option>
-                                        <option value="clone">OmniVoice Voice Cloning (Sao chép giọng nói mẫu)</option>
                                     </select>
                                 </div>
                             </div>
                         </div>
 
 
-                        <label for="burn-subtitles" style="display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.5rem; font-size: 0.72rem; color: var(--text-secondary); cursor: pointer;">
-                            <input type="checkbox" id="burn-subtitles">
-                            <span>Chèn phụ đề vào video (vẫn luôn xuất file SRT)</span>
-                        </label>
+                        <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap;">
+                            <label for="burn-subtitles" style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.72rem; color: var(--text-secondary); cursor: pointer;">
+                                <input type="checkbox" id="burn-subtitles">
+                                <span>Chèn phụ đề vào video (vẫn luôn xuất file SRT)</span>
+                            </label>
+                            <label for="enable-bgm" style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.72rem; color: #FFAE6E; cursor: pointer;">
+                                <input type="checkbox" id="enable-bgm">
+                                <span>🎵 Bật BGM & Auto Ducking</span>
+                            </label>
+                        </div>
 
                         <!-- VOICEVOX Local GPU Configurations -->
                         <div id="voicevox-config-area" style="display: none; margin-bottom: 0.5rem;">
