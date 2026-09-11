@@ -1888,10 +1888,13 @@ def parse_gemini_recap_text(text: str) -> list:
                 content = re.sub(r"[\*\_`]", "", content).strip()
                 imgs = _parse_gemini_image_specs(page_spec)
                 if imgs and content:
-                    parsed_list.append({
-                        "speech": content,
-                        "images": imgs
-                    })
+                    # Clean any trailing leaked segment headers accidentally glued into content
+                    content = re.sub(r"\s*\[\s*\d+\s*(?:,\s*\d+\s*)*\s*\]\s*[\-:].*$", "", content).strip()
+                    if content:
+                        parsed_list.append({
+                            "speech": content,
+                            "images": imgs
+                        })
                     
     # Fallback to JSON if plain text parsing did not yield any results
     if not parsed_list:
@@ -1903,6 +1906,10 @@ def parse_gemini_recap_text(text: str) -> list:
                     parsed_list = temp_data
             except Exception:
                 pass
+
+    # Apply Anti-Loop Guardrail auto-healing to prune duplicate narrative loops
+    from recap_schema import prune_recap_loops
+    parsed_list, _ = prune_recap_loops(parsed_list)
                 
     # Normalize priorities for downstream components
     for item in parsed_list:

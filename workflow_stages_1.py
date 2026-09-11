@@ -1799,7 +1799,20 @@ class Stage5_GeminiAutomation(BaseStage):
                         await context.log(f"[DEBUG] Phản hồi Gemini quá ngắn ({len(parsed_data)} phân đoạn): {preview}", "warning", episode=ep)
                         raise Exception(f"Kịch bản recap từ {vlm_name} quá ngắn ({len(parsed_data)} phân đoạn), yêu cầu ít nhất 10 phân đoạn.")
                     
-                    from recap_schema import parse_recap_data
+                    from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops
+                    has_loop, loop_idx = detect_recap_loop(parsed_data, max_page=len(image_files))
+                    if has_loop:
+                        pruned_data, was_pruned = prune_recap_loops(parsed_data, max_page=len(image_files))
+                        if was_pruned and len(pruned_data) >= 10:
+                            await context.log(
+                                f"Tập {ep}: Anti-Loop Guardrail: Đã phát hiện và tự động cắt bỏ vòng lặp kịch bản (giữ lại {len(pruned_data)} phân cảnh đầu, loại bỏ {len(parsed_data) - len(pruned_data)} phân cảnh lặp).",
+                                "info",
+                                episode=ep,
+                            )
+                            parsed_data = pruned_data
+                        else:
+                            raise Exception(f"Kịch bản recap từ {vlm_name} bị lỗi lặp vòng cốt truyện tại phân cảnh {loop_idx} và không thể tự phục hồi an toàn.")
+
                     normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
                     raw_temp_path = raw_response_path + ".tmp"
                     recap_temp_path = recap_json_path + ".tmp"

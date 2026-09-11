@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +55,101 @@ def _reject_non_finite(value: str) -> None:
     raise ValueError(f"non-finite JSON number is not allowed: {value}")
 
 
-def parse_recap_data(value: Any, *, max_page: int | None = None) -> list[RecapSegment]:
+def _extract_segment_pages(seg: Any) -> list[int]:
+    """Helper to extract integer page numbers from dict or RecapSegment."""
+    if isinstance(seg, dict):
+        images = seg.get("images", [])
+        pages = []
+        for img in images:
+            if isinstance(img, dict) and "page" in img:
+                try:
+                    pages.append(int(img["page"]))
+                except (ValueError, TypeError):
+                    pass
+        return pages
+    elif hasattr(seg, "images"):
+        pages = []
+        for img in getattr(seg, "images", []):
+            if hasattr(img, "page"):
+                try:
+                    pages.append(int(getattr(img, "page")))
+                except (ValueError, TypeError):
+                    pass
+        return pages
+    return []
+
+
+def detect_recap_loop(segments: list[Any], *, max_page: int | None = None) -> tuple[bool, int | None]:
+    """
+    Detects if the recap contains a chronological loop / restart
+    (where the story reached a high page, then suddenly resets back to early pages <= 3
+    and continues climbing, indicating an AI repetition loop).
+    Returns (has_loop, loop_start_index).
+    """
+    if not isinstance(segments, list) or len(segments) < 8:
+        return False, None
+
+    peak_page = 0
+    min_peak = 12 if max_page is None else max(10, int(max_page * 0.35))
+
+    for idx, seg in enumerate(segments):
+        pages = _extract_segment_pages(seg)
+        if not pages:
+            continue
+        cur_min = min(pages)
+        cur_max = max(pages)
+
+        # Check if story already progressed to substantial page depth
+        # and current segment abruptly plunges back to beginning (<= 3)
+        if idx >= 6 and peak_page >= min_peak and cur_min <= 3:
+            # Confirm sequence: check subsequent segments to differentiate from a 1-shot flashback
+            subsequent_indices = range(idx, min(len(segments), idx + 3))
+            subsequent_pages = []
+            for sub_idx in subsequent_indices:
+                subsequent_pages.extend(_extract_segment_pages(segments[sub_idx]))
+
+            if subsequent_pages and (
+                max(subsequent_pages) <= 8
+                or (sum(subsequent_pages) / len(subsequent_pages)) <= 6.0
+            ):
+                return True, idx
+
+        if cur_max > peak_page:
+            peak_page = cur_max
+
+    return False, None
+
+
+def prune_recap_loops(
+    segments: list[dict[str, Any]], *, max_page: int | None = None
+) -> tuple[list[dict[str, Any]], bool]:
+    """
+    Auto-heals recaps containing detected narrative loops.
+    If a loop is detected at index i:
+      - If the first portion (0 to i-1) has >= 10 segments and represents substantial progress,
+        prunes the duplicate tail and cleans any concatenated syntax at the boundary.
+      - Returns (sanitized_segments, was_pruned).
+    """
+    has_loop, loop_idx = detect_recap_loop(segments, max_page=max_page)
+    if not has_loop or loop_idx is None:
+        return segments, False
+
+    primary_portion = [dict(s) for s in segments[:loop_idx]]
+    if len(primary_portion) >= 10:
+        # Sanitize trailing speech on the boundary segment if it contains leaked prompt/segment syntax
+        last_seg = primary_portion[-1]
+        speech = str(last_seg.get("speech", ""))
+        cleaned_speech = re.sub(r"\s*\[\s*\d+\s*(?:,\s*\d+\s*)*\s*\]\s*[\-:].*$", "", speech).strip()
+        if cleaned_speech:
+            last_seg["speech"] = cleaned_speech
+        return primary_portion, True
+
+    return segments, False
+
+
+def parse_recap_data(
+    value: Any, *, max_page: int | None = None, allow_loops: bool = False
+) -> list[RecapSegment]:
     if not isinstance(value, list) or not value:
         raise ValueError("recap must be a non-empty list")
     segments = [RecapSegment.model_validate(item) for item in value]
@@ -65,6 +160,12 @@ def parse_recap_data(value: Any, *, max_page: int | None = None) -> list[RecapSe
             for image in segment.images:
                 if image.page > max_page:
                     raise ValueError(f"page {image.page} exceeds available page count {max_page}")
+
+    if not allow_loops:
+        has_loop, loop_idx = detect_recap_loop(segments, max_page=max_page)
+        if has_loop:
+            raise ValueError(f"Recap contains a detected narrative loop/repetition at segment {loop_idx}")
+
     return segments
 
 
