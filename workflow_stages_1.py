@@ -1389,6 +1389,23 @@ class Stage5_GeminiAutomation(BaseStage):
                     await local_nm.safe_goto(page, vlm_url, reason=f"Load {vlm_name} ep {ep}", caller=f"Ep_{ep}")
                     await asyncio.sleep(2.0)
                     
+                    # Click New Chat button to ensure clean session without previous chat errors
+                    try:
+                        new_chat_selectors = [
+                            "[data-test-id='new-chat-button']",
+                            "button[aria-label*='New chat']",
+                            "button[aria-label*='Cuộc trò chuyện mới']",
+                            "a[href='/app']"
+                        ]
+                        for ncs in new_chat_selectors:
+                            nc_btn = page.locator(ncs).first
+                            if await nc_btn.count() > 0 and await nc_btn.is_visible():
+                                await nc_btn.click()
+                                await asyncio.sleep(1.5)
+                                break
+                    except Exception:
+                        pass
+                    
                     # Ensure target model (3.8 Flash) is selected and check rate-limit status on this page before prompting
                     try:
                         from app import check_gemini_login_and_limit_status
@@ -1895,9 +1912,14 @@ class Stage5_GeminiAutomation(BaseStage):
                             await context.log(f"Lỗi tạo PDF safety fallback: {safe_err}", "error", episode=ep)
                             
                     # Reset shared context on any failure so next attempt checks rate limit and rotates profile if needed
-                    await context.log("Đặt lại browser context để sẵn sàng xoay vòng tài khoản nếu cần...", "warning", episode=ep)
+                    await context.log("Đặt lại browser context và xoay vòng tài khoản cho lần thử tiếp theo nếu cần...", "warning", episode=ep)
                     try:
-                        from app import reset_shared_browser_context
+                        from app import reset_shared_browser_context, load_config, save_config
+                        cfg = load_config()
+                        profiles = cfg.get("chrome_profiles", [])
+                        if profiles:
+                            cfg["current_profile_index"] = (cfg.get("current_profile_index", 0) + 1) % len(profiles)
+                            save_config(cfg)
                         await reset_shared_browser_context()
                     except Exception:
                         pass
