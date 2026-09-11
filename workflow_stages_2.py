@@ -323,23 +323,27 @@ def align_subtitles_to_segments(subtitles: list, segments: list, audio_duration:
     last_end_time = 0.0
 
     for seg_idx, seg in enumerate(segments):
+        char_count = max(1, count_meaningful_units(seg.get("speech", "")))
+        min_seg_dur = max(1.8, min(4.0, char_count * 0.08))
+
         matched_subs = [sub for sub in subtitles if sub.get("matched_segment_idx") == seg_idx]
         if matched_subs:
             start_time = min(sub["start"] for sub in matched_subs)
             end_time = max(sub["end"] for sub in matched_subs)
         else:
             start_time = last_end_time
-            char_count = max(1, count_meaningful_units(seg.get("speech", "")))
             if total_segment_units > 0 and audio_duration > 0:
-                estimated_dur = max(2.5, (char_count / total_segment_units) * audio_duration)
+                estimated_dur = max(min_seg_dur, (char_count / total_segment_units) * audio_duration)
             else:
-                estimated_dur = max(2.5, char_count * 0.15)
+                estimated_dur = max(min_seg_dur, char_count * 0.15)
             end_time = start_time + estimated_dur
 
         if start_time < last_end_time:
             start_time = last_end_time
-        if end_time <= start_time:
-            end_time = start_time + 2.5
+        # Hard floor: Ensure segment duration is at least min_seg_dur (>= 1.8s)
+        # Prevents Whisper compression flicker (e.g. 0.11s segments)
+        if (end_time - start_time) < min_seg_dur:
+            end_time = start_time + min_seg_dur
 
         last_end_time = end_time
         normalized_entries.append({
@@ -918,7 +922,31 @@ class CameraPlanner:
                 "transition": transition
             }
 
-        # Mode 2: Long Duration (> 4.5s) -> Deep Gentle Cinematic Motion (1.00x -> 1.045x)
+        # Mode 2: Ultra-Long Duration (> 7.0s) -> Dual Sub-shot Cinematic Cut
+        # Splits long stagnation into two cinematic camera angles:
+        # Shot 1: Tight focal subject zoom (scale 1.01 -> 1.05)
+        # Shot 2: Instant jump cut to wide overview / panel context (scale 1.00 -> 1.025)
+        if duration > 7.0:
+            animation_type = "dual_shot_cinematic"
+            t_split = round(duration * 0.5, 3)
+            keyframes = [
+                # Shot 1: Tight focal subject zoom (0.0 -> t_split)
+                {"time": 0.0, "x": center_x, "y": center_y * 0.5 + focal_y * 0.5, "scale": 1.01},
+                {"time": t_split, "x": center_x, "y": focal_y, "scale": 1.05},
+                # Instant jump cut to Shot 2: Wide overview / panel context (t_split + 0.001 -> duration)
+                {"time": t_split + 0.001, "x": center_x, "y": center_y, "scale": 1.00},
+                {"time": duration, "x": center_x, "y": center_y * 0.8 + focal_y * 0.2, "scale": 1.025},
+            ]
+            return {
+                "page": page_num,
+                "duration": duration,
+                "animation_type": animation_type,
+                "easing": easing,
+                "keyframes": keyframes,
+                "transition": transition,
+            }
+
+        # Mode 2b: Long Duration (4.5s < duration <= 7.0s) -> Deep Gentle Cinematic Motion (1.00x -> 1.045x)
         if duration > 4.5:
             animation_type = "virtual_multicam"
             keyframes = [
@@ -1220,7 +1248,36 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     merged_page_displays[-1]["end_time"] = merged_page_displays[-1]["start_time"] + merged_page_displays[-1]["duration"]
                 else:
                     merged_page_displays.append(pd)
-            page_displays = merged_page_displays
+
+            # Hard Floor (>= 1.8s) Display Guardrail:
+            # Eliminate sub-1.8s flicker displays by merging duration into adjacent display
+            cleaned_page_displays = []
+            for pd in merged_page_displays:
+                if cleaned_page_displays and pd["duration"] < 1.8:
+                    cleaned_page_displays[-1]["duration"] += pd["duration"]
+                    cleaned_page_displays[-1]["end_time"] = (
+                        cleaned_page_displays[-1]["start_time"] + cleaned_page_displays[-1]["duration"]
+                    )
+                else:
+                    cleaned_page_displays.append(pd)
+
+            # If the very first display is < 1.8s and there are subsequent displays, merge into next display
+            if len(cleaned_page_displays) > 1 and cleaned_page_displays[0]["duration"] < 1.8:
+                first = cleaned_page_displays.pop(0)
+                cleaned_page_displays[0]["duration"] += first["duration"]
+                cleaned_page_displays[0]["start_time"] = first["start_time"]
+
+            # Secondary pass: re-merge if duration absorption created consecutive identical images
+            final_page_displays = []
+            for pd in cleaned_page_displays:
+                if final_page_displays and final_page_displays[-1]["image_file"] == pd["image_file"]:
+                    final_page_displays[-1]["duration"] += pd["duration"]
+                    final_page_displays[-1]["end_time"] = (
+                        final_page_displays[-1]["start_time"] + final_page_displays[-1]["duration"]
+                    )
+                else:
+                    final_page_displays.append(pd)
+            page_displays = final_page_displays
 
             # Precompute bounds, focal points, and plans
             bounds_cache_path = os.path.join(ep_dir, "content_bounds_cache.json")

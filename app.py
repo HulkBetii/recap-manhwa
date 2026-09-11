@@ -3899,6 +3899,9 @@ Crucial Visual Grounding & Expressiveness Rules:
 - Multi-Panel Density on Key Scenes: Select multi-panel ranges (e.g. [5, 6] or
   [12, 13]) whenever describing consecutive character actions, reactions, or
   combats within the same meaningful scene.
+- DENSE VISUAL PACING & IMAGE ALLOCATION:
+  * For longer narrative sentences exceeding 100 characters (or duration > 6s), allocate 2 distinct consecutive pages with clear visual evidence (e.g. [<page1>, <page2>]) to maintain visual momentum and prevent viewer fatigue.
+  * For short, punchy phrases (< 40 characters), allocate exactly 1 page. Never assign multiple pages to rapid short phrases.
 - POINT SCORE HARD REQUIREMENT (STRICT ANTI-FILLER):
   * Check the watermark header on every page in the PDF: "Page: <number> - Point: <score>".
   * Point >= {point_score_threshold} is a HARD REQUIREMENT for normal page selection.

@@ -82,6 +82,9 @@ CORE TONE & NARRATION RULES:
 5. PAGE SELECTION & VISUAL EVIDENCE:
    - Direct Visual Alignment: Select panels showing clear character faces, action, combat, or key plot turning points.
    - Multi-page ranges: Use [<start>, <end>] for action-reaction sequences.
+   - DENSE VISUAL PACING & IMAGE ALLOCATION:
+     * For narrative sentences exceeding 60 characters (duration > 6s), allocate 2 distinct consecutive pages (e.g. [<page1>, <page2>]) to keep visual rhythm dynamic.
+     * For short phrases (< 25 characters), allocate exactly 1 page. Never assign multiple pages to rapid short phrases.
    - Zero filler: Never select blank backgrounds, pure credits, or empty cards.
 
 6. ONE PAGE = ONE PRIMARY BEAT:

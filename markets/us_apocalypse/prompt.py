@@ -186,6 +186,9 @@ CORE TONE & NARRATION RULES (US APOCALYPSE RECAP ARCHETYPE):
      * NEVER choose pure sound-effect pages, logo pages, translator credits, or panels cut awkwardly through a character's neck/face.
      * CRITICAL DIRECTIVE: You are directing a YouTube VIDEO recap, NOT an audiobook! The audience watches to SEE stunning comic artwork, combat, and expressive characters, NOT to read static text boxes while the voiceover talks. NEVER choose a page merely because its text box contains words matching your narration. ALWAYS choose the page with character art and action!
    - Multi-page ranges: Use [<start>, <end>] for action-reaction sequences.
+   - DENSE VISUAL PACING & IMAGE ALLOCATION:
+     * For narrative sentences exceeding 100 characters (duration > 6s), allocate 2 distinct consecutive pages with clear visual evidence (e.g. [<page1>, <page2>]) to maintain visual momentum and prevent viewer fatigue.
+     * For short, punchy phrases (< 40 characters), allocate exactly 1 page. Never assign multiple pages to rapid short phrases.
    - Zero filler: Never select blank backgrounds, pure credits, or empty cards.
 
 6. ONE PAGE = ONE PRIMARY BEAT:
