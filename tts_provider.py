@@ -163,19 +163,45 @@ _ref_audio_transcriptions = {}
 
 def get_ref_audio_text(ref_audio_path: str) -> str:
     global _ref_audio_transcriptions
-    if ref_audio_path not in _ref_audio_transcriptions:
-        logger.info(f"Transcribing reference audio '{ref_audio_path}' locally using Whisper...")
-        m_type, model = get_whisper_model()
-        with _whisper_lock:
-            if m_type == "faster_whisper":
-                segments_gen, _ = model.transcribe(ref_audio_path)
-                text = " ".join([s.text for s in segments_gen]).strip()
-            else:
-                result = model.transcribe(ref_audio_path)
-                text = result.get("text", "").strip()
-        logger.info(f"Transcribed reference audio text: '{text}'")
-        _ref_audio_transcriptions[ref_audio_path] = text
-    return _ref_audio_transcriptions[ref_audio_path]
+    norm_path = os.path.normpath(os.path.abspath(ref_audio_path)).lower()
+    
+    # 1. Check in-memory cache
+    if norm_path in _ref_audio_transcriptions:
+        return _ref_audio_transcriptions[norm_path]
+    if ref_audio_path in _ref_audio_transcriptions:
+        return _ref_audio_transcriptions[ref_audio_path]
+        
+    # 2. Check OMNIVOICE_PRESETS registry in config.py
+    presets = getattr(config, "OMNIVOICE_PRESETS", {})
+    ref_filename = os.path.basename(ref_audio_path).lower()
+    for preset_key, pdata in presets.items():
+        p_ref = pdata.get("ref_audio", "")
+        if p_ref and (
+            norm_path == os.path.normpath(os.path.abspath(p_ref)).lower()
+            or ref_filename == os.path.basename(p_ref).lower()
+            or preset_key.lower() in ref_filename
+        ):
+            cached_text = pdata.get("ref_text", "").strip()
+            if cached_text:
+                logger.info(f"OmniVoice: Using pre-cached reference text for preset '{preset_key}': '{cached_text}'")
+                _ref_audio_transcriptions[norm_path] = cached_text
+                _ref_audio_transcriptions[ref_audio_path] = cached_text
+                return cached_text
+
+    # 3. Fallback to local Whisper transcription
+    logger.info(f"Transcribing reference audio '{ref_audio_path}' locally using Whisper...")
+    m_type, model = get_whisper_model()
+    with _whisper_lock:
+        if m_type == "faster_whisper":
+            segments_gen, _ = model.transcribe(ref_audio_path)
+            text = " ".join([s.text for s in segments_gen]).strip()
+        else:
+            result = model.transcribe(ref_audio_path)
+            text = result.get("text", "").strip()
+    logger.info(f"Transcribed reference audio text: '{text}'")
+    _ref_audio_transcriptions[norm_path] = text
+    _ref_audio_transcriptions[ref_audio_path] = text
+    return text
 
 def normalize_srt_content(raw_srt: str) -> str:
     import re
@@ -507,6 +533,7 @@ async def generate_tts(
     ref_audio_path: str = None,
     rate: str = "+0%",
     pitch: str = "+0Hz",
+    language: str = None,
 ) -> bool:
     """
     Generates local TTS audio (MP3) and its SRT transcript.
@@ -552,7 +579,48 @@ async def generate_tts(
             "num_step": config.OMNIVOICE_NUM_STEPS
         }
         
-        # Resolve default reference audio for cloning (Jessa voice default)
+        # 1. Preset identification from voice_id
+        presets = getattr(config, "OMNIVOICE_PRESETS", {})
+        active_preset = None
+        clean_vid = v_id.lower().replace("clone_", "").replace("voice_", "").strip()
+        if clean_vid in presets:
+            active_preset = presets[clean_vid]
+        elif v_id in ("clone_andrew", "andrew"):
+            active_preset = presets.get("andrew")
+        elif v_id in ("clone_jessa", "jessa"):
+            active_preset = presets.get("jessa")
+
+        # 2. Resolve language
+        target_lang = None
+        if language and language.strip():
+            l_lower = language.strip().lower()
+            if l_lower in ("en", "english", "en-us", "us"):
+                target_lang = "English"
+            elif l_lower in ("vi", "vietnamese"):
+                target_lang = "Vietnamese"
+            else:
+                target_lang = language.strip()
+        elif active_preset and active_preset.get("language"):
+            target_lang = active_preset["language"]
+        elif v_id in ("clone_andrew", "andrew"):
+            target_lang = "English"
+
+        if target_lang:
+            kwargs["language"] = target_lang
+            logger.info(f"OmniVoice: Generating TTS with native language='{target_lang}'")
+
+        # 3. Resolve reference audio from preset or default
+        if not ref_audio_path:
+            if active_preset and active_preset.get("ref_audio") and os.path.exists(active_preset["ref_audio"]):
+                ref_audio_path = active_preset["ref_audio"]
+                logger.info(f"OmniVoice: Using preset '{clean_vid}' reference audio: {ref_audio_path}")
+            elif target_lang == "English":
+                andrew_ref = getattr(config, "ANDREW_DEFAULT_REF_AUDIO", None)
+                if andrew_ref and os.path.exists(andrew_ref):
+                    ref_audio_path = andrew_ref
+                    logger.info(f"OmniVoice: Using default English (US) reference audio: {ref_audio_path}")
+
+        # Fallback to default reference audio
         default_ref = getattr(config, "DEFAULT_REF_AUDIO_PATH", None)
         if not default_ref or not os.path.exists(default_ref):
             default_ref = os.path.join(os.getcwd(), "static", "jessa - easygoing and effortless.mp3")
@@ -561,6 +629,25 @@ async def generate_tts(
             if default_ref and os.path.exists(default_ref):
                 ref_audio_path = default_ref
                 logger.info(f"OmniVoice: Using default reference audio for cloning: {ref_audio_path}")
+
+        # 4. Auto-trimming guardrail for custom ref_audio > 20s
+        if ref_audio_path and os.path.exists(ref_audio_path):
+            try:
+                probe_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", ref_audio_path]
+                probe_res = json.loads(subprocess.check_output(probe_cmd).decode())
+                ref_dur = float(probe_res.get("format", {}).get("duration", 0))
+                if ref_dur > 20.0:
+                    logger.warning(f"OmniVoice: Reference audio is {ref_dur:.1f}s (>20s). Auto-trimming to 8s to prevent GPU memory ballooning...")
+                    trimmed_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "voices")
+                    os.makedirs(trimmed_dir, exist_ok=True)
+                    safe_name = f"trimmed_{os.path.splitext(os.path.basename(ref_audio_path))[0][:16]}.wav"
+                    trimmed_path = os.path.join(trimmed_dir, safe_name)
+                    if not os.path.exists(trimmed_path):
+                        trim_cmd = ["ffmpeg", "-y", "-i", ref_audio_path, "-ss", "0.0", "-to", "8.0", "-ar", "24000", "-ac", "1", trimmed_path]
+                        subprocess.run(trim_cmd, check=True)
+                    ref_audio_path = trimmed_path
+            except Exception as e:
+                logger.debug(f"OmniVoice: Could not check ref audio duration: {e}")
 
         if ref_audio_path and os.path.exists(ref_audio_path):
             logger.info(f"OmniVoice: Generating TTS with Voice Cloning from reference audio: {ref_audio_path}")

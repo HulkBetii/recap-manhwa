@@ -330,14 +330,25 @@ class SSELogger:
     def __init__(self):
         self.queues = []
 
-    def register(self):
-        q = asyncio.Queue()
+    def register(self, maxsize: int = 1000):
+        q = asyncio.Queue(maxsize=maxsize)
         self.queues.append(q)
         return q
 
     def unregister(self, q):
         if q in self.queues:
             self.queues.remove(q)
+
+    def _broadcast(self, payload: dict):
+        for q in list(self.queues):
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                    q.put_nowait(payload)
+                except Exception:
+                    pass
 
     async def log(self, message: str, level: str = "info", app_status: str = None, status_text: str = None, data: dict = None):
         safe_message = redact_sensitive_text(str(message)) or ""
@@ -360,8 +371,7 @@ class SSELogger:
         if data:
             payload["data"] = data
 
-        for q in self.queues:
-            await q.put(payload)
+        self._broadcast(payload)
 
 sse_logger = SSELogger()
 
@@ -374,8 +384,7 @@ async def sse_event_bus_subscriber(event_name: str, task_id: str, data):
         "message": f"Workflow Event: {event_name}",
         "level": "event"
     }
-    for q in sse_logger.queues:
-        await q.put(payload)
+    sse_logger._broadcast(payload)
 
 event_bus.subscribe(sse_event_bus_subscriber)
 
@@ -841,7 +850,7 @@ class CrawlRequest(BaseModel):
     pdf_quality: int = Field(default=20, ge=10, le=100)
     language: str = "en"
     vlm_provider: Literal["gemini"] = "gemini"
-    voice_id: str = "ai33pro"
+    voice_id: str = "clone_andrew"
     ref_audio_path: Optional[str] = None
     logo_path: Optional[str] = None
     overlay_path: Optional[str] = None
@@ -1291,33 +1300,32 @@ async def check_gemini_login_and_limit_status(page, context_logger=None, target_
     except Exception:
         return "ok"
         
-    check_js = f"""
-    (() => {{
-        const targetModel = "{target_model}";
+    check_js = """
+    ((targetModel) => {
         const items = Array.from(document.querySelectorAll('gem-menu-item, [role="menuitem"], [role="option"], .mat-mdc-menu-item'));
         let targetItem = null;
         
-        if (targetModel.includes("Pro")) {{
+        if (targetModel.includes("Pro")) {
             targetItem = items.find(el => /3\\.1\\s*Pro/i.test(el.textContent))
                       || items.find(el => /Pro/i.test(el.textContent) && !/Lite|Flash|Thinking/i.test(el.textContent));
-        }} else {{
+        } else {
             targetItem = items.find(el => /3\\.8\\s*Flash/i.test(el.textContent))
                       || items.find(el => /3\\.6\\s*Flash/i.test(el.textContent))
                       || items.find(el => /Flash/i.test(el.textContent) && !/Lite|Pro|Thinking/i.test(el.textContent))
                       || document.querySelector('gem-menu-item[data-mode-id="56fdd199312815e2"]');
-        }}
+        }
         
-        if (!targetItem) {{
+        if (!targetItem) {
             // General fallback
             targetItem = items.find(el => /3\\.1\\s*Pro/i.test(el.textContent))
                       || items.find(el => /Pro/i.test(el.textContent))
                       || items.find(el => /3\\.8\\s*Flash/i.test(el.textContent))
                       || items.find(el => /Flash/i.test(el.textContent));
-        }}
+        }
                        
-        if (!targetItem) {{
-            return {{ error: targetModel + " model option not found in menu" }};
-        }}
+        if (!targetItem) {
+            return { error: targetModel + " model option not found in menu" };
+        }
         
         const ariaDisabled = targetItem.getAttribute('aria-disabled') === 'true';
         const hasDisabledClass = targetItem.classList.contains('disabled') 
@@ -1330,19 +1338,19 @@ async def check_gemini_login_and_limit_status(page, context_logger=None, target_
         const isLimitText = /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(sublabel) || /limit|giới hạn|reached|resets/i.test(targetItem.textContent);
         const isLimited = ariaDisabled || hasDisabledClass || isLimitText;
         
-        if (!isLimited) {{
+        if (!isLimited) {
             targetItem.click();
-        }}
+        }
         
-        return {{
+        return {
             isLimited: isLimited,
             sublabel: sublabel,
             clicked: !isLimited
-        }};
-    }})()
+        };
+    })
     """
     try:
-        result = await page.evaluate(check_js)
+        result = await page.evaluate(check_js, str(target_model))
     except Exception:
         result = None
         
@@ -1378,23 +1386,22 @@ async def ensure_model_selected(page, context_logger=None, target_model="3.8 Fla
         await dropdown_btn.click()
         await page.wait_for_timeout(1000)
         
-        check_js = f"""
-        (() => {{
-            const targetModel = "{target_model}";
+        check_js = """
+        ((targetModel) => {
             const items = Array.from(document.querySelectorAll('gem-menu-item, [role="menuitem"], [role="option"], .mat-mdc-menu-item'));
             let targetItem = null;
             
-            if (targetModel.includes("Pro")) {{
+            if (targetModel.includes("Pro")) {
                 targetItem = items.find(el => /3\\.1\\s*Pro/i.test(el.textContent))
                           || items.find(el => /Pro/i.test(el.textContent) && !/Lite|Flash|Thinking/i.test(el.textContent));
-            }} else {{
+            } else {
                 targetItem = items.find(el => /3\\.8\\s*Flash/i.test(el.textContent))
                           || items.find(el => /3\\.6\\s*Flash/i.test(el.textContent))
                           || items.find(el => /Flash/i.test(el.textContent) && !/Lite|Pro|Thinking/i.test(el.textContent))
                           || document.querySelector('gem-menu-item[data-mode-id="56fdd199312815e2"]');
-            }}
+            }
                             
-            if (targetItem) {{
+            if (targetItem) {
                 const ariaDisabled = targetItem.getAttribute('aria-disabled') === 'true';
                 const hasDisabledClass = targetItem.classList.contains('disabled') 
                                       || targetItem.classList.contains('gmat-disabled');
@@ -1402,15 +1409,15 @@ async def ensure_model_selected(page, context_logger=None, target_model="3.8 Fla
                 const sublabel = sublabelEl ? sublabelEl.textContent.trim() : "";
                 const isLimitText = /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(sublabel);
                 
-                if (!ariaDisabled && !hasDisabledClass && !isLimitText) {{
+                if (!ariaDisabled && !hasDisabledClass && !isLimitText) {
                     targetItem.click();
-                    return {{ success: true }};
-                }}
-            }}
-            return {{ success: false }};
-        }})()
+                    return { success: true };
+                }
+            }
+            return { success: false };
+        })
         """
-        result = await page.evaluate(check_js)
+        result = await page.evaluate(check_js, str(target_model))
         
         if not result or not isinstance(result, dict) or not result.get("success"):
             await dropdown_btn.click()
@@ -2524,7 +2531,7 @@ async def run_crawler_task(
     image_quality: int = 80,
     pdf_quality: int = 80,
     language: str = "en",
-    voice_id: str = "ai33pro",
+    voice_id: str = "clone_andrew",
 ):
     global crawler_running, stop_requested
     stop_requested = False
@@ -3241,16 +3248,26 @@ async def crawl(payload: CrawlRequest):
         await sse_logger.log("Tự động kích hoạt Market Profile Hàn Quốc: korea_apocalypse cho Naver Webtoon", "info")
 
     lang = payload.language
+    v_id = normalize_tts_voice_mode(payload.voice_id)
     if market_id == "korea_apocalypse":
         if lang == "en":
             lang = "ko"
         from markets.korea_apocalypse.tts import DEFAULT_KR_VOICE_ID
-        if not payload.voice_id or payload.voice_id in ("ai33pro", "auto", "default"):
+        if not payload.voice_id or payload.voice_id in ("clone_andrew", "ai33pro", "auto", "default"):
             v_id = DEFAULT_KR_VOICE_ID
+        else:
+            v_id = normalize_tts_voice_mode(payload.voice_id)
+    elif lang in ("en", "english"):
+        import config as app_cfg
+        default_en = getattr(app_cfg, "DEFAULT_EN_VOICE_ID", "clone_andrew")
+        if not payload.voice_id or payload.voice_id in ("auto", "default", "ai33pro"):
+            v_id = default_en
+        else:
+            v_id = normalize_tts_voice_mode(payload.voice_id)
     elif lang in ("vi", "vietnamese"):
         import config as app_cfg
         default_vi = getattr(app_cfg, "DEFAULT_VI_VOICE_ID", "clone")
-        if not payload.voice_id or payload.voice_id in ("ai33pro", "auto", "default"):
+        if not payload.voice_id or payload.voice_id in ("clone_andrew", "ai33pro", "auto", "default"):
             v_id = default_vi
         else:
             v_id = normalize_tts_voice_mode(payload.voice_id)
@@ -3258,12 +3275,14 @@ async def crawl(payload: CrawlRequest):
         v_id = normalize_tts_voice_mode(payload.voice_id)
 
     resolved_ref_audio = _validated_asset_reference(payload.ref_audio_path)
-    if not resolved_ref_audio and v_id in ("clone", "auto", "omnivoice", "default"):
+    if not resolved_ref_audio and v_id in ("clone", "clone_andrew", "clone_jessa", "auto", "omnivoice", "default"):
         import config as app_cfg
-        if lang in ("vi", "vietnamese"):
+        if v_id in ("clone_andrew", "andrew") or (lang in ("en", "english") and v_id in ("clone", "auto", "default")):
+            default_ref = getattr(app_cfg, "DEFAULT_EN_REF_AUDIO", getattr(app_cfg, "DEFAULT_REF_AUDIO_PATH", None))
+        elif lang in ("vi", "vietnamese"):
             default_ref = getattr(app_cfg, "DEFAULT_VI_REF_AUDIO", getattr(app_cfg, "DEFAULT_REF_AUDIO_PATH", None))
         else:
-            default_ref = getattr(app_cfg, "DEFAULT_REF_AUDIO_PATH", None)
+            default_ref = getattr(app_cfg, "DEFAULT_EN_REF_AUDIO", getattr(app_cfg, "DEFAULT_REF_AUDIO_PATH", None))
         if default_ref:
             try:
                 resolved_ref_audio = _validated_asset_reference(default_ref)
@@ -3477,6 +3496,7 @@ def generate_gemini_prompt(
     point_score_threshold: int = 65,
     previous_context: dict = None,
 ) -> str:
+    comic_title = re.sub(r'[\r\n\t"\\]', ' ', str(comic_title or "")).strip()[:150]
     if market_id:
         from markets import get_market
         market = get_market(market_id)
@@ -5175,7 +5195,7 @@ class VideoRequest(BaseModel):
     comic_folder: str
     from_episode: int = Field(ge=1)
     to_episode: int = Field(ge=1)
-    voice_id: str = "ai33pro"
+    voice_id: str = "clone_andrew"
     logo_path: str = None
     overlay_path: str = None
     remove_text: bool = True
@@ -5576,7 +5596,7 @@ async def run_video_pipeline(
     comic_folder: str, 
     from_ep: int, 
     to_ep: int, 
-    voice_id: str = "ai33pro", 
+    voice_id: str = "clone_andrew", 
     logo_path: str = None, 
     overlay_path: str = None,
     remove_text: bool = True,

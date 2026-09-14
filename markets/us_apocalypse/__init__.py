@@ -47,7 +47,7 @@ class USApocalypseMarket(BaseMarketProfile):
         chapters: Optional[list] = None,
         **kwargs,
     ) -> dict:
-        return generate_us_apocalypse_metadata(comic_title, from_ep, to_ep, chapters=chapters)
+        return generate_us_apocalypse_metadata(comic_title, from_ep, to_ep, chapters=chapters, **kwargs)
 
 
 US_APOCALYPSE_MARKET = USApocalypseMarket()

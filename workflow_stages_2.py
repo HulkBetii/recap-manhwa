@@ -3,6 +3,7 @@ import json
 import asyncio
 import re
 import time
+import logging
 import config
 import subprocess
 import shutil
@@ -29,6 +30,8 @@ from moderation_utils import (
     selected_file_names,
     selected_page_numbers,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def is_ffmpeg_pipe_closed_error(error: BaseException) -> bool:
@@ -193,7 +196,7 @@ class Stage8_LocalTTS(BaseStage):
             if cache.is_current(
                 stage="tts",
                 fingerprint=fingerprint,
-                outputs=[audio_path, cache_path],
+                outputs=[audio_path, srt_path, cache_path],
                 validate=lambda: (
                     validate_nonempty_file(audio_path)
                     and validate_srt_file(srt_path)
@@ -210,8 +213,9 @@ class Stage8_LocalTTS(BaseStage):
 
             from tts_provider import generate_tts
             audio_temp_path = audio_path + ".tmp.mp3"
-            srt_temp_path = srt_path + ".tmp.srt"
-            success = await generate_tts(narration_text, audio_temp_path, srt_temp_path, voice_id, ref_audio_path, rate=rate, pitch=pitch)
+            srt_temp_path = srt_path + ".tmp"
+            task_lang = task.payload.get("language")
+            success = await generate_tts(narration_text, audio_temp_path, srt_temp_path, voice_id, ref_audio_path, rate=rate, pitch=pitch, language=task_lang)
             if not success:
                 for temp_path in (audio_temp_path, srt_temp_path):
                     if os.path.exists(temp_path):
@@ -229,7 +233,7 @@ class Stage8_LocalTTS(BaseStage):
                     "ref_audio_path": ref_audio_path,
                 }, cf, ensure_ascii=False, indent=4)
             os.replace(cache_temp_path, cache_path)
-            cache.commit(stage="tts", fingerprint=fingerprint, outputs=[audio_path, cache_path])
+            cache.commit(stage="tts", fingerprint=fingerprint, outputs=[audio_path, srt_path, cache_path])
 
             await context.complete_episode(ep)
             completed_eps += 1
@@ -638,7 +642,7 @@ def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple, float, tu
     h_full, w_full, _ = img_rgb.shape
 
     if h_full < 20 or w_full < 20:
-        return (0, 0, w_full, h_full), (w_full / 2.0, h_full / 2.0)
+        return (0, 0, w_full, h_full), (w_full / 2.0, h_full / 2.0), 0.0, (w_full / 2.0, h_full / 2.0)
 
     crop_hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
     crop_gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
@@ -871,8 +875,9 @@ def apply_motion_blur(img_np, dx: float, dy: float):
 import random
 
 class CameraPlanner:
-    @staticmethod
+    @classmethod
     def generate_camera_plan(
+        cls,
         page_num: int,
         duration: float,
         bounds: tuple,
@@ -880,19 +885,34 @@ class CameraPlanner:
         transition: str = "cross_fade",
         skin_ratio: float = 0.0,
         bubble_centroid: tuple = None,
+        shot_index: int = 0,
     ) -> dict:
         """
         Generates a balanced, clear cinematic camera plan that focuses on the subject
         (characters, objects, events) with subtle, non-intrusive micro-motion (1.00x -> 1.025x-1.055x).
         Preserves full subject clarity and panel context without aggressive cropping.
+        Supports Ken Burns Alternating Motion (In-Out-In-Out) based on shot_index.
         """
         cb_x, cb_y, W_c, H_c = bounds
 
         center_x = W_c / 2.0
         center_y = H_c / 2.0
 
-        # Center-lock X axis to guarantee zero clipping of text bubbles on left/right borders
-        focal_x = center_x
+        # Alternating motion flag: even shots Zoom In, odd shots Zoom Out
+        is_zoom_out = (shot_index % 2 == 1)
+
+        # Bubble-centroid repulsion: gently shift focal_x AWAY from text bubble region
+        # instead of hard-locking to center_x. Max displacement capped at 12% panel width.
+        if bubble_centroid:
+            bubble_cx, _ = bubble_centroid
+            dx_bubble = center_x - bubble_cx  # vector from bubble → center
+            if abs(dx_bubble) > W_c * 0.12:
+                focal_x = center_x + dx_bubble * 0.12
+                focal_x = float(np.clip(focal_x, 0.20 * W_c, 0.80 * W_c))
+            else:
+                focal_x = center_x
+        else:
+            focal_x = center_x
 
         if focal_point is None:
             focal_y = center_y
@@ -906,13 +926,25 @@ class CameraPlanner:
         aspect_ratio = W_c / max(1.0, float(H_c))
         easing = "easeInOutSine"
 
-        # Mode 1: Short Duration (< 1.8s) -> Subtle Micro-Motion Breathing (1.00x -> 1.020x)
+        # Skin-ratio adaptive zoom dampening: character close-ups (skin_ratio > 0.08)
+        # get slightly less zoom to avoid cropping facial expressions
+        skin_zoom_factor = 0.92 if skin_ratio > 0.08 else 1.0
+
+        # Mode 1: Short Duration (< 1.8s) -> Subtle Micro-Motion Breathing (1.00x <-> 1.030x)
         if duration < 1.8:
-            animation_type = "subtle_breath"
-            keyframes = [
-                {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
-                {"time": duration, "x": center_x, "y": focal_y, "scale": 1.020}
-            ]
+            target_scale = 1.030
+            if is_zoom_out:
+                animation_type = "subtle_breath_out"
+                keyframes = [
+                    {"time": 0.0, "x": center_x, "y": focal_y, "scale": target_scale},
+                    {"time": duration, "x": center_x, "y": center_y, "scale": 1.00}
+                ]
+            else:
+                animation_type = "subtle_breath"
+                keyframes = [
+                    {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
+                    {"time": duration, "x": center_x, "y": focal_y, "scale": target_scale}
+                ]
             return {
                 "page": page_num,
                 "duration": duration,
@@ -922,20 +954,19 @@ class CameraPlanner:
                 "transition": transition
             }
 
-        # Mode 2: Ultra-Long Duration (> 7.0s) -> Dual Sub-shot Cinematic Cut
-        # Splits long stagnation into two cinematic camera angles:
-        # Shot 1: Tight focal subject zoom (scale 1.01 -> 1.05)
-        # Shot 2: Instant jump cut to wide overview / panel context (scale 1.00 -> 1.025)
+        # Mode 2: Ultra-Long Duration (> 7.0s) -> Continuous 2-Phase Ken Burns Motion
+        # Smoothly zooms into the focal subject, then eases back out to full overview.
+        # Continuous 3-keyframe motion without discontinuous jump cut (eliminates video jitter).
         if duration > 7.0:
             animation_type = "dual_shot_cinematic"
             t_split = round(duration * 0.5, 3)
+            s_peak = 1.0 + (0.080 * skin_zoom_factor)
             keyframes = [
-                # Shot 1: Tight focal subject zoom (0.0 -> t_split)
-                {"time": 0.0, "x": center_x, "y": center_y * 0.5 + focal_y * 0.5, "scale": 1.01},
-                {"time": t_split, "x": center_x, "y": focal_y, "scale": 1.05},
-                # Instant jump cut to Shot 2: Wide overview / panel context (t_split + 0.001 -> duration)
-                {"time": t_split + 0.001, "x": center_x, "y": center_y, "scale": 1.00},
-                {"time": duration, "x": center_x, "y": center_y * 0.8 + focal_y * 0.2, "scale": 1.025},
+                # Phase 1: Subject Zoom In (0.0 -> t_split)
+                {"time": 0.0, "x": center_x * 0.5 + focal_x * 0.5, "y": center_y * 0.5 + focal_y * 0.5, "scale": 1.00},
+                {"time": t_split, "x": focal_x, "y": focal_y, "scale": s_peak},
+                # Phase 2: Smooth continuous ease-out to wide context (t_split -> duration)
+                {"time": duration, "x": center_x, "y": center_y, "scale": 1.00},
             ]
             return {
                 "page": page_num,
@@ -946,13 +977,21 @@ class CameraPlanner:
                 "transition": transition,
             }
 
-        # Mode 2b: Long Duration (4.5s < duration <= 7.0s) -> Deep Gentle Cinematic Motion (1.00x -> 1.045x)
+        # Mode 2b: Long Duration (4.5s < duration <= 7.0s) -> Deep Gentle Cinematic Motion (1.00x <-> 1.10x)
         if duration > 4.5:
-            animation_type = "virtual_multicam"
-            keyframes = [
-                {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
-                {"time": duration, "x": center_x, "y": focal_y, "scale": 1.045}
-            ]
+            target_scale = 1.0 + (0.10 * skin_zoom_factor)
+            if is_zoom_out:
+                animation_type = "virtual_multicam_out"
+                keyframes = [
+                    {"time": 0.0, "x": focal_x, "y": focal_y, "scale": target_scale},
+                    {"time": duration, "x": center_x, "y": center_y, "scale": 1.00}
+                ]
+            else:
+                animation_type = "virtual_multicam"
+                keyframes = [
+                    {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
+                    {"time": duration, "x": focal_x, "y": focal_y, "scale": target_scale}
+                ]
             return {
                 "page": page_num,
                 "duration": duration,
@@ -962,14 +1001,18 @@ class CameraPlanner:
                 "transition": transition
             }
 
-        # Mode 3: Wide Horizontal Panel (W/H >= 1.25) -> Cinematic Horizontal Micro-Pan (scale 1.00x -> 1.030x)
+        # Mode 3: Wide Horizontal Panel (W/H >= 1.25) -> Cinematic Horizontal Micro-Pan (scale 1.00x <-> 1.060x)
         if aspect_ratio >= 1.25:
             animation_type = "cinematic_pan_horizontal"
             pan_span = max(10.0, min(W_c * 0.04, 30.0))
-            dir_x = random.choice([-1.0, 1.0])
+            # Alternate horizontal direction by shot_index
+            dir_x = 1.0 if (shot_index % 2 == 0) else -1.0
+            scale_peak = 1.0 + (0.060 * skin_zoom_factor)
+            scale_start = 1.00 if not is_zoom_out else scale_peak
+            scale_end = scale_peak if not is_zoom_out else 1.00
             keyframes = [
-                {"time": 0.0, "x": center_x - dir_x * pan_span, "y": center_y, "scale": 1.00},
-                {"time": duration, "x": center_x + dir_x * pan_span, "y": focal_y, "scale": 1.030}
+                {"time": 0.0, "x": center_x - dir_x * pan_span, "y": center_y if not is_zoom_out else focal_y, "scale": scale_start},
+                {"time": duration, "x": center_x + dir_x * pan_span, "y": focal_y if not is_zoom_out else center_y, "scale": scale_end}
             ]
             return {
                 "page": page_num,
@@ -980,13 +1023,22 @@ class CameraPlanner:
                 "transition": transition
             }
 
-        # Mode 4: Standard Panels -> Dynamic Focal Micro-Zoom In (1.00x -> 1.035x)
-        animation_type = "focal_zoom_in"
-        target_scale = 1.035 if duration >= 3.0 else 1.025
-        keyframes = [
-            {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
-            {"time": duration, "x": center_x, "y": focal_y, "scale": target_scale}
-        ]
+        # Mode 4: Standard Panels -> Dynamic Focal Micro-Zoom (Alternating In / Out: 1.00x <-> 1.080x)
+        base_target = 1.080 if duration >= 3.0 else 1.050
+        target_scale = 1.0 + (base_target - 1.0) * skin_zoom_factor
+
+        if is_zoom_out:
+            animation_type = "focal_zoom_out"
+            keyframes = [
+                {"time": 0.0, "x": focal_x, "y": focal_y, "scale": target_scale},
+                {"time": duration, "x": center_x, "y": center_y, "scale": 1.00}
+            ]
+        else:
+            animation_type = "focal_zoom_in"
+            keyframes = [
+                {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
+                {"time": duration, "x": focal_x, "y": focal_y, "scale": target_scale}
+            ]
 
         return {
             "page": page_num,
@@ -1089,7 +1141,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
 
         bgm_volume = float(task.payload.get("bgm_volume", 0.18))
 
-        def render_episode_video_sync(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, bgm_path=None, bgm_volume=0.18):
+        def _render_episode_video_sync_impl(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, bgm_path=None, bgm_volume=0.18, stderr_file=None, stderr_log_path=None):
             from PIL import Image, ImageFilter, ImageEnhance, ImageDraw
             import subprocess
             import numpy as np
@@ -1148,8 +1200,10 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100", "-shortest", output_video_path
             ]
             
-            stderr_log_path = os.path.join(os.path.dirname(output_video_path), "ffmpeg_render_stderr.log")
-            stderr_file = open(stderr_log_path, "w", encoding="utf-8")
+            if stderr_log_path is None:
+                stderr_log_path = os.path.join(os.path.dirname(output_video_path), "ffmpeg_render_stderr.log")
+            if stderr_file is None:
+                stderr_file = open(stderr_log_path, "w", encoding="utf-8")
             
             proc = subprocess.Popen(
                 cmd,
@@ -1178,8 +1232,9 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 
                 seg_images = seg.get("images", [])
 
-                # Guardrail against meaningless / text-bubble panels when multi-images exist:
-                if seg_images and len(seg_images) > 1:
+                # Universal guardrail against meaningless / text-bubble panels:
+                # Works for ALL segments including single-image ones (fixing critical gap).
+                if seg_images:
                     from visual_scorer import VisualSemanticScorer
                     scored_candidates = []
                     for img_obj in seg_images:
@@ -1201,6 +1256,31 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         tot_p = sum(float(img.get("priority", 1.0)) for img in seg_images)
                         for img in seg_images:
                             img["priority"] = float(img.get("priority", 1.0)) / max(0.001, tot_p)
+                    else:
+                        # All images are junk — find best adjacent page as replacement
+                        best_item = max(scored_candidates, key=lambda x: x[1]) if scored_candidates else None
+                        if best_item:
+                            bad_page_idx = int(best_item[0]["page"]) - 1
+                            best_score = -1
+                            best_idx = bad_page_idx
+                            for delta in [1, -1, 2, -2, 3, -3]:
+                                candidate = bad_page_idx + delta
+                                if 0 <= candidate < len(image_files):
+                                    im_path = os.path.join(images_blur_dir, image_files[candidate])
+                                    if not os.path.exists(im_path):
+                                        im_path = os.path.join(images_pdf_dir, image_files[candidate])
+                                    try:
+                                        im_bgr = cv2.imread(im_path)
+                                        sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
+                                        if not bd.get("is_meaningless", False) and sc > best_score:
+                                            best_score = sc
+                                            best_idx = candidate
+                                    except Exception:
+                                        pass
+                            if best_score >= 40:
+                                seg_images = [{"page": best_idx + 1, "priority": 1.0}]
+                                print(f"  [Stage10] Replaced junk page {bad_page_idx + 1} with adjacent page {best_idx + 1} (score={best_score})")
+                            # else: keep original — no good replacement found
 
                 # Guardrail against rapid image transitions:
                 # Ensure each image is displayed for a comfortable duration (minimum 2.5 seconds).
@@ -1352,7 +1432,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 plan = CameraPlanner.generate_camera_plan(
                     pd["page"], pd["duration"], bounds,
                     focal_point=focal_point, transition=trans,
-                    skin_ratio=skin_ratio, bubble_centroid=bubble_centroid
+                    skin_ratio=skin_ratio, bubble_centroid=bubble_centroid,
+                    shot_index=idx
                 )
                 plans.append(plan)
                 
@@ -1395,7 +1476,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 box_to_crop = (cx - w_cam / 2.0, cy - h_cam / 2.0, cx + w_cam / 2.0, cy + h_cam / 2.0)
 
                 # Sub-pixel float crop & resize directly to fixed card dimensions (100% rock-solid, zero jitter)
-                fg_resized = img.resize((card_w, card_h), resample=Image.Resampling.BILINEAR, box=box_to_crop)
+                fg_resized = img.resize((card_w, card_h), resample=Image.Resampling.BICUBIC, box=box_to_crop)
 
                 # Apply color enhancement (Vibrance & Contrast & Sharpness)
                 enh_color = ImageEnhance.Color(fg_resized).enhance(1.06)
@@ -1446,7 +1527,15 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     W_c = max(10, W_c)
                     H_c = max(10, H_c)
                     aspect_nat = W_c / float(H_c)
-                    aspect_card = max(0.25, min(16.0 / 9.0, aspect_nat))
+
+                    if aspect_nat < 0.55:
+                        # Smart viewport for ultra-tall pages: widen the card to reduce
+                        # pillarbox and let the camera zoom into the character region.
+                        # Clamp between 9:16 (0.5625) and 3:4 (0.75).
+                        aspect_card = max(0.5625, min(0.75, aspect_nat * 1.4))
+                    else:
+                        # Normal pages: floor raised from 0.25 to 0.50 (Change #6)
+                        aspect_card = max(0.50, min(16.0 / 9.0, aspect_nat))
 
                     card_h = 1080
                     card_w = max(10, min(1920, int(round(card_h * aspect_card))))
@@ -1558,8 +1647,9 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         bg_curr_obj = get_blurred_background(pd_curr["image_file"], img_curr_obj, curr_bounds)
                         frame_curr = render_page_frame(img_curr_obj, bg_curr_obj, curr_bounds, plans[active_idx], t_local_curr, curr_card_dims)
                         
-                        # Interpolate next
-                        t_local_next = t - t_trans_start
+                        # Incoming next page holds its starting composition (t=0.0) while cross-fading in,
+                        # ensuring zero timeline rewind or camera snapping when it becomes active.
+                        t_local_next = 0.0
                         img_next_obj = get_img(pd_next["image_file"], t)
                         next_bounds = get_cached_bounds(pd_next["image_file"])
                         next_card_dims = card_dims_map.get(pd_next["image_file"], (555, 0, 810, 1080, 0.75))
@@ -1636,7 +1726,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             proc.stdin = None
             
             proc.wait()
-            stderr_file.close()
+            if not stderr_file.closed:
+                stderr_file.close()
             
             if proc.returncode != 0:
                 try:
@@ -1652,12 +1743,30 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 except Exception:
                     pass
 
+        def render_episode_video_sync(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, bgm_path=None, bgm_volume=0.18):
+            stderr_log_path = os.path.join(os.path.dirname(output_video_path), "ffmpeg_render_stderr.log")
+            stderr_file = open(stderr_log_path, "w", encoding="utf-8")
+            try:
+                return _render_episode_video_sync_impl(
+                    images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe,
+                    working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag,
+                    srt_filename, fps=fps, bgm_path=bgm_path, bgm_volume=bgm_volume,
+                    stderr_file=stderr_file, stderr_log_path=stderr_log_path
+                )
+            finally:
+                if not stderr_file.closed:
+                    stderr_file.close()
+
         total_episodes = to_ep - from_ep + 1
         
-        # Pass 1: Xóa chữ cho tất cả các tập chưa hoàn thành trước
+        # Pass 1: Xóa chữ cho tất cả các tập chưa hoàn thành trước (nếu bật)
         if task.payload.get("remove_text", False):
-            from tools.text_remover.comic_text_remover import get_easyocr_reader, process_image
-         # Pass 2: Tiến hành render video song song cho tất cả các tập
+            try:
+                from tools.text_remover.comic_text_remover import get_easyocr_reader, process_image
+            except ImportError:
+                pass
+
+        # Pass 2: Tiến hành render video song song cho tất cả các tập
         concurrency = task.payload.get("concurrency", 3)
         await context.log(f"Stage 10: Bắt đầu render video song song với tối đa {concurrency} luồng.", "info")
         semaphore = asyncio.Semaphore(concurrency)
@@ -1896,7 +2005,7 @@ def shift_srt_time(time_str: str, offset_seconds: float) -> str:
     msecs = int(parts[1]) if len(parts) > 1 else 0
     
     total_seconds = hrs * 3600 + mins * 60 + secs + msecs / 1000.0
-    new_total = total_seconds + offset_seconds
+    new_total = max(0.0, total_seconds + offset_seconds)
     
     new_hrs = int(new_total // 3600)
     new_mins = int((new_total % 3600) // 60)
@@ -2234,11 +2343,21 @@ class Stage12_MetadataReports(BaseStage):
                 m = get_market(market_id)
                 if m:
                     chapters = task.artifacts.get("chapters")
+                    story_memory = None
+                    story_mem_path = os.path.join(download_dir, "story_memory.json")
+                    if os.path.exists(story_mem_path):
+                        try:
+                            with open(story_mem_path, "r", encoding="utf-8") as smf:
+                                story_memory = json.load(smf)
+                        except Exception:
+                            pass
                     metadata["youtube_metadata"] = m.generate_youtube_metadata(
                         task.comic_title or "Comic",
                         task.from_episode or 1,
                         task.to_episode or 1,
-                        chapters=chapters
+                        chapters=chapters,
+                        story_memory=story_memory,
+                        download_dir=download_dir,
                     )
             except Exception as e:
                 logger.warning(f"Failed to generate market YouTube metadata: {e}")
@@ -2247,29 +2366,46 @@ class Stage12_MetadataReports(BaseStage):
         if yt_meta:
             kit_path = os.path.join(output_dir, "youtube_upload_kit.txt")
             folder_name = task.artifacts.get("download_folder_name")
-            kit_lines = [
-                "=" * 80,
-                f"YOUTUBE UPLOAD KIT: {task.comic_title or 'Comic'}",
-                f"Episodes: {task.from_episode} - {task.to_episode} | Market: {market_id}",
-                "=" * 80,
-                "",
-                "[1. TITLE CANDIDATES (Pick one for YouTube Title)]",
-            ]
-            for i, opt in enumerate(yt_meta.get("title_options", [yt_meta.get("title", "")]), 1):
-                kit_lines.append(f"{i}. {opt}")
-            
-            kit_lines.extend([
-                "",
-                "[2. DESCRIPTION & TIMESTAMPS (Copy & paste into YouTube Description)]",
-                yt_meta.get("description", ""),
-                "",
-                "[3. TAGS (Copy & paste directly into YouTube Studio Tag Box)]",
-                ", ".join(yt_meta.get("tags", [])) if isinstance(yt_meta.get("tags"), list) else str(yt_meta.get("tags", "")),
-                "",
-                "=" * 80
-            ])
+            if yt_meta.get("formatted_kit"):
+                kit_content = yt_meta["formatted_kit"]
+            else:
+                kit_lines = [
+                    "=" * 80,
+                    f"YOUTUBE UPLOAD KIT: {task.comic_title or 'Comic'}",
+                    f"Episodes: {task.from_episode} - {task.to_episode} | Market: {market_id}",
+                    "=" * 80,
+                    "",
+                    "[1. TITLE CANDIDATES (Pick one for YouTube Title)]",
+                ]
+                for i, opt in enumerate(yt_meta.get("title_options", [yt_meta.get("title", "")]), 1):
+                    kit_lines.append(f"{i}. {opt}")
+                
+                pinned_comm = yt_meta.get("pinned_comment")
+                if not pinned_comm:
+                    pinned_comm = (
+                        "📌 MANHWA INFO & TIMESTAMPS:\n"
+                        f"📖 Manhwa: {task.comic_title or 'Comic'}\n"
+                        f"📚 Chapters: {task.from_episode} – {task.to_episode}\n\n"
+                        "👉 Like & Subscribe for more full-arc manhwa recaps!"
+                    )
+
+                kit_lines.extend([
+                    "",
+                    "[2. DESCRIPTION & TIMESTAMPS (Copy & paste into YouTube Description)]",
+                    yt_meta.get("description", ""),
+                    "",
+                    "[3. PINNED COMMENT (BÌNH LUẬN GHIM NGẮN GỌN - Copy & paste to Pin)]",
+                    pinned_comm,
+                    "",
+                    "[4. TAGS (Copy & paste directly into YouTube Studio Tag Box)]",
+                    ", ".join(yt_meta.get("tags", [])) if isinstance(yt_meta.get("tags"), list) else str(yt_meta.get("tags", "")),
+                    "",
+                    "=" * 80
+                ])
+                kit_content = "\n".join(kit_lines)
+
             with open(kit_path, "w", encoding="utf-8") as kf:
-                kf.write("\n".join(kit_lines))
+                kf.write(kit_content)
             task.artifacts["youtube_upload_kit_path"] = kit_path
             if folder_name:
                 task.artifacts["youtube_upload_kit_url"] = f"/downloads/{folder_name}/output/youtube_upload_kit.txt"

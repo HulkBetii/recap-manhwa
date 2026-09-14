@@ -22,6 +22,11 @@ except Exception:
 from tools.text_remover.comic_text_remover import get_easyocr_reader, ocr_lock
 from recap_schema import validate_recap_file
 from artifact_cache import EpisodeStageCache, source_hash, stage_fingerprint, validate_pdf_file
+from chapter_resolver import (
+    extract_chapter_number,
+    resolve_numeric_chapter_slug,
+    assert_and_guard_chapter_url,
+)
 from moderation_utils import (
     MODERATION_MODEL_VERSION,
     MODERATION_PROMPT_VERSION,
@@ -172,6 +177,9 @@ class Stage1_ComicParsing(BaseStage):
         elif "valirscans.org" in urllib.parse.urlparse(url).netloc.lower() and "/chapter/" in url:
             url = re.sub(r"/chapter/[^/]+/?$", "", url)
             task.comic_url = url
+        elif "mgread.io" in url and "/chapter-" in url:
+            url = re.sub(r"/chapter-[^/]+/?$", "/", url)
+            task.comic_url = url
         elif "comic.naver.com" in url:
             parsed_naver = urllib.parse.urlparse(url)
             query = urllib.parse.parse_qs(parsed_naver.query)
@@ -251,15 +259,7 @@ class Stage1_ComicParsing(BaseStage):
                 
                 if vortex_chapters:
                     vortex_chapters = list(set(vortex_chapters))
-                    def extract_chap_number(slug):
-                        m = re.search(r"chapter-(\d+\.?\d*)", slug)
-                        if m:
-                            try:
-                                return float(m.group(1))
-                            except ValueError:
-                                pass
-                        return 0.0
-                    vortex_chapters.sort(key=extract_chap_number)
+                    vortex_chapters.sort(key=lambda s: extract_chapter_number(s) or 0.0)
                     task.artifacts["chapter_slugs"] = vortex_chapters
             elif "toongod.org" in url:
                 try:
@@ -281,15 +281,7 @@ class Stage1_ComicParsing(BaseStage):
                                 toongod_chapters.append(last_part)
                 if toongod_chapters:
                     toongod_chapters = list(set(toongod_chapters))
-                    def extract_chap_number(slug):
-                        m = re.search(r"chapter-(\d+\.?\d*)", slug)
-                        if m:
-                            try:
-                                return float(m.group(1))
-                            except ValueError:
-                                pass
-                        return 0.0
-                    toongod_chapters.sort(key=extract_chap_number)
+                    toongod_chapters.sort(key=lambda s: extract_chapter_number(s) or 0.0)
                     task.artifacts["chapter_slugs"] = toongod_chapters
             elif "asura" in urllib.parse.urlparse(url).netloc.lower():
                 try:
@@ -309,19 +301,7 @@ class Stage1_ComicParsing(BaseStage):
                             asura_chapters.append(parts[-1])
                 if asura_chapters:
                     asura_chapters = list(set(asura_chapters))
-                    def extract_asura_number(slug):
-                        try:
-                            return float(slug)
-                        except ValueError:
-                            pass
-                        m = re.search(r"(\d+\.?\d*)", slug)
-                        if m:
-                            try:
-                                return float(m.group(1))
-                            except ValueError:
-                                pass
-                        return 0.0
-                    asura_chapters.sort(key=extract_asura_number)
+                    asura_chapters.sort(key=lambda s: extract_chapter_number(s) or 0.0)
                     task.artifacts["chapter_slugs"] = asura_chapters
             elif "valirscans.org" in urllib.parse.urlparse(url).netloc.lower():
                 try:
@@ -341,19 +321,7 @@ class Stage1_ComicParsing(BaseStage):
                             valir_chapters.append(parts[-1])
                 if valir_chapters:
                     valir_chapters = list(set(valir_chapters))
-                    def extract_valir_number(slug):
-                        try:
-                            return float(slug)
-                        except ValueError:
-                            pass
-                        m = re.search(r"(\d+\.?\d*)", slug)
-                        if m:
-                            try:
-                                return float(m.group(1))
-                            except ValueError:
-                                pass
-                        return 0.0
-                    valir_chapters.sort(key=extract_valir_number)
+                    valir_chapters.sort(key=lambda s: extract_chapter_number(s) or 0.0)
                     task.artifacts["chapter_slugs"] = valir_chapters
             elif "comix.to" in url:
                 try:
@@ -453,6 +421,31 @@ class Stage1_ComicParsing(BaseStage):
                         task.artifacts["magapoke_episodes"] = info["episodes"]
                 except Exception as ex:
                     await context.log(f"Lỗi fetch MagaPoke metadata: {ex}", "warning")
+            elif "mgread.io" in url:
+                try:
+                    await page.wait_for_selector("h1", timeout=5000)
+                    title_text = await page.locator("h1").first.inner_text()
+                except Exception:
+                    pass
+                try:
+                    hrefs = await page.locator("#chapter-list a, a[href*='/chapter-']").evaluate_all(
+                        "elements => elements.map(el => el.getAttribute('href'))"
+                    )
+                    mgread_chapters = []
+                    for href in hrefs:
+                        if href and "/chapter-" in href:
+                            parsed_href = urllib.parse.urlparse(href)
+                            parts = parsed_href.path.strip("/").split("/")
+                            if parts:
+                                last_part = parts[-1]
+                                if last_part.startswith("chapter-"):
+                                    mgread_chapters.append(last_part)
+                    if mgread_chapters:
+                        mgread_chapters = list(set(mgread_chapters))
+                        mgread_chapters.sort(key=lambda s: extract_chapter_number(s) or 0.0)
+                        task.artifacts["chapter_slugs"] = mgread_chapters
+                except Exception as ex:
+                    await context.log(f"Lỗi parse chapter list mgread: {ex}", "warning")
             if not title_text:
                 title_text = await page.title()
             if " : 네이버" in title_text:
@@ -535,6 +528,7 @@ class Stage2_AsyncImageCrawling(BaseStage):
         is_comix = "comix.to" in parsed.netloc
         is_valir = "valirscans.org" in parsed.netloc.lower()
         is_magapoke = "pocket.shonenmagazine.com" in parsed.netloc.lower()
+        is_mgread = "mgread.io" in parsed.netloc.lower()
         
         if is_naver:
             query = urllib.parse.parse_qs(parsed.query)
@@ -581,6 +575,12 @@ class Stage2_AsyncImageCrawling(BaseStage):
                 return False
         elif is_magapoke:
             series_slug = "magapoke"
+        elif is_mgread:
+            parts = parsed.path.strip("/").split("/")
+            if len(parts) >= 2 and parts[0] == "manga":
+                series_slug = parts[1]
+            else:
+                series_slug = parts[-1]
         else:
             query = urllib.parse.parse_qs(parsed.query)
             title_no = query.get("title_no", [""])[0]
@@ -680,38 +680,32 @@ class Stage2_AsyncImageCrawling(BaseStage):
                 if is_naver:
                     viewer_url = f"https://comic.naver.com/webtoon/detail?titleId={naver_title_id}&no={ep}"
                     wait_sel = ".wt_viewer img, #comic_view_area img"
+                    chapter_slug = f"no={ep}"
                 elif is_vortex:
                     slugs = task.artifacts.get("chapter_slugs", [])
-                    if slugs and 0 <= (ep - 1) < len(slugs):
-                        chapter_slug = slugs[ep - 1]
-                    else:
-                        chapter_slug = f"chapter-{ep}"
+                    chapter_slug = resolve_numeric_chapter_slug(slugs, ep, fallback_pattern="chapter-{ep}")
                     viewer_url = f"{parsed.scheme}://{parsed.netloc}/series/{series_slug}/{chapter_slug}"
                     wait_sel = "img[data-reader-page-image]"
                 elif is_toongod:
                     slugs = task.artifacts.get("chapter_slugs", [])
-                    if slugs and 0 <= (ep - 1) < len(slugs):
-                        chapter_slug = slugs[ep - 1]
-                    else:
-                        chapter_slug = f"chapter-{ep}"
+                    chapter_slug = resolve_numeric_chapter_slug(slugs, ep, fallback_pattern="chapter-{ep}")
                     viewer_url = f"{parsed.scheme}://{parsed.netloc}/webtoon/{series_slug}/{chapter_slug}/"
                     wait_sel = ".reading-content img, .wp-manga-chapter-img, div.page-break img, #chapter_imgs img"
                 elif is_asura:
                     slugs = task.artifacts.get("chapter_slugs", [])
-                    if slugs and 0 <= (ep - 1) < len(slugs):
-                        chapter_slug = slugs[ep - 1]
-                    else:
-                        chapter_slug = f"{ep}"
+                    chapter_slug = resolve_numeric_chapter_slug(slugs, ep, fallback_pattern="{ep}")
                     viewer_url = f"{parsed.scheme}://{parsed.netloc}/comics/{series_slug}/chapter/{chapter_slug}"
                     wait_sel = "main img.w-full.block, .ch-images img, .reading-content img, div.flex.flex-col.items-center img"
                 elif is_valir:
                     slugs = task.artifacts.get("chapter_slugs", [])
-                    if slugs and 0 <= (ep - 1) < len(slugs):
-                        chapter_slug = slugs[ep - 1]
-                    else:
-                        chapter_slug = f"{ep}"
+                    chapter_slug = resolve_numeric_chapter_slug(slugs, ep, fallback_pattern="{ep}")
                     viewer_url = f"{parsed.scheme}://{parsed.netloc}/series/{series_slug}/chapter/{chapter_slug}"
                     wait_sel = "img.select-none"
+                elif is_mgread:
+                    slugs = task.artifacts.get("chapter_slugs", [])
+                    chapter_slug = resolve_numeric_chapter_slug(slugs, ep, fallback_pattern="chapter-{ep}")
+                    viewer_url = f"{parsed.scheme}://{parsed.netloc}/manga/{series_slug}/{chapter_slug}/"
+                    wait_sel = "img[data-original-src], img[src*='mg.mgread.io']"
                 elif is_comix:
                     slugs = task.artifacts.get("chapter_slugs", [])
                     user_chap_id = task.artifacts.get("user_comix_chap_id")
@@ -829,17 +823,18 @@ class Stage2_AsyncImageCrawling(BaseStage):
                             current_page += 1
                                     
                     if not chapter_slug:
-                        if slugs and 0 <= (ep - 1) < len(slugs):
-                            chapter_slug = slugs[ep - 1]
-                        else:
-                            chapter_slug = f"{ep}"
+                        chapter_slug = resolve_numeric_chapter_slug(slugs, ep, fallback_pattern="{ep}")
                             
                     viewer_url = f"{parsed.scheme}://{parsed.netloc}/title/{series_slug}/{chapter_slug}"
                     wait_sel = ".rpage-main, img.rpage-page__img"
                 else:
+                    chapter_slug = f"ep-{ep}"
                     viewer_url = f"{parsed.scheme}://{parsed.netloc}/{base_path}/ep-{ep}/viewer?title_no={title_no}&episode_no={ep}"
                     wait_sel = "#_imageList img"
                     
+                # Chốt chặn toàn vẹn số tập (Hard Chapter Integrity Guard): ngăn chặn tuyệt đối việc tải sai chapter
+                assert_and_guard_chapter_url(requested_ep=ep, viewer_url=viewer_url, chapter_slug=chapter_slug)
+
                 await nav_manager.safe_goto(page, viewer_url, reason=f"Download ep {ep} images", caller="Stage2_AsyncImageCrawling")
 
                 try:
@@ -966,6 +961,29 @@ class Stage2_AsyncImageCrawling(BaseStage):
                         image_urls = await page.locator("img.select-none").evaluate_all(
                             "elements => elements.map(el => el.getAttribute('src'))"
                         )
+                elif is_mgread:
+                    raw_imgs = await page.locator("img").evaluate_all("""
+                        elements => elements.map(el => {
+                            const alt = el.getAttribute('alt') || '';
+                            const src = el.getAttribute('data-original-src') || el.getAttribute('src') || '';
+                            return { src, alt };
+                        })
+                    """)
+                    image_urls = [
+                        item["src"] for item in raw_imgs
+                        if item["src"] and (
+                            "mg.mgread.io" in item["src"] or 
+                            "Chapter" in item["alt"] or 
+                            "Image" in item["alt"]
+                        ) and not item["src"].endswith(".svg") and not item["src"].startswith("data:")
+                    ]
+                    seen = set()
+                    clean_urls = []
+                    for u in image_urls:
+                        if u not in seen:
+                            seen.add(u)
+                            clean_urls.append(u)
+                    image_urls = clean_urls
                 else:
                     image_urls = await page.locator("#_imageList img").evaluate_all(
                         "elements => elements.map(el => el.getAttribute('data-url') || el.getAttribute('src'))"
@@ -1003,6 +1021,8 @@ class Stage2_AsyncImageCrawling(BaseStage):
                             referer = "https://comix.to/"
                         elif is_valir:
                             referer = "https://valirscans.org/"
+                        elif is_mgread:
+                            referer = "https://mgread.io/"
                         else:
                             referer = "https://www.webtoons.com/"
                             

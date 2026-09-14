@@ -10,7 +10,7 @@ class BaseMarketProfile:
     name: str
     description: str
     language: str = 'en'
-    default_voice_id: str = 'ai33pro'
+    default_voice_id: str = 'clone_andrew'
     voice_rate: str = '+0%'
     voice_pitch: str = '+0Hz'
     preferred_fonts: List[str] = field(default_factory=list)

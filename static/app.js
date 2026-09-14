@@ -1374,6 +1374,56 @@ async function checkVoicevoxStatus() {
     }
 }
 
+// Voice Preview Audio Player
+const btnPreviewVoice = document.getElementById('btn-preview-voice');
+const previewBtnText = document.getElementById('preview-btn-text');
+const audioPreviewPlayer = document.getElementById('audio-preview-player');
+const voicePreviewContainer = document.getElementById('voice-preview-container');
+
+function updateVoicePreviewState() {
+    if (!ttsVoiceIdInput || !voicePreviewContainer) return;
+    const mode = ttsVoiceIdInput.value;
+    if (mode === 'clone_andrew') {
+        voicePreviewContainer.style.display = 'flex';
+        if (previewBtnText) previewBtnText.textContent = '▶ Nghe thử giọng Andrew (US English)';
+        if (audioPreviewPlayer) audioPreviewPlayer.src = '/voices/andrew_preview_en.mp3';
+    } else if (mode === 'clone_jessa' || mode === 'clone') {
+        voicePreviewContainer.style.display = 'flex';
+        if (previewBtnText) previewBtnText.textContent = '▶ Nghe thử giọng Jessa (General)';
+        if (audioPreviewPlayer) audioPreviewPlayer.src = '/jessa - easygoing and effortless.mp3';
+    } else {
+        voicePreviewContainer.style.display = 'none';
+        if (audioPreviewPlayer && !audioPreviewPlayer.paused) {
+            audioPreviewPlayer.pause();
+        }
+    }
+}
+
+if (btnPreviewVoice && audioPreviewPlayer) {
+    btnPreviewVoice.addEventListener('click', () => {
+        if (audioPreviewPlayer.paused) {
+            audioPreviewPlayer.play().then(() => {
+                if (previewBtnText) previewBtnText.textContent = '⏸ Tạm dừng';
+            }).catch(e => {
+                console.error('Audio play error:', e);
+            });
+        } else {
+            audioPreviewPlayer.pause();
+            if (previewBtnText) {
+                const isAndrew = ttsVoiceIdInput && ttsVoiceIdInput.value === 'clone_andrew';
+                previewBtnText.textContent = isAndrew ? '▶ Nghe thử giọng Andrew (US English)' : '▶ Nghe thử giọng Jessa (General)';
+            }
+        }
+    });
+
+    audioPreviewPlayer.addEventListener('ended', () => {
+        if (previewBtnText) {
+            const isAndrew = ttsVoiceIdInput && ttsVoiceIdInput.value === 'clone_andrew';
+            previewBtnText.textContent = isAndrew ? '▶ Nghe thử giọng Andrew (US English)' : '▶ Nghe thử giọng Jessa (General)';
+        }
+    });
+}
+
 if (ttsVoiceIdInput) {
     ttsVoiceIdInput.addEventListener('change', () => {
         const mode = ttsVoiceIdInput.value;
@@ -1404,6 +1454,7 @@ if (ttsVoiceIdInput) {
             if (ai33proApiArea) ai33proApiArea.style.display = 'none';
             if (voicevoxConfigArea) voicevoxConfigArea.style.display = 'none';
         }
+        updateVoicePreviewState();
     });
     // Trigger initial state mapping on load
     ttsVoiceIdInput.dispatchEvent(new Event('change'));
@@ -1436,10 +1487,10 @@ if (marketPresetSelect) {
         } else if (!preset) {
             if (vlmLang) vlmLang.value = 'en';
             if (ttsVoiceIdInput) {
-                ttsVoiceIdInput.value = 'ai33pro';
+                ttsVoiceIdInput.value = 'clone_andrew';
                 ttsVoiceIdInput.dispatchEvent(new Event('change'));
             }
-            appendLog('Đã hoàn tác cấu hình về Mặc định (Toàn cầu / Tiếng Anh).', 'system');
+            appendLog('Đã hoàn tác cấu hình về Mặc định (Tiếng Anh - Giọng OmniVoice Andrew US).', 'system');
         }
     });
 }
@@ -1450,9 +1501,9 @@ if (vlmLanguageSelect && ttsVoiceIdInput) {
     vlmLanguageSelect.addEventListener('change', () => {
         const selectedLang = vlmLanguageSelect.value;
         if (selectedLang === 'vi') {
-            ttsVoiceIdInput.value = 'clone';
+            ttsVoiceIdInput.value = 'clone_jessa';
             ttsVoiceIdInput.dispatchEvent(new Event('change'));
-            appendLog('Đã chọn ngôn ngữ Tiếng Việt: Tự động dùng giọng mặc định OmniVoice Jessa (jessa - easygoing and effortless).', 'info');
+            appendLog('Đã chọn ngôn ngữ Tiếng Việt: Tự động dùng giọng mặc định OmniVoice Jessa.', 'info');
         } else if (selectedLang === 'ko') {
             ttsVoiceIdInput.value = 'edge-tts_ko-KR-InJoonNeural';
             ttsVoiceIdInput.dispatchEvent(new Event('change'));
@@ -1460,8 +1511,9 @@ if (vlmLanguageSelect && ttsVoiceIdInput) {
             ttsVoiceIdInput.value = 'edge-tts_ja-JP-KeitaNeural';
             ttsVoiceIdInput.dispatchEvent(new Event('change'));
         } else if (selectedLang === 'en') {
-            ttsVoiceIdInput.value = 'ai33pro';
+            ttsVoiceIdInput.value = 'clone_andrew';
             ttsVoiceIdInput.dispatchEvent(new Event('change'));
+            appendLog('Đã chọn ngôn ngữ Tiếng Anh (US): Tự động dùng giọng mặc định OmniVoice Andrew (Smooth, Smart & Clear).', 'info');
         }
     });
 }

@@ -11,7 +11,6 @@ DEFAULT_VI_VOICE_ID = "clone"
 AI33PRO_VOICE_PREFIXES = (
     "elevenlabs_",
     "minimax_",
-    "clone_",
     "edge_",
     "kokoro_",
     "vbee_",
@@ -25,6 +24,8 @@ def get_ai33pro_voice_id() -> str:
 
 def uses_ai33pro(voice_id: str | None) -> bool:
     value = (voice_id or "").strip()
+    if value.startswith(("clone_", "omnivoice_")) or value in ("clone", "omnivoice", "andrew", "jessa"):
+        return False
     return value == "ai33pro" or value.startswith(AI33PRO_VOICE_PREFIXES)
 
 
@@ -42,7 +43,7 @@ def parse_voicevox_speaker_id(voice_id: str | None, default_id: int = 3) -> int:
     return default_id
 
 
-def normalize_tts_voice_mode(voice_id: str | None, *, default: str = "ai33pro") -> str:
+def normalize_tts_voice_mode(voice_id: str | None, *, default: str = "clone_andrew") -> str:
     value = (voice_id or "").strip() or default
     return "ai33pro" if uses_ai33pro(value) else value
 

@@ -598,7 +598,7 @@ class MicroIntroRenderer:
         hook_script: str,
         image_paths: List[str],
         language: str = "en",
-        voice_id: str = "ai33pro",
+        voice_id: str = "clone_andrew",
         ref_audio_path: Optional[str] = None,
         bgm_path: Optional[str] = None,
         enable_bgm: bool = False,
@@ -627,13 +627,15 @@ class MicroIntroRenderer:
                 actual_voice = getattr(config, "DEFAULT_VI_VOICE_ID", "clone")
             if not actual_ref_audio and actual_voice in ("clone", "auto", "omnivoice", "default"):
                 actual_ref_audio = getattr(config, "DEFAULT_VI_REF_AUDIO", getattr(config, "DEFAULT_REF_AUDIO_PATH", None))
-        elif (not actual_voice or actual_voice in ("ai33pro", "default", "auto")) and not actual_ref_audio:
+        elif (not actual_voice or actual_voice in ("ai33pro", "default", "auto", "clone")) and not actual_ref_audio:
             if language.lower() in ("ko", "korean"):
                 actual_voice = "edge-tts_ko-KR-InJoonNeural"
             elif language.lower() in ("ja", "japanese"):
                 actual_voice = "edge-tts_ja-JP-KeitaNeural"
             else:
-                actual_voice = "ai33pro"
+                import config
+                actual_voice = getattr(config, "DEFAULT_EN_VOICE_ID", "clone_andrew")
+                actual_ref_audio = getattr(config, "DEFAULT_EN_REF_AUDIO", None)
 
         tts_ok = await generate_tts(
             hook_script,

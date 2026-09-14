@@ -117,3 +117,41 @@ def test_apply_motion_blur():
     # Fast horizontal motion
     res_blurred = apply_motion_blur(img_np, 8.0, 0.0)
     assert res_blurred.shape == img_np.shape
+
+
+def test_ken_burns_alternating_motion_in_and_out():
+    """Verify that even shots zoom in and odd shots zoom out across camera modes."""
+    bounds = (0, 0, 800, 1200)
+
+    # 1. Standard duration (3.0s)
+    plan_even = CameraPlanner.generate_camera_plan(1, 3.0, bounds, shot_index=0)
+    assert plan_even["animation_type"] == "focal_zoom_in"
+    assert plan_even["keyframes"][0]["scale"] == 1.00
+    assert plan_even["keyframes"][1]["scale"] > 1.04
+
+    plan_odd = CameraPlanner.generate_camera_plan(1, 3.0, bounds, shot_index=1)
+    assert plan_odd["animation_type"] == "focal_zoom_out"
+    assert plan_odd["keyframes"][0]["scale"] > 1.04
+    assert plan_odd["keyframes"][1]["scale"] == 1.00
+
+    # 2. Long duration (5.5s)
+    plan_long_even = CameraPlanner.generate_camera_plan(1, 5.5, bounds, shot_index=0)
+    assert plan_long_even["animation_type"] == "virtual_multicam"
+    assert plan_long_even["keyframes"][0]["scale"] == 1.00
+    assert plan_long_even["keyframes"][1]["scale"] > 1.05
+
+    plan_long_odd = CameraPlanner.generate_camera_plan(1, 5.5, bounds, shot_index=1)
+    assert plan_long_odd["animation_type"] == "virtual_multicam_out"
+    assert plan_long_odd["keyframes"][0]["scale"] > 1.05
+    assert plan_long_odd["keyframes"][1]["scale"] == 1.00
+
+    # 3. Short duration (1.2s)
+    plan_short_even = CameraPlanner.generate_camera_plan(1, 1.2, bounds, shot_index=0)
+    assert plan_short_even["animation_type"] == "subtle_breath"
+    assert plan_short_even["keyframes"][0]["scale"] == 1.00
+    assert plan_short_even["keyframes"][1]["scale"] == 1.030
+
+    plan_short_odd = CameraPlanner.generate_camera_plan(1, 1.2, bounds, shot_index=1)
+    assert plan_short_odd["animation_type"] == "subtle_breath_out"
+    assert plan_short_odd["keyframes"][0]["scale"] == 1.030
+    assert plan_short_odd["keyframes"][1]["scale"] == 1.00

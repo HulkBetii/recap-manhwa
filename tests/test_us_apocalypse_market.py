@@ -14,9 +14,9 @@ def test_us_market_registration():
     assert isinstance(market, USApocalypseMarket)
     assert market.id == "us_apocalypse"
     assert market.language == "en"
-    assert market.default_voice_id == "ai33pro"
-    assert market.voice_rate == "+6%"
-    assert market.voice_pitch == "-1Hz"
+    assert market.default_voice_id == "clone_andrew"
+    assert market.voice_rate == "+0%"
+    assert market.voice_pitch == "+0Hz"
 
     all_markets = markets.list_markets()
     ids = [m["id"] for m in all_markets]

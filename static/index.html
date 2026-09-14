@@ -202,17 +202,31 @@
                                 <label for="tts-voice-id" style="font-size: 0.7rem; color: var(--text-secondary);">Chế độ giọng đọc (TTS Mode)</label>
                                 <div class="input-wrapper">
                                     <select id="tts-voice-id" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
-                                        <option value="clone" selected>OmniVoice Voice Cloning (Jessa - Mặc định Tiếng Việt: easygoing and effortless)</option>
-                                        <option value="edge-tts_vi-VN-NamMinhNeural">EdgeTTS Tiếng Việt (Nam Minh - Nam trầm)</option>
-                                        <option value="edge-tts_vi-VN-HoaiMyNeural">EdgeTTS Tiếng Việt (Hoài My - Nữ nhẹ nhàng)</option>
-                                        <option value="ai33pro">API AI33Pro (ElevenLabs / EdgeTTS Auto Fallback)</option>
-                                        <option value="edge-tts_ko-KR-InJoonNeural">EdgeTTS Hàn Quốc (ko-KR-InJoonNeural - Nam trầm kịch tính)</option>
-                                        <option value="edge-tts_ko-KR-SunHiNeural">EdgeTTS Hàn Quốc (ko-KR-SunHiNeural - Nữ chuẩn)</option>
-                                        <option value="voicevox">VOICEVOX Local GPU (Tiếng Nhật - Zundamon / Anime)</option>
-                                        <option value="edge-tts">EdgeTTS Trực tiếp (en-US Christopher)</option>
-                                        <option value="auto">OmniVoice Auto (Tự động thiết kế giọng)</option>
-                                        <option value="design">OmniVoice Prompt Design (Thiết kế giọng bằng văn bản)</option>
+                                        <optgroup label="🎙️ OmniVoice Voice Cloning (Chất lượng phòng thu)">
+                                            <option value="clone_andrew" selected>OmniVoice Clone: Andrew (Mặc định Tiếng Anh Mỹ: Smooth, Smart & Clear)</option>
+                                            <option value="clone_jessa">OmniVoice Clone: Jessa (Mặc định Tiếng Việt: Easygoing & Effortless)</option>
+                                            <option value="clone">OmniVoice Clone: Tự động theo ngôn ngữ / File tải lên</option>
+                                        </optgroup>
+                                        <optgroup label="🌐 EdgeTTS Miễn phí">
+                                            <option value="edge-tts">EdgeTTS Tiếng Anh (en-US Christopher)</option>
+                                            <option value="edge-tts_vi-VN-NamMinhNeural">EdgeTTS Tiếng Việt (Nam Minh - Nam trầm)</option>
+                                            <option value="edge-tts_vi-VN-HoaiMyNeural">EdgeTTS Tiếng Việt (Hoài My - Nữ nhẹ nhàng)</option>
+                                            <option value="edge-tts_ko-KR-InJoonNeural">EdgeTTS Hàn Quốc (ko-KR-InJoonNeural - Nam trầm kịch tính)</option>
+                                            <option value="edge-tts_ko-KR-SunHiNeural">EdgeTTS Hàn Quốc (ko-KR-SunHiNeural - Nữ chuẩn)</option>
+                                        </optgroup>
+                                        <optgroup label="⚡ Tùy chọn khác">
+                                            <option value="ai33pro">API AI33Pro (ElevenLabs / EdgeTTS Auto Fallback)</option>
+                                            <option value="voicevox">VOICEVOX Local GPU (Tiếng Nhật - Zundamon / Anime)</option>
+                                            <option value="auto">OmniVoice Auto (Tự động thiết kế giọng)</option>
+                                            <option value="design">OmniVoice Prompt Design (Thiết kế giọng bằng văn bản)</option>
+                                        </optgroup>
                                     </select>
+                                </div>
+                                <div id="voice-preview-container" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.35rem;">
+                                    <button type="button" id="btn-preview-voice" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.7rem; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #60A5FA; border-radius: 0.35rem; cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
+                                        <span id="preview-btn-text">▶ Nghe thử giọng Andrew (EN)</span>
+                                    </button>
+                                    <audio id="audio-preview-player" style="display: none;"></audio>
                                 </div>
                             </div>
                         </div>

@@ -133,7 +133,9 @@ async def test_stage12_metadata_and_youtube_kit(tmp_path):
     assert "00:00 - Episode 1" in kit_text
     assert "30:00 - Episode 2" in kit_text
     assert "Copyright Disclaimer" in kit_text
-    assert "[3. TAGS" in kit_text
+    assert "[3. PINNED COMMENT" in kit_text
+    assert "📌 MANHWA INFO & TIMESTAMPS" in kit_text
+    assert "[4. TAGS" in kit_text
     assert "apocalypse manhwa" in kit_text
 
     # Verify task artifacts

@@ -5,7 +5,7 @@ import json
 import shutil
 import uuid
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Iterable
+from typing import Any, Awaitable, Callable, Iterable, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -47,7 +47,11 @@ JUNK_TEXT_KEYWORDS = (
     "scans",
     "discord",
     "donate",
+    "donating",
     "patreon",
+    "ko-fi",
+    "kofi",
+    "ko fi",
     "team",
     "group",
     "tác giả",
@@ -58,6 +62,14 @@ JUNK_TEXT_KEYWORDS = (
     "typeset",
     "proofread",
     "cleaning",
+    "support us",
+    "read the full",
+    "read on",
+    "comes first at",
+    "buy raw",
+    "webtoon.com",
+    "tapas.io",
+    "tappytoon",
 )
 
 
@@ -197,6 +209,19 @@ def is_junk_or_title_page(
         edge_ratio = float(np.mean(canny > 0))
         if edge_ratio < 0.025:
             return True, "sparse_title_banner"
+
+    # 3. Short wide banner with sparse large text — likely ad/credit even without OCR
+    #    Catches fan-translation ad pages (e.g. "Read on Dragontea.ink", "Ko-fi.com/...")
+    if h < 500 and bg_ratio >= 0.70:
+        canny = cv2.Canny(gray, 50, 150)
+        contours, _ = cv2.findContours(canny, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        large_contours = [c for c in contours if cv2.contourArea(c) > (h * w * 0.005)]
+        art_color = 0.0
+        if img_bgr.ndim == 3:
+            hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+            art_color = float(np.mean((hsv[:, :, 1] > 25) & (hsv[:, :, 2] > 45)))
+        if len(large_contours) < 4 and art_color < 0.15:
+            return True, "short_ad_credit_banner"
 
     return False, "valid_story_panel"
 
