@@ -1,6 +1,9 @@
 import os
 import torch
 
+APP_NAME = "Recap Comics Automation"
+APP_VERSION = "1.5.0"
+
 # TTS Configuration
 # Supported providers: "kokoro"
 TTS_PROVIDER = os.getenv("TTS_PROVIDER", "kokoro")

@@ -499,6 +499,14 @@ async def get_app_config():
     return load_config()
 
 
+@app.get("/api/version")
+async def get_app_version():
+    return {
+        "app": getattr(config, "APP_NAME", "Recap Comics Automation"),
+        "version": getattr(config, "APP_VERSION", "1.5.0"),
+    }
+
+
 @app.get("/api/voicevox/status")
 async def get_voicevox_status():
     import httpx
