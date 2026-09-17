@@ -716,9 +716,28 @@ async def generate_tts(
                                 final_segments.append(" ".join(current_chunk))
                             current_chunk = [word]
                             current_len = len(word)
-                    if current_chunk:
-                        final_segments.append(" ".join(current_chunk))
-            return final_segments
+            # Third level processing (v1.7.0 Sentence Packing Optimization):
+            # Pack short consecutive sentences/clauses into optimal chunks up to max_chars.
+            # Dramatically reduces OmniVoice model.generate invocations and diffusion setup overhead.
+            packed_segments = []
+            current_pack = []
+            current_pack_len = 0
+            for seg in final_segments:
+                seg = seg.strip()
+                if not seg:
+                    continue
+                add_len = len(seg) if current_pack_len == 0 else len(seg) + 1
+                if current_pack_len + add_len <= max_chars:
+                    current_pack.append(seg)
+                    current_pack_len += add_len
+                else:
+                    if current_pack:
+                        packed_segments.append(" ".join(current_pack))
+                    current_pack = [seg]
+                    current_pack_len = len(seg)
+            if current_pack:
+                packed_segments.append(" ".join(current_pack))
+            return packed_segments
 
         def synthesize():
             segments = split_text_into_segments(text)

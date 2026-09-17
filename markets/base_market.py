@@ -14,7 +14,7 @@ class BaseMarketProfile:
     voice_rate: str = '+0%'
     voice_pitch: str = '+0Hz'
     preferred_fonts: List[str] = field(default_factory=list)
-    point_score_threshold: int = 65
+    point_score_threshold: int = 70
 
     def get_gemini_prompt(
         self,

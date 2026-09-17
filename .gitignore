@@ -35,3 +35,8 @@ output/
 *.srt
 *.mp3
 *.wav
+review_*/
+review_samples/
+audit_results_*.json
+scratch_*.jpg
+

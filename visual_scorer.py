@@ -12,6 +12,7 @@ feat-multi-episode-optimization branch.
 
 from __future__ import annotations
 
+import os
 from typing import Dict, Optional, Tuple
 
 import cv2
@@ -24,15 +25,62 @@ class VisualSemanticScorer:
     Computes deterministic Visual Semantic Score (0-100) for manhwa/comic pages:
 
       FINAL SCORE =
-        Semantic Similarity × 0.35 +
-        Visual Detail × 0.30 +
-        Character Presence × 0.15 +
+        Semantic Similarity × 0.30 +
+        Visual Detail × 0.25 +
+        Character Presence × 0.25 +
         Action/Context × 0.10 +
         Image Quality × 0.10
 
     Evaluates visual utility for downstream narration-to-image semantic
-    matching.
+    matching. Character presence is weighted heavily to prefer panels
+    showing genuine faces, character interactions, and action over
+    text-heavy, empty, or limb-only panels.
     """
+
+    _detector = None
+    _detector_initialized = False
+    _model_path = os.path.join(os.path.dirname(__file__), "models", "face_detection_yunet_2023mar.onnx")
+
+    @classmethod
+    def _get_detector(cls, w: int, h: int):
+        if not cls._detector_initialized:
+            cls._detector_initialized = True
+            if os.path.exists(cls._model_path) and hasattr(cv2, "FaceDetectorYN"):
+                try:
+                    cls._detector = cv2.FaceDetectorYN.create(
+                        model=cls._model_path,
+                        config="",
+                        input_size=(w, h),
+                        score_threshold=0.55,
+                        nms_threshold=0.3,
+                        top_k=5000,
+                    )
+                except Exception:
+                    cls._detector = None
+            else:
+                cls._detector = None
+
+        if cls._detector is not None:
+            try:
+                cls._detector.setInputSize((w, h))
+            except Exception:
+                pass
+        return cls._detector
+
+    @classmethod
+    def detect_faces(cls, img_bgr: np.ndarray) -> list:
+        """Detect human/character faces using YuNet ONNX."""
+        if img_bgr is None or img_bgr.size == 0:
+            return []
+        h, w = img_bgr.shape[:2]
+        detector = cls._get_detector(w, h)
+        if detector is None:
+            return []
+        try:
+            _, faces = detector.detect(img_bgr)
+            return list(faces) if faces is not None else []
+        except Exception:
+            return []
 
     @classmethod
     def calculate_score(
@@ -181,10 +229,23 @@ class VisualSemanticScorer:
         )
         contour_score = np.clip(significant_contours / 5.0 * 100.0, 0.0, 100.0)
 
-        character_presence = float(
-            np.clip(0.45 * skin_score + 0.35 * focal_score + 0.20 * contour_score,
-                    0.0, 100.0)
-        )
+        # AI Face Detection (YuNet ONNX)
+        detected_faces = cls.detect_faces(small_bgr)
+        num_faces = len(detected_faces)
+        if num_faces > 0:
+            max_conf = float(max(f[-1] for f in detected_faces))
+            # Human/character face strongly anchors character presence
+            face_score = float(np.clip(num_faces * 40.0 + max_conf * 50.0, 0.0, 100.0))
+            character_presence = float(
+                np.clip(0.60 * face_score + 0.25 * skin_score + 0.15 * focal_score, 0.0, 100.0)
+            )
+        else:
+            # When NO face is detected, prevent false-positive skin-tone artifacts
+            # (e.g. orange wooden walls, sunlight, or bare walking legs) from inflating score.
+            capped_skin = min(25.0, skin_score)
+            character_presence = float(
+                np.clip(0.35 * capped_skin + 0.35 * focal_score + 0.30 * contour_score, 0.0, 60.0)
+            )
 
         # ==================================================================
         # 4. Action / Context  (Weight: 0.10)
@@ -238,26 +299,43 @@ class VisualSemanticScorer:
         black_ratio = float(np.mean(gray < 40))
         void_ratio = white_ratio + black_ratio
 
+        # Bubble coverage ratio: fraction of image covered by speech bubble
+        # regions (bright white blobs with very low saturation)
+        bubble_cov_mask = (gray > 205) & (sat < 30)
+        bubble_coverage_ratio = float(np.mean(bubble_cov_mask))
+        gray_std = float(np.std(gray))
+
         from moderation_utils import is_text_bubble_dominant
         is_bubble, _ = is_text_bubble_dominant(small_bgr, bg_val=bg_val)
         is_empty_box = (void_ratio >= 0.78 and (art_color_ratio < 0.18 or skin_ratio < 0.015))
         is_tiny_slice = (h < 400 and (void_ratio > 0.65 or art_color_ratio < 0.20) and skin_ratio < 0.02)
+        is_mostly_bubble = (bubble_coverage_ratio > 0.40 and skin_ratio < 0.03) or (bubble_coverage_ratio > 0.35 and character_presence < 18.0)
+        # Low variance / solid / gradient gutter detection (catches grey bars, solid color bars, empty panels)
+        is_solid_or_gutter = (gray_std < 14.0 or visual_detail < 8.0) and skin_ratio < 0.02
+        is_limbs_no_face = bool(num_faces == 0 and skin_ratio > 0.35 and visual_detail < 25.0 and action_context < 25.0)
+        is_bubble_no_face = bool(num_faces == 0 and bubble_coverage_ratio > 0.35 and character_presence < 30.0)
 
-        is_meaningless = bool(is_bubble or is_empty_box or is_tiny_slice)
+        is_meaningless = bool(is_bubble or is_empty_box or is_tiny_slice or is_mostly_bubble or is_solid_or_gutter or is_limbs_no_face or is_bubble_no_face)
 
         # ==================================================================
         # Final Score Combination
+        # Weights rebalanced in v1.6.0: character_presence raised from 0.15
+        # to 0.25 so panels with faces/characters are strongly preferred over
+        # text-heavy or detail-only panels.
         # ==================================================================
         final_score_raw = (
-            semantic_similarity * 0.35
-            + visual_detail * 0.30
-            + character_presence * 0.15
+            semantic_similarity * 0.30
+            + visual_detail * 0.25
+            + character_presence * 0.25
             + action_context * 0.10
             + image_quality * 0.10
         )
+        if final_score_raw < 32.0:
+            is_meaningless = True
+
         if is_meaningless:
-            # Heavily penalize text-bubble, empty text-box, and tiny slices below threshold (capped at 35)
-            final_score = min(35, max(0, int(round(final_score_raw * 0.35))))
+            # Heavily penalize text-bubble, empty text-box, gutter bars, and tiny slices below threshold (capped at 25)
+            final_score = min(25, max(0, int(round(final_score_raw * 0.25))))
         else:
             final_score = max(0, min(100, int(round(final_score_raw))))
 
@@ -267,6 +345,7 @@ class VisualSemanticScorer:
             "character_presence": round(character_presence, 2),
             "action_context": round(action_context, 2),
             "image_quality": round(image_quality, 2),
+            "bubble_coverage_ratio": round(bubble_coverage_ratio, 3),
             "is_meaningless": is_meaningless,
             "final_score": final_score,
         }

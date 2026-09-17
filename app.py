@@ -503,7 +503,7 @@ async def get_app_config():
 async def get_app_version():
     return {
         "app": getattr(config, "APP_NAME", "Recap Comics Automation"),
-        "version": getattr(config, "APP_VERSION", "1.5.0"),
+        "version": getattr(config, "APP_VERSION", "1.6.0"),
     }
 
 
@@ -3501,7 +3501,7 @@ def generate_gemini_prompt(
     target_language: str = "en",
     glossary: str = None,
     market_id: str = None,
-    point_score_threshold: int = 65,
+    point_score_threshold: int = 70,
     previous_context: dict = None,
 ) -> str:
     comic_title = re.sub(r'[\r\n\t"\\]', ' ', str(comic_title or "")).strip()[:150]
@@ -4077,7 +4077,7 @@ def generate_intro_prompt(
     total_pages: int,
     target_language: str = "en",
     market_id: str = None,
-    point_score_threshold: int = 65,
+    point_score_threshold: int = 70,
 ) -> str:
     """Generate a specialized prompt for Episode 1 Intro Hook only.
 

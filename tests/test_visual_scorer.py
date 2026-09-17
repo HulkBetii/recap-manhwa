@@ -91,11 +91,12 @@ class TestVisualSemanticScorer:
         score, breakdown = VisualSemanticScorer.calculate_score(img)
         assert score < 30, f"Solid black should score < 30, got {score}"
 
-    def test_gradient_scores_medium(self):
-        """A gradient image has some detail but no characters."""
+    def test_gradient_without_art_scores_low(self):
+        """A plain gradient image has no comic art or characters; in v1.6.0 it is penalized as gutter/meaningless."""
         img = _make_gradient()
         score, breakdown = VisualSemanticScorer.calculate_score(img)
-        assert 20 <= score <= 70, f"Gradient should score 20-70, got {score}"
+        assert score <= 25, f"Plain gradient should be penalized <= 25, got {score}"
+        assert breakdown["is_meaningless"] is True
 
     def test_complex_art_scores_high(self):
         """Synthetic art with shapes/lines should score reasonably high."""
@@ -112,12 +113,13 @@ class TestVisualSemanticScorer:
             assert 0 <= score <= 100
 
     def test_breakdown_keys(self):
-        """Breakdown dict must contain all 5 criteria + final_score + is_meaningless."""
+        """Breakdown dict must contain all 5 criteria + bubble_coverage_ratio + final_score + is_meaningless."""
         img = _make_gradient()
         _, breakdown = VisualSemanticScorer.calculate_score(img)
         expected_keys = {
             "semantic_similarity", "visual_detail", "character_presence",
-            "action_context", "image_quality", "is_meaningless", "final_score",
+            "action_context", "image_quality", "bubble_coverage_ratio",
+            "is_meaningless", "final_score",
         }
         assert set(breakdown.keys()) == expected_keys
 
@@ -169,3 +171,18 @@ class TestVisualSemanticScorer:
 
         # Allow generous 100ms to account for CI / slow machines
         assert elapsed < 100, f"Average scoring time {elapsed:.1f}ms exceeds 100ms limit"
+
+    def test_non_face_skin_tone_is_capped(self):
+        """Pure skin tone image without face (e.g. orange wall or legs) should have capped character_presence."""
+        # Create image with pure skin tone (Cr=145, Cb=105, Y=160 in YCrCb -> BGR)
+        ycrcb = np.zeros((400, 400, 3), dtype=np.uint8)
+        ycrcb[:, :, 0] = 160  # Y
+        ycrcb[:, :, 1] = 145  # Cr
+        ycrcb[:, :, 2] = 105  # Cb
+        skin_img = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
+
+        score, breakdown = VisualSemanticScorer.calculate_score(skin_img)
+        # character_presence must be capped and cannot exceed 50 without a face
+        assert breakdown["character_presence"] <= 50.0, f"Non-face skin tone should be capped, got {breakdown['character_presence']}"
+        assert breakdown["is_meaningless"] is True
+

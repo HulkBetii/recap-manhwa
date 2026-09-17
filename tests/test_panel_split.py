@@ -118,3 +118,66 @@ def test_create_numbered_pdf(tmp_path):
     # Validate that PDF has 3 page objects
     pdf_bytes = pdf_out.read_bytes()
     assert pdf_bytes.count(b"/Type /Page\n") + pdf_bytes.count(b"/Type /Page ") + pdf_bytes.count(b"/Type/Page") >= 3
+
+
+def test_anti_decapitation_face_guard():
+    """Verify that optimize_panel_splits NEVER cuts through a human face."""
+    from workflow_stages_1 import optimize_panel_splits
+
+    height = 3000
+    clean_rows = np.zeros(height, dtype=bool)
+    # Put clean bands only at 1800
+    clean_rows[1800:1820] = True
+
+    is_forbidden = np.zeros(height, dtype=bool)
+    # Face located at y in [900, 1100]
+    face_protected = np.zeros(height, dtype=bool)
+    face_protected[900:1100] = True
+
+    # Low gradient energy valley happens right across the face (e.g. plain shirt/chin at 1000)
+    smoothed_energy = np.ones(height, dtype=float) * 10.0
+    smoothed_energy[980:1020] = 0.1  # Local minimum right on chin/collar
+
+    splits = optimize_panel_splits(
+        height=height,
+        clean_rows=clean_rows,
+        is_forbidden=is_forbidden,
+        target_h=1000,
+        min_h=700,
+        max_h=1400,
+        smoothed_energy=smoothed_energy,
+        face_protected=face_protected,
+    )
+
+    # NONE of the split cuts can fall inside [900, 1100]
+    for cut in splits[1:-1]:
+        assert not (900 <= cut <= 1100), f"Split cut {cut} decapitated the face in [900, 1100]!"
+
+
+def test_panel_preserving_lookahead():
+    """Verify that a clean band slightly beyond max_h (up to 1.45*max_h) is chosen to keep panel intact."""
+    from workflow_stages_1 import optimize_panel_splits
+
+    height = 4000
+    clean_rows = np.zeros(height, dtype=bool)
+    # Panel starts at 0 and ends at 1550 (which is > max_h=1400 but < 1.45*1400=2030)
+    clean_rows[1550:1580] = True
+
+    is_forbidden = np.zeros(height, dtype=bool)
+    # The entire range [0, 1550] is content
+    is_forbidden[0:1550] = True
+
+    splits = optimize_panel_splits(
+        height=height,
+        clean_rows=clean_rows,
+        is_forbidden=is_forbidden,
+        target_h=1000,
+        min_h=700,
+        max_h=1400,
+    )
+
+    # First cut should look ahead and pick the clean band at 1565 instead of chopping inside [700, 1400]
+    assert len(splits) >= 2
+    first_cut = splits[1]
+    assert 1550 <= first_cut <= 1580, f"Expected cut at clean gutter ~1565, got {first_cut}"
+

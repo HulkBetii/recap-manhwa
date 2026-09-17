@@ -69,18 +69,42 @@ def test_camera_planner_never_uses_scroll_down():
 
 
 def test_camera_planner_mode_selection():
-    # 1. Short duration -> subtle_breath
-    plan_short = CameraPlanner.generate_camera_plan(1, 1.2, (0, 0, 600, 800))
-    assert plan_short["animation_type"] == "subtle_breath"
+    # 1. Tall webtoon strip panel (usable_v_travel >= 160px) -> vertical_pan_glide
+    plan_tall = CameraPlanner.generate_camera_plan(1, 3.0, (0, 0, 600, 1600))
+    assert plan_tall["animation_type"] == "vertical_pan_glide"
+    assert plan_tall["easing"] == "soft_linear_glide"
+    assert len(plan_tall["keyframes"]) == 2
 
-    # 2. Long duration -> virtual_multicam continuous gentle focus
-    plan_long = CameraPlanner.generate_camera_plan(1, 6.0, (0, 0, 600, 800))
-    assert plan_long["animation_type"] == "virtual_multicam"
-    assert len(plan_long["keyframes"]) >= 2
+    # 2. Smart direction on tall panel: bubble in upper 35% -> bottom_to_top
+    plan_bubble_top = CameraPlanner.generate_camera_plan(
+        page_num=1,
+        duration=3.0,
+        bounds=(0, 0, 600, 1600),
+        bubble_centroid=(300.0, 300.0),  # y=300 < 0.35*1600=560
+        bubble_coverage_ratio=0.25,
+    )
+    assert plan_bubble_top["animation_type"] == "vertical_pan_glide"
+    assert plan_bubble_top["direction"] == "bottom_to_top"
 
-    # 3. Wide panel -> cinematic_pan_horizontal
+    # 3. Standard / Square / Low-height panel -> Ken Burns Focus Zoom luân phiên (never frozen!)
+    plan_square_even = CameraPlanner.generate_camera_plan(1, 3.0, (0, 0, 800, 800), shot_index=0)
+    assert plan_square_even["animation_type"] == "focal_zoom_in"
+    assert plan_square_even["keyframes"][0]["scale"] == 1.00
+    assert plan_square_even["keyframes"][1]["scale"] == 1.10
+
+    plan_square_odd = CameraPlanner.generate_camera_plan(1, 3.0, (0, 0, 800, 800), shot_index=1)
+    assert plan_square_odd["animation_type"] == "focal_zoom_out"
+    assert plan_square_odd["keyframes"][0]["scale"] == 1.10
+    assert plan_square_odd["keyframes"][1]["scale"] == 1.00
+
+    # 4. Standard wide panel (aspect_ratio < 2.40, e.g. 1200x600 = 2.0) -> Ken Burns Focus Zoom (No horizontal pan!)
     plan_wide = CameraPlanner.generate_camera_plan(1, 3.0, (0, 0, 1200, 600))
-    assert plan_wide["animation_type"] == "cinematic_pan_horizontal"
+    assert plan_wide["animation_type"] in ("focal_zoom_in", "focal_zoom_out")
+
+    # 5. Extreme panoramic strip (aspect_ratio >= 2.40) -> restricted cinematic horizontal pan
+    plan_panorama = CameraPlanner.generate_camera_plan(1, 3.0, (0, 0, 1500, 500))
+    assert plan_panorama["animation_type"] == "cinematic_pan_horizontal"
+    assert plan_panorama["easing"] == "soft_linear_glide"
 
 
 def test_interpolate_camera_plan_and_jump_cut():
@@ -119,39 +143,42 @@ def test_apply_motion_blur():
     assert res_blurred.shape == img_np.shape
 
 
-def test_ken_burns_alternating_motion_in_and_out():
-    """Verify that even shots zoom in and odd shots zoom out across camera modes."""
-    bounds = (0, 0, 800, 1200)
+def test_hybrid_motion_alternating_motion_and_progress():
+    """Verify v1.6.1 Hybrid Motion alternating direction and continuous progress interpolation."""
+    from workflow_stages_2 import soft_linear_glide, interpolate_camera_progress
 
-    # 1. Standard duration (3.0s)
-    plan_even = CameraPlanner.generate_camera_plan(1, 3.0, bounds, shot_index=0)
-    assert plan_even["animation_type"] == "focal_zoom_in"
-    assert plan_even["keyframes"][0]["scale"] == 1.00
-    assert plan_even["keyframes"][1]["scale"] > 1.04
+    # 1. Tall panel (usable_v_travel >= 160) -> alternating pan direction
+    tall_bounds = (0, 0, 800, 1800)
+    plan_even = CameraPlanner.generate_camera_plan(1, 3.0, tall_bounds, shot_index=0)
+    assert plan_even["animation_type"] == "vertical_pan_glide"
+    assert plan_even["direction"] == "top_to_bottom"
+    assert plan_even["keyframes"][0]["progress"] == 0.0
+    assert plan_even["keyframes"][1]["progress"] == 1.0
 
-    plan_odd = CameraPlanner.generate_camera_plan(1, 3.0, bounds, shot_index=1)
-    assert plan_odd["animation_type"] == "focal_zoom_out"
-    assert plan_odd["keyframes"][0]["scale"] > 1.04
-    assert plan_odd["keyframes"][1]["scale"] == 1.00
+    plan_odd = CameraPlanner.generate_camera_plan(1, 3.0, tall_bounds, shot_index=1)
+    assert plan_odd["animation_type"] == "vertical_pan_glide"
+    assert plan_odd["direction"] == "bottom_to_top"
 
-    # 2. Long duration (5.5s)
-    plan_long_even = CameraPlanner.generate_camera_plan(1, 5.5, bounds, shot_index=0)
-    assert plan_long_even["animation_type"] == "virtual_multicam"
-    assert plan_long_even["keyframes"][0]["scale"] == 1.00
-    assert plan_long_even["keyframes"][1]["scale"] > 1.05
+    # 2. Soft linear glide easing property: linear constant speed in [0.05, 0.95]
+    assert soft_linear_glide(0.0) == 0.0
+    assert abs(soft_linear_glide(0.5) - 0.5) < 1e-4
+    assert soft_linear_glide(1.0) == 1.0
 
-    plan_long_odd = CameraPlanner.generate_camera_plan(1, 5.5, bounds, shot_index=1)
-    assert plan_long_odd["animation_type"] == "virtual_multicam_out"
-    assert plan_long_odd["keyframes"][0]["scale"] > 1.05
-    assert plan_long_odd["keyframes"][1]["scale"] == 1.00
+    # Intermediate progress is strictly monotonic
+    for t in [0.1, 0.25, 0.5, 0.75, 0.9]:
+        p = interpolate_camera_progress(plan_even, t * 3.0)
+        assert 0.0 <= p <= 1.0
+    assert interpolate_camera_progress(plan_even, 0.0) == 0.0
+    assert interpolate_camera_progress(plan_even, 3.0) == 1.0
 
-    # 3. Short duration (1.2s)
-    plan_short_even = CameraPlanner.generate_camera_plan(1, 1.2, bounds, shot_index=0)
-    assert plan_short_even["animation_type"] == "subtle_breath"
-    assert plan_short_even["keyframes"][0]["scale"] == 1.00
-    assert plan_short_even["keyframes"][1]["scale"] == 1.030
 
-    plan_short_odd = CameraPlanner.generate_camera_plan(1, 1.2, bounds, shot_index=1)
-    assert plan_short_odd["animation_type"] == "subtle_breath_out"
-    assert plan_short_odd["keyframes"][0]["scale"] == 1.030
-    assert plan_short_odd["keyframes"][1]["scale"] == 1.00
+def test_adaptive_velocity_clamping_v170():
+    """Verify that vertical pan velocity is strictly clamped <= 120 px/s in v1.7.0."""
+    tall_bounds = (0, 0, 800, 2800)
+    duration = 2.5  # Short dialogue line
+    plan = CameraPlanner.generate_camera_plan(1, duration, tall_bounds, shot_index=0)
+    
+    kf = plan["keyframes"]
+    travel_dist = abs(kf[1]["y"] - kf[0]["y"])
+    pan_speed = travel_dist / duration
+    assert pan_speed <= 120.0 + 1e-4, f"Pan speed {pan_speed:.1f}px/s exceeded 120px/s limit"

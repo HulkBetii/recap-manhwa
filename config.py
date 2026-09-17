@@ -2,7 +2,7 @@ import os
 import torch
 
 APP_NAME = "Recap Comics Automation"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.8.0"
 
 # TTS Configuration
 # Supported providers: "kokoro"
@@ -74,6 +74,8 @@ OMNIVOICE_PRESETS = {
 # Flash-Forward Intro Policy: Disabled by default per user request (Cold Open / Direct Start)
 ENABLE_FLASH_FORWARD_INTRO = os.getenv("ENABLE_FLASH_FORWARD_INTRO", "false").lower() in ("true", "1", "yes")
 
-
-
-
+# Universal Automation Defaults (Pacing, Auto Clean-Crop, On-Demand Text Removal)
+DEFAULT_MIN_PANEL_DURATION = float(os.getenv("MIN_PANEL_DURATION", "3.5"))
+DEFAULT_HARD_FLOOR_DURATION = float(os.getenv("HARD_FLOOR_DURATION", "3.0"))
+DEFAULT_AUTO_TRIM_VOIDS = os.getenv("AUTO_TRIM_VOIDS", "true").lower() in ("true", "1", "yes")
+DEFAULT_AUTO_REMOVE_TEXT = os.getenv("AUTO_REMOVE_TEXT", "false").lower() in ("true", "1", "yes")

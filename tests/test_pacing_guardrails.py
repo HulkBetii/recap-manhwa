@@ -68,16 +68,16 @@ def test_dual_sub_shot_camera_planner_for_long_duration():
 
 
 def test_standard_and_medium_durations_unaffected():
-    """Verify durations <= 7.0s still use their designated animation types."""
+    """Verify durations <= 7.0s still use their designated animation types (focal zoom in/out)."""
     bounds = (0, 0, 800, 1200)
     
-    # 6.0s should use virtual_multicam
+    # 6.0s should use standard focal zoom
     plan_med = CameraPlanner.generate_camera_plan(1, 6.0, bounds)
-    assert plan_med["animation_type"] == "virtual_multicam"
+    assert plan_med["animation_type"] in ("focal_zoom_in", "focal_zoom_out")
 
-    # 1.2s should use subtle_breath
+    # 1.2s should use standard focal zoom
     plan_short = CameraPlanner.generate_camera_plan(1, 1.2, bounds)
-    assert plan_short["animation_type"] == "subtle_breath"
+    assert plan_short["animation_type"] in ("focal_zoom_in", "focal_zoom_out")
 
 
 def test_display_guardrail_merges_sub_1_8s():

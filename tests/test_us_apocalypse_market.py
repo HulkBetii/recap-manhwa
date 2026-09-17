@@ -38,7 +38,7 @@ def test_us_apocalypse_prompt_generation_ep1():
     assert "<page_number> - <English narration sentence>.#" in prompt
     # Visual Panel Selection & Anti-Filler Filter
     assert "POINT SCORE HARD REQUIREMENT" in prompt
-    assert "Point >= 65" in prompt
+    assert f"Point >= {market.point_score_threshold}" in prompt
     assert "FORBIDDEN PAGES" in prompt
     assert "LEVEL A — DIRECT VISUAL" in prompt
 
@@ -93,3 +93,47 @@ def test_bgm_assets_exist():
 def test_public_artifacts_keys():
     assert "youtube_upload_kit_url" in PUBLIC_ARTIFACT_KEYS
     assert "chapters" in PUBLIC_ARTIFACT_KEYS
+
+
+def test_thumbnail_prompt_6_layers_gpt():
+    market = markets.get_market("us_apocalypse")
+    meta = market.generate_youtube_metadata("Ultimate Shut-in", 1, 85)
+
+    assert "thumbnail_concepts" in meta
+    concepts = meta["thumbnail_concepts"]
+    assert len(concepts) == 5
+
+    concept_ids = [c["id"] for c in concepts]
+    assert "concept_sovereign_climax" in concept_ids
+    assert "concept_intimate_proximity" in concept_ids
+    assert "concept_enemy_humiliation" in concept_ids
+    assert "concept_resource_contrast" in concept_ids
+    assert "concept_system_defiance" in concept_ids
+
+    for concept in concepts:
+        assert "prompt" in concept
+        assert "gpt_prompt" in concept
+        assert "name" in concept
+        assert "thumbnail_text" in concept
+        assert "text_overlay" in concept
+        assert "text_style" in concept
+        assert "characters" in concept
+        assert len(concept["characters"]) >= 2
+
+        prompt = concept["prompt"]
+        # Verify mandatory 6-Layer GPT Image Prompt structure
+        assert "[IMAGE MEDIUM, ART STYLE & ASPECT RATIO]" in prompt
+        assert "[CHARACTER REFERENCES & SUBJECT ANCHORS]" in prompt
+        assert "[SPATIAL COMPOSITION & CAMERA FRAMING]" in prompt
+        assert "[SCENE ENVIRONMENT, 2.5D LIGHTING & COLOR PALETTE]" in prompt
+        assert "[YOUTUBE CLICKBAIT GRAPHIC DESIGN & TYPOGRAPHY OVERLAYS]" in prompt
+        assert "[TECHNICAL QUALITY & ANATOMY GUARDRAILS]" in prompt
+
+        # Verify manhwa 2.5D visual aesthetic
+        assert "Modern Korean Webtoon (Manhwa 2.5D)" in prompt
+        assert "Redice Studio" in prompt
+
+        # Verify clickbait text overlay is present
+        assert len(concept["text_overlay"]) > 0
+
+

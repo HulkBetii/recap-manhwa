@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 import glob
 from typing import Dict, Any, List, Optional
 
@@ -19,27 +20,36 @@ def detect_archetype(comic_title: str, story_memory: Optional[Dict[str, Any]] = 
 
     if any(k in combined for k in ["zombie", "infected", "undead", "ghoul", "plague", "virus", "outbreak", "82-08", "8208", "walking dead"]):
         return "zombie_apocalypse"
-    elif any(k in combined for k in ["world after the fall", "tower", "floor", "chaos", "return stone", "regress", "nightmare"]):
+    elif any(k in combined for k in ["world after the fall", "tower", "floor", "chaos", "return stone", "regress", "nightmare", "thrust"]):
         return "tower_anti_regression"
-    elif any(k in combined for k in ["bunker", "shelter", "shut-in", "shutin", "warehouse", "hoard", "freeze", "freezing"]):
+    elif any(k in combined for k in ["bunker", "shelter", "shut-in", "shutin", "warehouse", "hoard", "freeze", "freezing", "ice age", "supplies", "vault", "doomsday prepper"]):
         return "bunker_prepper"
-    elif any(k in combined for k in ["hunter", "gate", "dungeon", "awakening", "rank", "necromancer", "shadow"]):
+    elif any(k in combined for k in ["hunter", "gate", "dungeon", "awakening", "rank", "necromancer", "shadow", "monarch", "s-rank", "calamity"]):
         return "hunter_gate"
-    elif any(k in combined for k in ["murim", "martial", "cultivation", "sword", "heavenly", "demon"]):
+    elif any(k in combined for k in ["murim", "martial", "cultivation", "sword", "heavenly", "demon", "sect", "dantian", "qi"]):
         return "murim_apocalypse"
+    elif any(k in combined for k in ["revenge", "betray", "betrayed", "executed", "reborn", "regressor", "returnee", "vengeance"]):
+        return "reincarnation_revenge"
+    elif any(k in combined for k in ["space", "inventory", "infinite storage", "supermarket", "grocery"]):
+        return "infinite_space_hoard"
     return "general_apocalypse"
 
 
 def get_character_names(comic_title: str, story_memory: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     """
-    Resolves protagonist and key supporting character names.
+    Resolves protagonist and key supporting character names dynamically from story memory or smart archetype fallbacks.
     """
     title_lower = (comic_title or "").lower()
     mc_name = ""
+    female_lead = ""
+
     if story_memory:
         raw_mc = story_memory.get("protagonist_name", "").strip()
-        if raw_mc and len(raw_mc) > 1 and raw_mc.lower() not in ["a", "protagonist", "mc", "unknown"]:
+        if raw_mc and len(raw_mc) > 1 and raw_mc.lower() not in ["a", "protagonist", "mc", "unknown", "hero", "the hero"]:
             mc_name = raw_mc
+        raw_fl = story_memory.get("female_lead", "") or story_memory.get("companion_name", "")
+        if raw_fl and len(raw_fl) > 1 and raw_fl.lower() not in ["a", "companion", "female", "unknown"]:
+            female_lead = raw_fl
 
     if not mc_name:
         if "world after the fall" in title_lower:
@@ -54,17 +64,20 @@ def get_character_names(comic_title: str, story_memory: Optional[Dict[str, Any]]
             mc_name = "The Veteran Survivor"
         elif any(k in title_lower for k in ["zombie", "82-08", "8208"]):
             mc_name = "South"
+        elif any(k in title_lower for k in ["shut-in", "shutin", "bunker", "shelter"]):
+            mc_name = "The Ultimate Bunker Sovereign"
         else:
-            mc_name = "The Lone Survivor"
+            mc_name = "The Lone Sovereign"
 
-    if "world after the fall" in title_lower:
-        female_lead = "Mino / Sirwen Armelt"
-    elif "global freeze" in title_lower or "shelter" in title_lower:
-        female_lead = "Yu Qing / Zhou Keer"
-    elif any(k in title_lower for k in ["zombie", "82-08", "8208"]):
-        female_lead = "The Fearless Survivor"
-    else:
-        female_lead = "The Seductive Companion"
+    if not female_lead:
+        if "world after the fall" in title_lower:
+            female_lead = "Mino / Sirwen Armelt"
+        elif "global freeze" in title_lower or "shelter" in title_lower or "shut-in" in title_lower:
+            female_lead = "Yu Qing / Zhou Keer"
+        elif any(k in title_lower for k in ["zombie", "82-08", "8208"]):
+            female_lead = "The Fearless Survivor"
+        else:
+            female_lead = "The Alluring Female Lead"
 
     return {
         "mc": mc_name,
@@ -131,7 +144,6 @@ def extract_episode_theme(recap_path: str, ep: int, comic_title: str = "") -> st
         if any(kw in lower_speech for kw in keywords):
             return theme
 
-    # Fallback: clean action phrase
     first_sent = re.split(r"[.!?]", full_speech)[0].strip()
     first_sent = re.sub(r"^(while|as|spotting|even with|with|after)\s+[^,]+,\s*", "", first_sent, flags=re.IGNORECASE)
     first_sent = re.sub(r"^(south|he|they|she|the hero|the survivor)\s+(watches|scrambles|lunges|braces|realizes|slices|slams|freezes|frantically|doesn\'t waste|doesn\'t hesitate)\s+[^,\.]*?(?:as|when|that|to)?\s*", "", first_sent, flags=re.IGNORECASE)
@@ -195,6 +207,30 @@ UNIVERSAL_NARRATIVE_PROGRESSION = {
         "The Wasteland Siege & Ruthless Retribution",
         "Sovereign of the Frozen Earth",
     ],
+    "reincarnation_revenge": [
+        "The Fatal Betrayal & Death in the Abyss",
+        "Rebirth with 10 Years of Future Knowledge",
+        "Hoarding Forbidden Artifacts in Secret",
+        "First Blood Against Former Traitors",
+        "Dominating The Underground Black Market",
+        "Crushing The Corrupt Noble Clan",
+        "Unleashing The Forbidden Bloodline",
+        "The High Citadel Confrontation",
+        "Absolute Vengeance & Royal Fall",
+        "Sovereign of Rebirth: The New Era",
+    ],
+    "murim_apocalypse": [
+        "The Demonic Sect Incursion & Ruined Sect",
+        "Awakening The Heavenly Demon Dantian",
+        "Slicing Through The Zombie Outbreak in Jianghu",
+        "The Poison Clan's Deadly Ambush",
+        "Breaking The Nine Heavens Barrier",
+        "Solo Slaughter of Corrupt Elders",
+        "The Demonic Blood Sword Master",
+        "Alliance Siege on Heavenly Demon Mount",
+        "The Grand Climax: Slicing the Nether Gate",
+        "The Undisputed Martial Sovereign",
+    ],
     "general_apocalypse": [
         "The Sudden Cataclysm & The Awakening",
         "Brutal Survival & Adapting to the New World",
@@ -233,8 +269,7 @@ def build_narrative_story_chapters(
 
     total_eps = len(chapters)
 
-    # Backward compatibility with existing small 2-chapter tests where titles are explicitly "Episode 1", "Episode 2"
-    if total_eps <= 2 and all(ch.get("title", "").strip().lower().startswith("episode") for ch in chapters) and not download_dir:
+    if total_eps <= 2 and all(ch.get("title", "").strip().lower().startswith("episode") for ch in chapters):
         return [
             {
                 "timestamp": "00:00" if i == 0 else ch.get("timestamp", "00:00"),
@@ -244,10 +279,8 @@ def build_narrative_story_chapters(
             for i, ch in enumerate(chapters)
         ]
 
-    # Universal Narrative Progression Template
     prog_list = UNIVERSAL_NARRATIVE_PROGRESSION.get(archetype, UNIVERSAL_NARRATIVE_PROGRESSION["general_apocalypse"])
 
-    # Determine number of video progression arcs
     if total_eps >= 35:
         num_arcs = 10
     elif total_eps >= 16:
@@ -271,14 +304,10 @@ def build_narrative_story_chapters(
         start_ep = ch_start.get("episode", start_idx + from_ep)
         end_ep = ch_end.get("episode", end_idx + from_ep)
 
-        # YouTube strictly requires the first chapter timestamp to be 00:00
         ts = "00:00" if k == 0 else ch_start.get("timestamp", "00:00")
-
-        # Get base narrative theme from universal progression table
         theme_idx = min(len(prog_list) - 1, round(k * (len(prog_list) - 1) / max(1, num_arcs - 1)))
         base_theme = prog_list[theme_idx]
 
-        # If recap.json exists, check for chapter-specific thematic action
         custom_theme = None
         if download_dir:
             recap_path = os.path.join(download_dir, f"episode_{start_ep}", "recap.json")
@@ -287,8 +316,6 @@ def build_narrative_story_chapters(
                 custom_theme = None
 
         chosen_theme = custom_theme if custom_theme else base_theme
-
-        # Format arc title with episode span
         ep_label = f"Ep {start_ep}" if start_ep == end_ep else f"Ep {start_ep}–{end_ep}"
         title = f"Arc {k + 1}: {chosen_theme} ({ep_label})"
 
@@ -334,15 +361,13 @@ def find_character_image_references(
                 refs[k].extend(v)
 
     if download_dir and os.path.isdir(download_dir):
-        # Look for protagonist panels in earliest chapters
-        for ep in [1, 2]:
+        for ep in [1, 2, 3]:
             ep_img_dir = os.path.join(download_dir, f"episode_{ep}", "images_pdf")
             if os.path.isdir(ep_img_dir):
                 imgs = sorted(glob.glob(os.path.join(ep_img_dir, "*.webp")) + glob.glob(os.path.join(ep_img_dir, "*.jpg")) + glob.glob(os.path.join(ep_img_dir, "*.png")))
                 if imgs and len(refs["protagonist"]) < 2:
                     refs["protagonist"].append(imgs[min(1, len(imgs) - 1)])
-        # Look for female companion panels in chapters where female leads appear (Mino, Sirwen, etc.)
-        for ep in [14, 20, 35, 15, 4]:
+        for ep in [4, 14, 15, 20, 27, 35, 40, 74]:
             ep_img_dir = os.path.join(download_dir, f"episode_{ep}", "images_pdf")
             if os.path.isdir(ep_img_dir):
                 imgs = sorted(glob.glob(os.path.join(ep_img_dir, "*.webp")) + glob.glob(os.path.join(ep_img_dir, "*.jpg")) + glob.glob(os.path.join(ep_img_dir, "*.png")))
@@ -350,6 +375,420 @@ def find_character_image_references(
                     refs["female_characters"].append(imgs[min(2, len(imgs) - 1)])
 
     return refs
+
+
+def extract_story_narrative_climax_highlights(
+    comic_title: str,
+    from_ep: int,
+    to_ep: int,
+    story_memory: Optional[Dict[str, Any]] = None,
+    download_dir: Optional[str] = None,
+) -> List[Dict[str, str]]:
+    """
+    Dynamically scans actual episode recaps, story memory, and dialogue to extract dramatic narrative peaks,
+    key weapons, high-stakes conflicts, intimate moments, enemy interactions, and resource milestones.
+    """
+    highlights = []
+
+    if story_memory and isinstance(story_memory, dict):
+        for k in ["climax_moment", "signature_weapon", "turning_point", "core_conflict", "recent_events", "current_threat"]:
+            val = story_memory.get(k)
+            if val and isinstance(val, str) and len(val.strip()) > 8:
+                highlights.append({"source": k, "summary": val.strip()})
+
+    if download_dir and os.path.isdir(download_dir):
+        ep_list = []
+        if from_ep == to_ep:
+            ep_list = [from_ep]
+        else:
+            ep_list = sorted(list(set([
+                from_ep,
+                from_ep + 1,
+                (from_ep + to_ep) // 2,
+                max(from_ep, to_ep - 2),
+                max(from_ep, to_ep - 1),
+                to_ep
+            ])))
+
+        for ep in ep_list:
+            rpath = os.path.join(download_dir, f"episode_{ep}", "recap.json")
+            if os.path.isfile(rpath):
+                try:
+                    with open(rpath, "r", encoding="utf-8") as rf:
+                        rdata = json.load(rf)
+                    if isinstance(rdata, list) and rdata:
+                        speeches = [item.get("speech", "").strip() for item in rdata if isinstance(item, dict) and item.get("speech")]
+                        if speeches:
+                            # Pick top longest action/dialogue sentence
+                            longest = max(speeches, key=len)
+                            if len(longest) > 20:
+                                highlights.append({"source": f"Episode {ep}", "summary": longest[:220]})
+                except Exception:
+                    pass
+
+    return highlights
+
+
+# =============================================================================
+# 6-LAYER STANDARDIZED GPT IMAGE PROMPT BUILDER (DALL-E 3 & GPT-4o COMPLIANT)
+# =============================================================================
+
+def build_standard_gpt_image_prompt(
+    art_medium_and_style: str,
+    characters_and_references: List[Dict[str, str]],
+    spatial_composition: str,
+    scene_environment_and_lighting: str,
+    clickbait_graphic_overlays: str,
+    technical_guardrails: str = "Ensure anatomical precision with crisp hand-drawn ink outlines, natural hand proportions, sharp facial features, and zero visual distortion or watermarks.",
+) -> str:
+    """
+    Constructs an anatomically rigorous 6-layer prompt specifically engineered for OpenAI GPT-4o / DALL-E 3
+    multi-image reference processing, 2.5D webtoon aesthetics, and YouTube clickbait typography.
+    """
+    char_lines = []
+    for c in characters_and_references:
+        char_lines.append(f"• {c['label']} (Reference: {c['ref_image']}): {c['description']}")
+    char_block = "\n".join(char_lines)
+
+    prompt = (
+        f"[IMAGE MEDIUM, ART STYLE & ASPECT RATIO]\n"
+        f"{art_medium_and_style}\n\n"
+        f"[CHARACTER REFERENCES & SUBJECT ANCHORS]\n"
+        f"{char_block}\n\n"
+        f"[SPATIAL COMPOSITION & CAMERA FRAMING]\n"
+        f"{spatial_composition}\n\n"
+        f"[SCENE ENVIRONMENT, 2.5D LIGHTING & COLOR PALETTE]\n"
+        f"{scene_environment_and_lighting}\n\n"
+        f"[YOUTUBE CLICKBAIT GRAPHIC DESIGN & TYPOGRAPHY OVERLAYS]\n"
+        f"{clickbait_graphic_overlays}\n\n"
+        f"[TECHNICAL QUALITY & ANATOMY GUARDRAILS]\n"
+        f"{technical_guardrails}"
+    )
+    return prompt
+
+
+def generate_story_flex_thumbnail_concepts(
+    comic_title: str,
+    from_ep: int,
+    to_ep: int,
+    archetype: str,
+    mc_name: str,
+    female_lead_name: str,
+    image_refs: Dict[str, List[str]],
+    story_memory: Optional[Dict[str, Any]] = None,
+    download_dir: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Pure AI Story-Flex Thumbnail Synthesizer generating 5 distinct, high-CTR viral concepts
+    engineered strictly under the Standard 6-Layer GPT-4o / DALL-E 3 Image Generation Framework:
+      1. The Sovereign Feat & Reality Piercing Climax (Peak Power / Decisive Strike)
+      2. Lethal Seductive Proximity & Whispered Tension (Intimate Stand-off / Flirtation)
+      3. Disbelief Shock & Total Enemy Humiliation (Enemy Defeat / Begging for Mercy)
+      4. Extreme Resource & Safezone Monopoly Contrast (Luxury Haven vs Wasteland Hell)
+      5. Glitched System / Forbidden Choice Defiance (RPG Quest Warning / Rule Breaking)
+    """
+    mc_ref_path = image_refs['protagonist'][0] if image_refs['protagonist'] else "Panel ảnh nam chính từ episode_1"
+    f1_ref_path = image_refs['female_characters'][0] if image_refs['female_characters'] else "Panel ảnh nữ phụ 1 từ episode_14"
+    f2_ref_path = image_refs['female_characters'][1] if len(image_refs['female_characters']) > 1 else f1_ref_path
+    enemy_ref_path = image_refs.get('enemies', [f2_ref_path])[0] if image_refs.get('enemies') else f2_ref_path
+
+    raw_highlights = extract_story_narrative_climax_highlights(comic_title, from_ep, to_ep, story_memory, download_dir)
+    highlight_text = " ".join([h["summary"] for h in raw_highlights]).lower()
+    t_lower = (comic_title or "").lower()
+
+    art_style_header = (
+        "An ultra-detailed, cinematic 16:9 widescreen YouTube thumbnail illustration in authentic Modern Korean Webtoon (Manhwa 2.5D) art style "
+        "(signature visual aesthetic of Redice Studio, Solo Leveling, and The World After The Fall). "
+        "Crisp dark ink linework, saturated cel-shading, dynamic 2.5D volumetric rim lighting, high micro-contrast, and glowing particle effects."
+    )
+
+    concepts = []
+
+    # =========================================================================
+    # CONCEPT 1: THE SOVEREIGN FEAT & REALITY PIERCING CLIMAX (PEAK POWER)
+    # =========================================================================
+    if "world after the fall" in t_lower or "thrust" in highlight_text:
+        c1_name = "The 10-Billion Thrusts & Reality Piercing Awakening"
+        c1_text = "ONE STAB WAS ENOUGH"
+        c1_style = "Font Gothic vàng kim (#FFD700) phát sáng cực đại viền đen 8px, kèm vệt chém hư không tím xé toạc không gian."
+        c1_mc = f"Possesses an athletic, vascular 8-pack build and sharp chiseled jawline. Masculine sovereign ({mc_name}) holding a dark blade crackling with reality-piercing violet void lightning."
+        c1_fl = f"Female lead ({female_lead_name}) standing intimately behind him in awe, glistening eyes, flushed beet-red cheeks, and parted glossy lips."
+        c1_spatial = "Dynamic Dutch low-angle framing with Protagonist commanding the center-left foreground. Dramatic depth of field with shattered stone shards in extreme foreground."
+        c1_env = "Shattered 100th floor threshold entering cosmic Chaos wilderness. Swirling violet nebula sky, floating stone ruins, volumetric backlighting, and floating magical embers."
+        c1_overlay = 'In the upper-left corner, render bold glowing golden-yellow (#FFD700) comic typography reading "ONE STAB WAS ENOUGH" with an 8px solid black stroke and drop shadow.'
+    elif any(k in t_lower or k in highlight_text for k in ["bunker", "shut-in", "shutin", "freeze", "hoard", "shelter"]):
+        c1_name = "The Ultimate Shelter Sovereign & Impenetrable Defense Blast"
+        c1_text = "HE OBLITERATED THEM ALL"
+        c1_style = "Font Gothic vàng kim (#FFD700) viền đen 8px, chùm tia laser phòng thủ tự động quét sạch kẻ đột kích."
+        c1_mc = f"Handsome bunker sovereign ({mc_name}) casually pressing a glowing red defense console button with a mocking smirk, dressed in tactical dark adventurer attire."
+        c1_fl = f"Beautiful female companion ({female_lead_name}) in a cozy indoor outfit watching automated laser turrets annihilate attacking raiders through reinforced glass with utter devotion."
+        c1_spatial = "Wide 16:9 interior angle showing MC centered at command console with cinematic split-screen view of defense lasers vaporizing enemies outside."
+        c1_env = "High-tech subterranean command bridge with warm amber display lights contrasting with brilliant cyan-and-red defense laser beams."
+        c1_overlay = 'At the top-left, render massive bold typography reading "HE OBLITERATED THEM ALL" in vivid golden yellow (#FFD700) with an 8px black stroke.'
+    elif any(k in t_lower or k in highlight_text for k in ["zombie", "infected", "82-08", "8208", "outbreak"]):
+        c1_name = "The Day 1 vs Day 100 Undead Slayer Transformation"
+        c1_text = "DAY 1 VS DAY 100"
+        c1_style = "Font Impact chia đôi: 'DAY 1: VICTIM' (màu đỏ rách nát) vs 'DAY 100: MONSTER' (màu vàng kim phát sáng)."
+        c1_mc = f"Battle-hardened lone survivor ({mc_name}) standing atop a mountain of defeated mutated infected. Dual customized combat blades in hand, glowing piercing eyes, battle-worn combat vest over sculpted muscular arms."
+        c1_fl = f"Fearless female companion ({female_lead_name}) in tactical combat gear reloading her weapon while gazing at him in profound admiration."
+        c1_spatial = "Extreme low-angle hero shot with protagonist dominating composition. Blurred silhouettes of reaching zombie claws in extreme foreground."
+        c1_env = "Barricaded skyscraper rooftop under a burning crimson sunset sky. Volumetric smoke, glowing red eye reflections, and vibrant golden rim light on hero silhouette."
+        c1_overlay = 'At the top-center, render contrasting split-title banner: "DAY 1: VICTIM" in distressed dark red on left, and "DAY 100: MONSTER" in gleaming golden yellow (#FFD700) with heavy black outline on right.'
+    elif any(k in t_lower or k in highlight_text for k in ["solo", "hunter", "shadow", "monarch", "gate"]):
+        c1_name = "The Glitched Level 999 Awakening & Sovereign Shadow Domain"
+        c1_text = "LEVEL 999 MONARCH"
+        c1_style = "Font Gothic vàng kim viền đen 'LEVEL 999 MONARCH', bảng nhiệm vụ System Quest Hologram phát sáng neon."
+        c1_mc = f"Handsome black-haired solo hunter ({mc_name}) with glowing electric cyan-and-violet eyes. Dark trench coat billowing with shadow aura, surrounded by crackling dimensional lightning."
+        c1_fl = f"High-ranking S-Class female hunter ({female_lead_name}) kneeling in shock and awe as she witnesses his glitched sovereign power."
+        c1_spatial = "Grand wide-angle perspective with MC elevated on a dungeon dais. Scores of summoned shadow phantom warriors rising from ground behind him."
+        c1_env = "Calamity Red Gate dungeon boss chamber with cracked crystalline pillars, glowing purple rift portals, and vibrant neon rim lighting."
+        c1_overlay = 'In the upper-left, render bold Gothic typography reading "LEVEL 999 MONARCH" in vivid yellow with black stroke. In center, render floating translucent crimson RPG hologram displaying "! QUEST COMPLETED: DEIFIED !".'
+    else:
+        c1_name = "The Unstoppable Climax & Awakened Sovereign Strike"
+        c1_text = "ONE STRIKE WAS ENOUGH"
+        c1_style = "Font Gothic vàng kim (#FFD700) viền đen 8px, vệt kiếm khí rực sáng xé toạc không gian."
+        c1_mc = f"Athletic awakened sovereign ({mc_name}) radiating supreme confidence, sharp jawline, glowing eyes, holding his signature weapon crackling with vibrant power embers."
+        c1_fl = f"Gorgeous female lead ({female_lead_name}) intimately beside him, gazing with glistening eyes and flushed cheeks in awe of his overwhelming dominance."
+        c1_spatial = "Dynamic 16:9 hero framing with MC front-and-center and female lead leaning in on right. Foreground bokeh blur on shattered dimensional particles."
+        c1_env = "Ruined citadel surrounded by swirling atmospheric energy, dramatic volumetric backlighting, and vibrant neon rim light."
+        c1_overlay = 'At the top-left, render bold comic typography reading "ONE STRIKE WAS ENOUGH" in vibrant yellow (#FFD700) with an 8px solid black stroke and drop shadow.'
+
+    p1 = build_standard_gpt_image_prompt(
+        art_medium_and_style=art_style_header,
+        characters_and_references=[
+            {"label": f"MALE PROTAGONIST ({mc_name})", "ref_image": "Please match Image 1 (Face, hairstyle, eyes, physique)", "description": c1_mc},
+            {"label": f"FEMALE LEAD ({female_lead_name})", "ref_image": "Please match Image 2 (Hair, facial features, curves)", "description": c1_fl},
+        ],
+        spatial_composition=c1_spatial,
+        scene_environment_and_lighting=c1_env,
+        clickbait_graphic_overlays=c1_overlay,
+    )
+
+    concepts.append({
+        "id": "concept_sovereign_climax",
+        "name": c1_name,
+        "thumbnail_text": c1_text,
+        "text_overlay": c1_text,
+        "text_style": c1_style,
+        "characters": [
+            {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
+            {"role": f"Nữ chính ({female_lead_name})", "image_reference": f1_ref_path},
+        ],
+        "prompt": p1,
+        "gpt_prompt": p1,
+    })
+
+    # =========================================================================
+    # CONCEPT 2: LETHAL SEDUCTIVE PROXIMITY & WHISPERED TENSION
+    # =========================================================================
+    if "world after the fall" in t_lower:
+        c2_name = "The Soul-Clothes Inspection & Lethal Proximity in Gorgon Fortress"
+        c2_text = "INSPECTING MY BODY?"
+        c2_style = "Bong bóng thoại truyện tranh vàng chanh viền đen 8px 'INSPECTING MY BODY?', mũi tên chỉ vào Mino, vạch đỏ mặt '???'."
+        c2_mc = f"Handsome swordsman ({mc_name}) with cold indifferent eyes, calmly resting glowing sharp tip of his dark blade against her throat in an electric standoff."
+        c2_fl = f"Mino ({female_lead_name}) leaning in merely one inch away from his lips, playfully tugging her unbuttoned collar to inspect his spirit core. Flushed beet-red cheeks, glossy parted lips, and playful bedroom eyes."
+        c2_spatial = "Extreme close-up Dutch angle framing. The distance between their faces is less than an inch, creating intense romantic and fatal tension."
+        c2_env = "Private backroom in Gorgon Fortress tavern. Flickering warm candlelight, deep shadows, and subtle violet void rim lighting."
+        c2_overlay = 'In upper-right corner, render vibrant yellow comic speech bubble with an 8px solid black stroke reading "INSPECTING MY BODY?" pointing at female lead, with red comic blushing lines and question marks "???".'
+    elif any(k in t_lower or k in highlight_text for k in ["bunker", "shut-in", "shutin", "freeze", "shelter"]):
+        c2_name = "The Luxury Lounge Seduction & Heated Bunker Flirtation"
+        c2_text = "TOO WARM IN HERE?"
+        c2_style = "Bong bóng thoại màu hồng viền đen 'TOO WARM IN HERE?', nữ nhân vật cởi bớt áo khoác lộ đường cong quyến rũ."
+        c2_mc = f"Handsome male sovereign ({mc_name}) sitting relaxed on a plush sofa, composed and amused, watching her playful flirtation."
+        c2_fl = f"Alluring female survivor ({female_lead_name}) leaning over him intimately in heated bunker, playfully slipping off her winter jacket to reveal a form-fitting athletic crop top. Flushed cheeks, glistening eyes, and teasing smile."
+        c2_spatial = "Intimate over-the-shoulder Dutch angle with female companion leaning directly toward camera and protagonist in foreground."
+        c2_env = "Cozy luxury bunker living quarters with glowing electric fireplace, amber ambient lighting, and rich warm shadows."
+        c2_overlay = 'In top corner, render expressive pink-and-yellow comic speech bubble reading "TOO WARM IN HERE?" with heart icons and cute comic blushing lines.'
+    elif any(k in t_lower or k in highlight_text for k in ["zombie", "82-08", "8208", "outbreak"]):
+        c2_name = "The Silent Barricade Embrace During The Midnight Horde"
+        c2_text = "DON'T MAKE A SOUND!"
+        c2_style = "Bong bóng thì thầm căng thẳng 'DON'T MAKE A SOUND!', MC che miệng nữ chính ép sát vào ngực khi bầy zombie lướt qua."
+        c2_mc = f"Protagonist ({mc_name}) holding one hand gently over her parted lips while pulling her tightly against his chest behind a splintered barricade."
+        c2_fl = f"Female lead ({female_lead_name}) pressed against him, breathless with heart-pounding tension, glistening eyes staring into his, blushing in close proximity."
+        c2_spatial = "Tight vertical framing focusing on their faces and chest proximity behind a splintered wooden barricade."
+        c2_env = "Moonlit ruined corridor with cool blue light filtering through broken glass and ominous yellow zombie eyes glowing in background darkness."
+        c2_overlay = (
+            'In upper-left, render high-tension comic whisper bubble reading "DON\'T MAKE A SOUND!" '
+            'in yellow with heavy black outline and exclamation marks.'
+        )
+    else:
+        c2_name = "The Lethal Intimate Proximity & Whispered Stand-off"
+        c2_text = "TOO CLOSE RIGHT?"
+        c2_style = "Bong bóng thoại màu vàng viền đen dày, dấu chấm hỏi đỏ mặt '???' trên đầu nam chính."
+        c2_mc = f"Cold, unyielding male protagonist ({mc_name}) with sharp indifferent eyes, casually holding his weapon between them to maintain lethal distance."
+        c2_fl = f"Seductive female lead ({female_lead_name}) whispering playfully inches from his face, flushed cheeks, parted glossy lips, and form-fitting combat attire."
+        c2_spatial = "Tightly cropped intimate Dutch angle framing their faces in sharp focus with warm ambient bokeh blur in background."
+        c2_env = "Private refuge sanctuary with warm lantern glow, chiaroscuro lighting, and violet rim light on their silhouettes."
+        c2_overlay = 'In upper corner, render vibrant yellow comic speech bubble with thick black outline reading "TOO CLOSE RIGHT?" with red blushing lines.'
+
+    p2 = build_standard_gpt_image_prompt(
+        art_medium_and_style=art_style_header,
+        characters_and_references=[
+            {"label": f"MALE PROTAGONIST ({mc_name})", "ref_image": "Please match Image 1 (Face, hairstyle, eyes, physique)", "description": c2_mc},
+            {"label": f"FEMALE LEAD ({female_lead_name})", "ref_image": "Please match Image 2 (Hair, facial features, curves)", "description": c2_fl},
+        ],
+        spatial_composition=c2_spatial,
+        scene_environment_and_lighting=c2_env,
+        clickbait_graphic_overlays=c2_overlay,
+    )
+
+    concepts.append({
+        "id": "concept_intimate_proximity",
+        "name": c2_name,
+        "thumbnail_text": c2_text,
+        "text_overlay": c2_text,
+        "text_style": c2_style,
+        "characters": [
+            {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
+            {"role": f"Nữ chính ({female_lead_name})", "image_reference": f1_ref_path},
+        ],
+        "prompt": p2,
+        "gpt_prompt": p2,
+    })
+
+    # =========================================================================
+    # CONCEPT 3: DISBELIEF SHOCK & TOTAL ENEMY HUMILIATION (REACTION SHOCK)
+    # =========================================================================
+    c3_name = "The Total Domination & Defeated Rivals Begging For Mercy"
+    c3_text = "THEY BEGGED FOR MERCY"
+    c3_style = "Font khối trắng viền cyan phát sáng 'THEY BEGGED FOR MERCY', các thủ lĩnh đối thủ quỳ gối xin tha trước hào quang MC."
+    c3_mc = f"Supreme Sovereign ({mc_name}) standing tall in center foreground, looking down with cold amusement, dark coat billowing with radiant sovereign aura."
+    c3_enemy = f"Defeated rival warlords and arrogant guild leaders ({female_lead_name} & rivals) kneeling in trembling submission, bruised and sweating in sheer disbelief."
+    c3_spatial = "Heroic low-angle perspective with MC elevated in sharp foreground focus and kneeling rivals foreshortened in dramatic perspective below."
+    c3_env = "Conquered apocalyptic battlefield with fiery sunset sky, burning debris, volumetric smoke plumes, and brilliant neon cyan rim lighting."
+    c3_overlay = 'At top-center, render bold all-caps typography reading "THEY BEGGED FOR MERCY" in pure white with a neon cyan outer glow and an 8px solid black stroke.'
+
+    p3 = build_standard_gpt_image_prompt(
+        art_medium_and_style=art_style_header,
+        characters_and_references=[
+            {"label": f"SOVEREIGN PROTAGONIST ({mc_name})", "ref_image": "Please match Image 1 (Face, hairstyle, eyes, physique)", "description": c3_mc},
+            {"label": f"DEFEATED RIVALS & WITNESSES ({female_lead_name})", "ref_image": "Please match Image 2 & Image 3", "description": c3_enemy},
+        ],
+        spatial_composition=c3_spatial,
+        scene_environment_and_lighting=c3_env,
+        clickbait_graphic_overlays=c3_overlay,
+    )
+
+    concepts.append({
+        "id": "concept_enemy_humiliation",
+        "name": c3_name,
+        "thumbnail_text": c3_text,
+        "text_overlay": c3_text,
+        "text_style": c3_style,
+        "characters": [
+            {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
+            {"role": f"Nữ phụ / Kẻ thù ({female_lead_name})", "image_reference": f1_ref_path},
+            {"role": "Đối thủ quỳ gối", "image_reference": enemy_ref_path},
+        ],
+        "prompt": p3,
+        "gpt_prompt": p3,
+    })
+
+    # =========================================================================
+    # CONCEPT 4: EXTREME RESOURCE & SAFEZONE MONOPOLY CONTRAST
+    # =========================================================================
+    if any(k in t_lower or k in highlight_text for k in ["bunker", "shut-in", "shutin", "freeze", "hoard", "shelter"]):
+        c4_name = "The 50,000 Tons Supply Warehouse & Safezone Paradise Contrast"
+        c4_text = "50,000 TONS OF FOOD"
+        c4_style = "Font Impact vàng chanh (#FFE500) viền đen 8px '50,000 TONS OF FOOD', mũi tên neon chỉ vào kho lương thực vô tận và MC ung dung."
+        c4_mc = f"Protagonist ({mc_name}) sitting relaxed on an executive armchair with an amused smirk, savoring fresh gourmet steak and wine inside heated vault."
+        c4_fl = f"Two gorgeous female survivors ({female_lead_name} & companion) looking through reinforced glass from the freezing blizzard with yearning, tearful eyes and flushed cold cheeks."
+        c4_spatial = "Split-depth perspective: 60% left showing heated luxury vault interior in foreground, 40% right showing freezing blizzard wasteland through reinforced glass."
+        c4_env = "Warm amber indoor lighting and glowing holographic inventory counters showing 'SUPPLIES: 999,999+' contrasting with howling blue snowstorm outside."
+        c4_overlay = 'At top-left, render bold high-impact typography reading "50,000 TONS OF FOOD" in vibrant yellow (#FFE500) with 8px black stroke. Render glowing badges: "SAFEZONE" in neon cyan and "APOCALYPSE" in fiery red.'
+    else:
+        c4_name = "The Supreme Monopoly & Paradise vs Wasteland Contrast"
+        c4_text = "ALL GIRLS WANT IN"
+        c4_style = "Chia đôi nhãn: SAFEZONE (xanh neon cyan) bên trong ấm áp vs APOCALYPSE (đỏ rực) bên ngoài thảm họa."
+        c4_mc = f"Protagonist ({mc_name}) relaxing inside his private luxury sanctuary with unlimited fresh supplies, completely unbothered by the world end."
+        c4_fl = f"Two beautiful survivors ({female_lead_name} & companion) outside at the barrier gates, wearing battle-torn attire, pleading with clasped hands to enter."
+        c4_spatial = "Wide split-screen perspective contrasting luxury interior in foreground left with brutal apocalyptic wasteland in background right."
+        c4_env = "Warm golden indoor illumination and clean neon status lights contrasting with dark stormy exterior skies."
+        c4_overlay = 'At top-center, render massive bold all-caps typography reading "ALL GIRLS WANT IN" in yellow (#FFE500) with heavy black outline and glowing badges: "SAFEZONE" (cyan) vs "APOCALYPSE" (red).'
+
+    p4 = build_standard_gpt_image_prompt(
+        art_medium_and_style=art_style_header,
+        characters_and_references=[
+            {"label": f"SOVEREIGN PROTAGONIST ({mc_name})", "ref_image": "Please match Image 1 (Face, hairstyle, eyes, physique)", "description": c4_mc},
+            {"label": f"OUTSIDE SURVIVORS ({female_lead_name})", "ref_image": "Please match Image 2 & Image 3", "description": c4_fl},
+        ],
+        spatial_composition=c4_spatial,
+        scene_environment_and_lighting=c4_env,
+        clickbait_graphic_overlays=c4_overlay,
+    )
+
+    concepts.append({
+        "id": "concept_resource_contrast",
+        "name": c4_name,
+        "thumbnail_text": c4_text,
+        "text_overlay": c4_text,
+        "text_style": c4_style,
+        "characters": [
+            {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
+            {"role": f"Nữ phụ 1 ({female_lead_name})", "image_reference": f1_ref_path},
+            {"role": "Nữ phụ 2", "image_reference": f2_ref_path},
+        ],
+        "prompt": p4,
+        "gpt_prompt": p4,
+    })
+
+    # =========================================================================
+    # CONCEPT 5: GLITCHED SYSTEM / FORBIDDEN CHOICE DEFIANCE
+    # =========================================================================
+    if "world after the fall" in t_lower or "tower" in t_lower:
+        c5_name = "The Nightmare Mistress Seduction & Crushed Return Stone"
+        c5_text = "SHE OFFERED PARADISE"
+        c5_style = "Font khối dày màu vàng chanh (#FFE500) 'SHE OFFERED PARADISE', mũi tên chỉ bàn tay bóp nát đá hồi quy 'HE CHOSE CHAOS'."
+        c5_mc = f"Jaehwan ({mc_name}) seated on an obsidian throne, indifferent and cold, left fist crushing a glowing blue Return Stone into glittering magical dust."
+        c5_fl = f"Nightmare Lord Sirwen Armelt ({female_lead_name}) floating behind him with delicate demonic horns, whispering sweet illusions into his ear, wearing a semi-translucent astral gown."
+        c5_spatial = "Centered regal framing with Jaehwan commanding the throne and the Nightmare Lord wrapped around his shoulders."
+        c5_env = "Surreal mystical dream realm with floating clock gears, purple nebula mist, and glittering blue crystal shards falling from his fist."
+        c5_overlay = 'At top-center, render bold typography reading "SHE OFFERED PARADISE" in yellow (#FFE500) with black stroke, and an arrow pointing to the crushed crystal reading "HE CHOSE CHAOS".'
+    elif any(k in t_lower or k in highlight_text for k in ["hunter", "gate", "system", "dungeon", "solo"]):
+        c5_name = "The Glitched Alert System Quest & S-Rank Defiance"
+        c5_text = "! ALERT: SSS-RANK DETECTED !"
+        c5_style = "Bảng nhiệm vụ System Hologram đỏ rực màu máu, font in hoa '! ALERT: SSS-RANK DETECTED !', mũi tên vàng neon chỉ vào hào quang MC."
+        c5_mc = f"Solo Hunter ({mc_name}) walking forward with an amused smirk as an enormous crimson-and-gold system quest window hovers before him."
+        c5_fl = f"S-Rank female guild master ({female_lead_name}) gasping in disbelief in background as dungeon ranking system shatters."
+        c5_spatial = "Dynamic Dutch perspective with floating holographic system window angled across center screen."
+        c5_env = "Dungeon portal threshold with crackling dimensional lightning, crimson warning light, and glowing holographic runes."
+        c5_overlay = 'Floating across center, render prominent glowing crimson RPG system window with warning borders reading "! ALERT: SSS-RANK MONARCH DETECTED !".'
+    else:
+        c5_name = "The Glitched Awakening & System Breaking Defiance"
+        c5_text = "HE BROKE THE SYSTEM!"
+        c5_style = "Bảng thông số System Hologram vỡ vụn với tia sét neon cyan, font in hoa 'HE BROKE THE SYSTEM!'."
+        c5_mc = f"Protagonist ({mc_name}) shattering a floating red warning holographic window with one fist, surrounded by crackling violet lightning."
+        c5_fl = f"Witness companion ({female_lead_name}) gasping in sheer awe as the world rules collapse around him."
+        c5_spatial = "Dynamic 16:9 diagonal angle with shattered glass HUD elements flying towards camera."
+        c5_env = "Crackling dimensional rift with glowing runic circles, volumetric electric discharge, and dark violet atmosphere."
+        c5_overlay = 'In center, render shattered holographic system window reading "! ERROR: LIMIT EXCEEDED !" and top banner reading "HE BROKE THE SYSTEM!" in yellow (#FFD700) with 8px black stroke.'
+
+    p5 = build_standard_gpt_image_prompt(
+        art_medium_and_style=art_style_header,
+        characters_and_references=[
+            {"label": f"PROTAGONIST ({mc_name})", "ref_image": "Please match Image 1 (Face, hairstyle, eyes, physique)", "description": c5_mc},
+            {"label": f"WITNESS / COMPANION ({female_lead_name})", "ref_image": "Please match Image 2", "description": c5_fl},
+        ],
+        spatial_composition=c5_spatial,
+        scene_environment_and_lighting=c5_env,
+        clickbait_graphic_overlays=c5_overlay,
+    )
+
+    concepts.append({
+        "id": "concept_system_defiance",
+        "name": c5_name,
+        "thumbnail_text": c5_text,
+        "text_overlay": c5_text,
+        "text_style": c5_style,
+        "characters": [
+            {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
+            {"role": f"Nữ phụ / Đồng đội ({female_lead_name})", "image_reference": f1_ref_path},
+        ],
+        "prompt": p5,
+        "gpt_prompt": p5,
+    })
+
+    return concepts
 
 
 def generate_us_apocalypse_metadata(
@@ -365,10 +804,13 @@ def generate_us_apocalypse_metadata(
     ep_range = f"Ep {from_ep}~{to_ep}" if from_ep != to_ep else f"Ep {from_ep}"
     char_names = get_character_names(comic_title, story_memory)
     mc_name = char_names["mc"]
+    female_lead_name = char_names["female_lead"]
     archetype = detect_archetype(comic_title, story_memory)
     image_refs = find_character_image_references(download_dir, image_references)
 
-    # 1. High-CTR Title Options based on Archetype (Always ending with ' - Manhwa Recap')
+    # =========================================================================
+    # 1. HIGH-CTR SEO TITLE CANDIDATES (5 CATEGORIES ACCORDING TO US YOUTUBE STANDARDS)
+    # =========================================================================
     if archetype == "tower_anti_regression":
         title_options = [
             "He Refused To Regress When Everyone Else Gave Up, Climbing The Tower Alone... | Manhwa Recap",
@@ -394,13 +836,14 @@ def generate_us_apocalypse_metadata(
             "Everyone Laughed When He Hoarded 50,000 Tons Of Supplies, Until The Frost... | Manhwa Recap",
             f"The World Ended Overnight, But He Had An Infinite Space Warehouse [{ep_range}] | Manhwa Recap",
             "He Regressed Before The Doomsday Freeze And Prepared Everything Alone | Manhwa Recap",
-            "Surviving The Apocalypse In A Max-Level Luxury Underground Bunker | Manhwa Recap",
+            f"Surviving The Apocalypse In A Max-Level Luxury Underground Bunker [{ep_range}] | Manhwa Recap",
         ]
         synopsis_text = (
-            f"When a sudden cataclysm plunges civilization into an eternal winter, society crumbles in mere days. "
-            f"While survivors freeze and fight over breadcrumbs, {mc_name} relaxes inside an impenetrable subterranean fortress "
-            f"stocked with decades worth of gourmet supplies, state-of-the-art power grids, and an infinite spatial inventory.\n\n"
-            f"Armed with ruthless pragmatism and total self-sufficiency, {mc_name} turns away selfish parasites and dominates the wasteland."
+            f"When a sudden cataclysm plunges civilization into an eternal sub-zero winter, society crumbles in mere days. "
+            f"While survivors freeze and turn on each other over breadcrumbs, {mc_name} relaxes inside an impenetrable subterranean fortress "
+            f"stocked with decades worth of gourmet supplies, automated defenses, state-of-the-art power grids, and an infinite spatial inventory.\n\n"
+            f"Armed with ruthless pragmatism and total self-sufficiency, {mc_name} turns away selfish parasites, defends his territory against mutant hordes and wasteland warlords, "
+            f"and dominates the frozen apocalypse on his own terms."
         )
     elif archetype == "hunter_gate":
         title_options = [
@@ -411,9 +854,10 @@ def generate_us_apocalypse_metadata(
             f"The Hunter Who Broke The Global Ranking System [{ep_range} Full Arc] | Manhwa Recap",
         ]
         synopsis_text = (
-            f"When dimensional rifts tore open across modern Earth, grotesque monsters invaded our cities. "
-            f"Mocked as the weakest awakened hunter, {mc_name} is betrayed by his squad and abandoned inside a lethal calamity dungeon. "
-            f"On the verge of death, a hidden prompt awakens within his soul, granting him forbidden power that defies the world's hierarchy."
+            f"When dimensional rifts tore open across modern Earth, grotesque monsters invaded civilization. "
+            f"Mocked as the weakest awakened hunter, {mc_name} is betrayed by his squad and left for dead inside a lethal calamity dungeon. "
+            f"On the verge of death, a hidden glitched system prompt awakens within his soul, granting him forbidden power that defies the world's hierarchy.\n\n"
+            f"Rising from the abyss as an unstoppable solo monarch, {mc_name} conquers impossible gates, crushes corrupt top guilds, and uncovers the dark truth behind the apocalypse."
         )
     elif archetype == "zombie_apocalypse":
         title_options = [
@@ -432,6 +876,34 @@ def generate_us_apocalypse_metadata(
             f"every single day is an agonizing battle for humanity's final breath. In a ruined world where both the undead and desperate survivors "
             f"pose mortal danger, {mc_name} carves an unyielding path of survival across the wasteland."
         )
+    elif archetype == "reincarnation_revenge":
+        title_options = [
+            "He Was Betrayed And Executed By His Clan, Then Reborn 10 Years In The Past | Manhwa Recap",
+            f"The Betrayed Sovereign Returned To Take Everything From His Traitors [{ep_range}] | Manhwa Recap",
+            "They Stole His Throne And Power, So He Reincarnated With Forbidden Knowledge | Manhwa Recap",
+            "He Died A Miserable Death, But Woke Up Before The Calamity Began | Manhwa Recap",
+            f"The Ruthless Rebirth Of The Betrayed Monarch [{ep_range} Full Story] | Manhwa Recap",
+        ]
+        synopsis_text = (
+            f"After sacrificing everything for his clan and allies, {mc_name} was betrayed, stripped of his powers, and left to die in agony. "
+            f"Instead of the afterlife, he awakens ten years in the past—before the calamity struck and before the betrayal occurred.\n\n"
+            f"Armed with memories of future catastrophes, hidden artifact locations, and the true faces of his enemies, {mc_name} discards naivety. "
+            f"He embarks on a calculating, relentless journey of revenge, hoarding forbidden strength to crush every traitor before they even see him coming."
+        )
+    elif archetype == "murim_apocalypse":
+        title_options = [
+            f"When The Demonic Outbreak Ruined Jianghu, A Solo Martial God Awakened [{comic_title}] | Manhwa Recap",
+            "He Mastered The Forbidden Heavenly Demon Blade To Slay The Undead Horde | Manhwa Recap",
+            f"The Fallen Sect's Weakest Disciple Awakened The Sovereign Bloodline [{ep_range}] | Manhwa Recap",
+            "While Great Sects Fell To The Nether Plague, He Cleared Jianghu Alone | Manhwa Recap",
+            f"The Ultimate Murim Sovereign [{ep_range} Full Marathon] | Manhwa Recap",
+        ]
+        synopsis_text = (
+            f"The peaceful martial world of Jianghu is torn asunder when a demonic Nether plague transforms martial artists into bloodthirsty fiends. "
+            f"With great sects crumbling and orthodox masters falling one after another, {mc_name} unlocks the forgotten Heavenly Demon scripture.\n\n"
+            f"Wielding lethal blade arts and unmatched internal qi, he cuts an unstoppable swath of destruction through undead hordes and corrupt factions, "
+            f"restoring order to Jianghu with absolute martial might."
+        )
     else:
         title_options = [
             f"A Lone Survivor Stood Against The Cataclysm [{comic_title}] | Manhwa Recap",
@@ -442,15 +914,16 @@ def generate_us_apocalypse_metadata(
         ]
         synopsis_text = (
             f"Society collapsed in a single night as an otherworldly apocalypse consumed the Earth. "
-            f"While humanity descended into panic, {mc_name} unlocked unyielding resolve and absolute strength, "
-            f"carving an unstoppable path of survival through ruins and warlords."
+            f"While humanity descended into panic and despair, {mc_name} unlocked unyielding resolve and absolute strength, "
+            f"carving an unstoppable path of survival through ruins, mutated monsters, and ruthless warlords."
         )
 
-    # Guarantee all titles always strictly end with ' - Manhwa Recap' and fit within 100 chars
     title_options = [format_recap_title(t) for t in title_options]
     primary_title = title_options[0]
 
-    # 2. Description Lines with Story Progression Timestamps (Form chung cho mọi video)
+    # =========================================================================
+    # 2. DESCRIPTION LINES WITH STORY PROGRESSION TIMESTAMPS (6-ZONE US STANDARD)
+    # =========================================================================
     desc_lines = [
         f"{title_options[0]}",
         f"This is the complete marathon recap of {comic_title} ({ep_range}).",
@@ -458,7 +931,7 @@ def generate_us_apocalypse_metadata(
         "📖 SYNOPSIS:",
         synopsis_text,
         "",
-        "⏱️ Chapters & Timestamps:",
+        "⏱️ Chapters & Timestamps (Story Progression Arcs):",
     ]
 
     narrative_chapters = build_narrative_story_chapters(
@@ -472,7 +945,6 @@ def generate_us_apocalypse_metadata(
     for ch in narrative_chapters:
         desc_lines.append(f"{ch['timestamp']} - {ch['title']}")
 
-    # Dynamic hashtags based on comic title and archetype
     clean_tag = re.sub(r"[^a-zA-Z0-9]", "", comic_title.lower())
     dynamic_hashtags = [
         f"#{clean_tag}" if clean_tag else "#manhwarecap",
@@ -491,6 +963,10 @@ def generate_us_apocalypse_metadata(
         dynamic_hashtags.insert(3, "#dungeonmanhwa")
     elif archetype == "bunker_prepper":
         dynamic_hashtags.insert(3, "#bunkermanhwa")
+    elif archetype == "reincarnation_revenge":
+        dynamic_hashtags.insert(3, "#revengemanhwa")
+    elif archetype == "murim_apocalypse":
+        dynamic_hashtags.insert(3, "#murimmanhwa")
 
     desc_lines.extend([
         "",
@@ -503,7 +979,9 @@ def generate_us_apocalypse_metadata(
         " ".join(dynamic_hashtags),
     ])
 
-    # 3. SEO Tags (Deduplicated and strictly capped under YouTube's 500-character Studio limit)
+    # =========================================================================
+    # 3. SEO TAGS (DEDUPLICATED & CAPPED UNDER YOUTUBE'S 500-CHARACTER STUDIO LIMIT)
+    # =========================================================================
     base_tags = [
         "manhwa recap",
         "apocalypse manhwa",
@@ -532,6 +1010,7 @@ def generate_us_apocalypse_metadata(
             "he refused to regress",
             "refused to regress manhwa",
             "chaos arc recap",
+            "tower climbing manhwa",
         ])
     elif archetype == "hunter_gate":
         base_tags.extend([
@@ -539,6 +1018,7 @@ def generate_us_apocalypse_metadata(
             "dungeon manhwa recap",
             "gate manhwa",
             "solo monarch recap",
+            "awakened hunter recap",
         ])
     elif archetype == "bunker_prepper":
         base_tags.extend([
@@ -546,16 +1026,21 @@ def generate_us_apocalypse_metadata(
             "shelter manhwa",
             "doomsday manhwa recap",
             "infinite space manhwa",
+            "ice age manhwa recap",
         ])
-
-    if "world after the fall" in comic_title.lower():
+    elif archetype == "reincarnation_revenge":
         base_tags.extend([
-            "the world after the fall full recap",
-            "sing shong manhwa",
-            "omniscient reader author",
-            "jaehwan thrust",
-            "chaos arc recap",
-            "the world after the fall chapters 1-89",
+            "revenge manhwa recap",
+            "reincarnation manhwa",
+            "regressor manhwa recap",
+            "betrayed mc recap",
+        ])
+    elif archetype == "murim_apocalypse":
+        base_tags.extend([
+            "murim manhwa recap",
+            "martial arts manhwa",
+            "heavenly demon recap",
+            "cultivation manhwa recap",
         ])
 
     seen_tags = set()
@@ -573,177 +1058,43 @@ def generate_us_apocalypse_metadata(
                 break
     base_tags = cleaned_tags
 
-    # 4. Contextual High-CTR Sensual / Alluring Thumbnail Concepts (Story-Tailored, Anti-Formula)
-    mc_ref_path = image_refs['protagonist'][0] if image_refs['protagonist'] else "Panel ảnh nam chính từ episode_1"
-    f1_ref_path = image_refs['female_characters'][0] if image_refs['female_characters'] else "Panel ảnh nữ phụ 1 từ episode_14"
-    f2_ref_path = image_refs['female_characters'][1] if len(image_refs['female_characters']) > 1 else f1_ref_path
+    # =========================================================================
+    # 4. TRUE DYNAMIC STORY-FLEX THUMBNAIL CONCEPTS (6-LAYER GPT PROMPT ENGINE)
+    # =========================================================================
+    thumbnail_concepts = generate_story_flex_thumbnail_concepts(
+        comic_title=comic_title,
+        from_ep=from_ep,
+        to_ep=to_ep,
+        archetype=archetype,
+        mc_name=mc_name,
+        female_lead_name=female_lead_name,
+        image_refs=image_refs,
+        story_memory=story_memory,
+        download_dir=download_dir,
+    )
 
-    is_twatf = "world after the fall" in comic_title.lower()
-    f1_name = "Mino" if is_twatf else "The Alluring Female Lead"
-    f2_name = "Sirwen Armelt" if is_twatf else "The Enchanting Second Female Lead"
+    # Standard 6-Layer Meta-Director Prompt for Universal Generation
+    meta_prompt_text = (
+        f"You are an elite YouTube Manhwa Recap Art Director specializing in 1M+ view viral thumbnails.\n"
+        f"Generate 3 brand-new, ultra-detailed thumbnail prompts adhering strictly to the Standard 6-Layer GPT-4o / DALL-E 3 Image Generation Framework.\n\n"
+        f"[COMIC CONTEXT]\n"
+        f"• Title: {comic_title} (Chapters {from_ep} to {to_ep})\n"
+        f"• Subgenre: {archetype.upper()}\n"
+        f"• Protagonist: {mc_name} (Reference Image 1)\n"
+        f"• Female Lead: {female_lead_name} (Reference Image 2)\n"
+        f"• Story Highlights: {synopsis_text[:250]}...\n\n"
+        f"[MANDATORY 6-LAYER PROMPT STRUCTURE PER CONCEPT]\n"
+        f"1. [IMAGE MEDIUM, ART STYLE & ASPECT RATIO]: 16:9 widescreen, Modern Korean Webtoon (Manhwa 2.5D), Redice Studio aesthetic.\n"
+        f"2. [CHARACTER REFERENCES & SUBJECT ANCHORS]: Clear reference mappings (Image 1, Image 2), physical traits, costumes, poses.\n"
+        f"3. [SPATIAL COMPOSITION & CAMERA FRAMING]: Dutch angle, Rule of Thirds, foreground bokeh / depth of field.\n"
+        f"4. [SCENE ENVIRONMENT, 2.5D LIGHTING & COLOR PALETTE]: Volumetric backlighting, multi-colored rim lights, particle embers.\n"
+        f"5. [YOUTUBE CLICKBAIT GRAPHIC DESIGN & TYPOGRAPHY OVERLAYS]: Bold yellow (#FFD700) / cyan text in quotes with 8px solid black stroke, comic speech bubbles with blushing lines, or glowing system quest holograms.\n"
+        f"6. [TECHNICAL QUALITY & ANATOMY GUARDRAILS]: Anatomical precision, crisp linework, zero distortion, no watermarks."
+    )
 
     # =========================================================================
-    # STORY-TAILORED VIRAL CONCEPTS (Deeply rooted in the comic's actual lore)
+    # 5. DYNAMIC STORY PROGRESSION ARCS TIMELINE FOR PINNED COMMENT
     # =========================================================================
-    if is_twatf:
-        # Concept 1: The 10-Billion Thrusts Awakening & Stunned Mino
-        # Directly based on Jaehwan training naked in the frost tower for decades + shattering floor 100
-        prompt_concept_1 = (
-            f"Create an ultra-detailed, cinematic 16:9 widescreen YouTube thumbnail illustration in the authentic Korean webtoon manhwa art style of Redice Studio "
-            f"(similar to Solo Leveling and The World After The Fall). Sharp ink linework, saturated cel-shading, dynamic rim lighting, and glowing violet-and-gold void embers.\n\n"
-            f"[CHARACTER REFERENCES & STORY-SPECIFIC COMPOSITION]:\n"
-            f"1. CHISELED AWAKENED SWORDSMAN ({mc_name} - Please match Image 1):\n"
-            f"Standing in the foreground center. After practicing a single thrust billions of times in the frozen tower, he possesses an athletic, vascular 8-pack physique and sculpted chest. "
-            f"His dark battle coat is torn open, casually exposing his muscular torso. Wiping sweat from his angular chin with a cold, nonchalant smirk. "
-            f"In his right hand, his dark sword radiates a reality-piercing violet void aura crackling with dimensional energy.\n\n"
-            f"2. STUNNED ROGUE ENCHANTRESS ({f1_name} - Please match Image 2):\n"
-            f"Kneeling intimately beside him in the Chaos wasteland, her floating crystalline daggers dropped to the ground in shock. "
-            f"She leans in close with glistening eyes, heavily flushed beet-red cheeks, and half-parted glossy lips, staring in total awe, lust, and infatuation at his god-tier strike and perfect physical body. "
-            f"She wears a form-fitting Chaos leather-and-silk battle corset with an alluring neckline flattering her feminine curves.\n\n"
-            f"[SCENE & ATMOSPHERE]:\n"
-            f"The shattered 100th floor threshold entering the Chaos wilderness. Colossal cracked stone pillars and swirling celestial nebula skies with dramatic volumetric backlight.\n\n"
-            f"[THUMBNAIL GRAPHIC OVERLAYS]:\n"
-            f"In the top-left corner, render bold glowing golden-yellow (#FFD700) comic typography reading \"ONE STAB WAS ENOUGH\" with an 8px black stroke. "
-            f"Above Mino's blushing head, render a cute pink thought bubble with glowing hearts reading \"HE DID 10 BILLION THRUSTS?!\"."
-        )
-
-        # Concept 2: The Nightmare Mistress Seduction & The Crushed Return Stone
-        # Directly based on Nightmare Lord Sirwen Armelt testing Jaehwan's soul with the Return Stone
-        prompt_concept_2 = (
-            f"Create a breathtaking, intensely seductive 16:9 widescreen YouTube thumbnail illustration in the signature Redice Studio webtoon manhwa art style. "
-            f"Exquisite character beauty, rich jewel tones, cinematic chiaroscuro, and glowing magical dream powder.\n\n"
-            f"[CHARACTER REFERENCES & STORY-SPECIFIC COMPOSITION]:\n"
-            f"1. ALLURING NIGHTMARE LORD ({f2_name} - Please match Image 3):\n"
-            f"Floating intimately behind Jaehwan, her soft arms wrapped gently around his muscular shoulders. "
-            f"She has delicate curved demonic horns on her forehead, long flowing silky pastel hair, and playful half-lidded bedroom eyes whispering seductive sweet illusions against his ear. "
-            f"She wears a luxurious, semi-translucent violet astral gown with a daring neckline that clings to her feminine silhouette, emitting swirling pink and purple dream mist.\n\n"
-            f"2. COLD UNYIELDING MONARCH ({mc_name} - Please match Image 1):\n"
-            f"Front-and-center, seated on a throne of shattered obsidian. Unfazed by her overwhelming sexual temptation, he stares forward with chilling indifferent eyes. "
-            f"His left fist is raised, forcefully crushing a glowing blue 'Return Stone' into glittering magical powder right in front of her face.\n\n"
-            f"[SCENE & ATMOSPHERE]:\n"
-            f"The surreal, mystical dream realm of the Nightmare Tower. Floating clock gears, starry nebula clouds, and soft violet rim lighting creating immense romantic, sensual, and power tension.\n\n"
-            f"[THUMBNAIL GRAPHIC OVERLAYS]:\n"
-            f"At the top-center, render distressed bold typography reading \"SHE OFFERED PARADISE\" in vivid yellow (#FFE500) with a thick black outline, "
-            f"and an arrow pointing to the shattered stone reading \"HE CHOSE CHAOS\"."
-        )
-
-        # Concept 3: The Soul-Clothes Inspection & Lethal Proximity in Gorgon Fortress
-        # Directly based on Mino and Jaehwan's tense, intimate interrogation/encounter in Gorgon Fortress
-        prompt_concept_3 = (
-            f"Create a heart-pounding, highly provocative 16:9 widescreen YouTube thumbnail illustration with an extreme Dutch angle in the authentic Redice Studio manhwa art style. "
-            f"High aesthetic fidelity, crisp dark ink outlines, warm lantern glow, and crackling violet spark embers.\n\n"
-            f"[CHARACTER REFERENCES & STORY-SPECIFIC COMPOSITION]:\n"
-            f"1. SEDUCTIVE ROGUE BEAUTY ({f1_name} - Please match Image 2):\n"
-            f"Positioned intimately close on the right, her face merely one inch away from Jaehwan's lips. "
-            f"She playfully tugs at the neckline of her unbuttoned translucent soul-clothes tunic to inspect his spirit core, revealing her graceful feminine collarbone and curves. "
-            f"Her cheeks are flushed heated red, lips glistening and parted, panting with a mix of playful flirtation and dangerous awe.\n\n"
-            f"2. DEADPAN WARRIOR ({mc_name} - Please match Image 1):\n"
-            f"Framed tightly on the left. Handsome male swordsman with pitch-black hair and sharp piercing eyes. "
-            f"He doesn't flinch an inch, casually holding the sharp tip of his dark glowing blade right against her throat in a dangerous, heart-stopping standoff.\n\n"
-            f"[SCENE & ATMOSPHERE]:\n"
-            f"A private backroom in the Gorgon Fortress tavern. Flickering warm candlelight, deep crimson drapery, and floating spirit motes. Maximum electric tension blending fatal danger and irresistible physical attraction.\n\n"
-            f"[THUMBNAIL GRAPHIC OVERLAYS]:\n"
-            f"In the upper-right corner, render a vibrant yellow comic speech bubble with a thick black outline reading \"INSPECTING MY BODY?\" pointing at Mino, "
-            f"with red comic blushing lines and question marks \"???\"."
-        )
-
-        thumbnail_concepts = [
-            {
-                "id": "concept_1",
-                "name": "The 10-Billion Thrusts Awakening (Khoe Thể Chất Vô Song & Mino Sững Sờ)",
-                "thumbnail_text": "ONE STAB WAS ENOUGH",
-                "text_style": "Font Gothic vàng kim (#FFD700) phát sáng cực đại 'ONE STAB WAS ENOUGH', kèm bong bóng suy nghĩ màu hồng 'HE DID 10 BILLION THRUSTS?!' trên đầu Mino.",
-                "characters": [
-                    {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
-                    {"role": f"Nữ phụ ({f1_name})", "image_reference": f1_ref_path},
-                ],
-                "gpt_prompt": prompt_concept_1,
-            },
-            {
-                "id": "concept_2",
-                "name": "The Nightmare Mistress Seduction (Chúa Tể Ác Mộng Cám Dỗ & Bóp Nát Đá Hồi Quy)",
-                "thumbnail_text": "SHE OFFERED PARADISE",
-                "text_style": "Font chữ khối dày màu vàng chanh (#FFE500) 'SHE OFFERED PARADISE' ở giữa trên, mũi tên chỉ vào bàn tay nghiền nát đá hồi quy 'HE CHOSE CHAOS'.",
-                "characters": [
-                    {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
-                    {"role": f"Nữ chúa Ác Mộng ({f2_name})", "image_reference": f2_ref_path},
-                ],
-                "gpt_prompt": prompt_concept_2,
-            },
-            {
-                "id": "concept_3",
-                "name": "The Soul-Clothes Inspection (Áp Sát Trong Gang Tấc / Vén Áo Linh Hồn)",
-                "thumbnail_text": "INSPECTING MY BODY?",
-                "text_style": "Bong bóng thoại truyện tranh vàng chanh viền đen 8px 'INSPECTING MY BODY?', mũi tên chỉ vào Mino, vạch đỏ mặt '???' trên đầu nam chính.",
-                "characters": [
-                    {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
-                    {"role": f"Nữ phụ ({f1_name})", "image_reference": f1_ref_path},
-                ],
-                "gpt_prompt": prompt_concept_3,
-            },
-        ]
-    else:
-        # Dynamic Story-Adaptive Concepts for Any Other Manhwa
-        prompt_concept_1 = (
-            f"Create an ultra-detailed, cinematic 16:9 widescreen YouTube thumbnail illustration in the authentic Redice Studio manhwa art style. "
-            f"Sharp linework, saturated cel-shading, dynamic rim lighting, and glowing magical embers.\n\n"
-            f"[CHARACTER REFERENCES & COMPOSITION - POWER & ALLURE DYNAMIC]:\n"
-            f"1. PROTAGONIST ({mc_name} - Please match Image 1): Athletic, handsome male hero standing confidently in the foreground, displaying his overwhelming physical strength and unyielding presence with glowing powers.\n"
-            f"2. ALLURING COMPANION ({f1_name} - Please match Image 2): Extraordinarily beautiful female lead with flushed blushing cheeks and half-lidded bedroom eyes, leaning intimately close in adoration and awe. "
-            f"Wearing a form-fitting fantasy outfit accentuating her feminine curves.\n\n"
-            f"[THUMBNAIL GRAPHIC OVERLAYS]: Bold yellow text overlay reading \"UNTOUCHABLE MONARCH\" with glowing neon cyan accents."
-        )
-        prompt_concept_2 = (
-            f"Create a heart-racing, playful and intensely sensual 16:9 widescreen YouTube thumbnail illustration in Redice Studio manhwa art style. "
-            f"Warm intimate lighting, soft ambient glow, and high romantic tension.\n\n"
-            f"[COMPOSITION - ACCIDENTAL PROXIMITY]: Seductive female lead ({f1_name} - Please match Image 2) leaning over the flustered male protagonist ({mc_name} - Please match Image 1), "
-            f"playfully tugging at her neckline with flushed cheeks. Male protagonist caught off-guard and blushing bright crimson.\n\n"
-            f"[THUMBNAIL GRAPHIC OVERLAYS]: Manga speech bubble reading \"TOO HOT RIGHT?\" with comic question marks."
-        )
-        prompt_concept_3 = (
-            f"Create an epic, high-stakes 16:9 widescreen YouTube thumbnail illustration in Redice Studio manhwa art style.\n\n"
-            f"[COMPOSITION - SUBMISSIVE HAREM DYNAMIC]: Male protagonist ({mc_name} - Please match Image 1) dominating on a throne or safezone sanctuary, "
-            f"while multiple stunning female leads ({f1_name} & {f2_name} - Please match Image 2 & Image 3) in battle-worn fitted attire beg to enter or serve with total devotion.\n\n"
-            f"[THUMBNAIL GRAPHIC OVERLAYS]: Bold typography reading \"THEY BEGGED TO SERVE\" in pure white with neon outer glow."
-        )
-        thumbnail_concepts = [
-            {
-                "id": "concept_1",
-                "name": "The Overwhelming Power & Flustered Waifu (Khoe Thể Chất & Mỹ Nhân Mê Mẩn)",
-                "thumbnail_text": "UNTOUCHABLE MONARCH",
-                "text_style": "Font Gothic vàng kim phát sáng, mũi tên chỉ điểm nóng và bong bóng suy nghĩ đỏ mặt.",
-                "characters": [
-                    {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
-                    {"role": f"Nữ phụ ({f1_name})", "image_reference": f1_ref_path},
-                ],
-                "gpt_prompt": prompt_concept_1,
-            },
-            {
-                "id": "concept_2",
-                "name": "The Accidental Intimate Encounter (Va Chạm Nhạy Cảm / Nữ Nhân Áp Sát)",
-                "thumbnail_text": "TOO HOT RIGHT?",
-                "text_style": "Bong bóng thoại màu vàng viền đen dày, dấu chấm hỏi đỏ mặt trên đầu MC.",
-                "characters": [
-                    {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
-                    {"role": f"Nữ phụ ({f1_name})", "image_reference": f1_ref_path},
-                ],
-                "gpt_prompt": prompt_concept_2,
-            },
-            {
-                "id": "concept_3",
-                "name": "The Safezone Sanctuary / Harem Devotion (Đế Vương / Song Nữ Phục Tùng)",
-                "thumbnail_text": "THEY BEGGED TO SERVE",
-                "text_style": "Font Sans-Serif khối lớn màu trắng viền neon cyan phát sáng.",
-                "characters": [
-                    {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
-                    {"role": f"Nữ phụ 1 ({f1_name})", "image_reference": f1_ref_path},
-                    {"role": f"Nữ phụ 2 ({f2_name})", "image_reference": f2_ref_path},
-                ],
-                "gpt_prompt": prompt_concept_3,
-            },
-        ]
-
-    # 5. Dynamic Story Progression Arcs Timeline for Pinned Comment (Form chung cho mọi video)
     arc_lines = []
     for ch in narrative_chapters:
         arc_lines.append(f"• {ch['timestamp']} — {ch['title']}")
@@ -758,7 +1109,9 @@ def generate_us_apocalypse_metadata(
         "👉 Like & Subscribe for more full-arc manhwa recaps!"
     )
 
-    # 6. Full Formatted Kit String
+    # =========================================================================
+    # 6. FULL FORMATTED KIT STRING
+    # =========================================================================
     kit_lines = [
         "=" * 80,
         f"YOUTUBE UPLOAD KIT: {comic_title}",
@@ -782,12 +1135,11 @@ def generate_us_apocalypse_metadata(
         ", ".join(base_tags),
         "",
         "=" * 80,
-        "[5. HIGH-CTR THUMBNAIL CONCEPTS & MASTER PROMPTS CHO CHATGPT (GPT-4o)]",
+        "[5. DYNAMIC STORY-FLEX THUMBNAIL MASTER PROMPTS (STANDARD 6-LAYER GPT-4o / DALL-E 3)]",
         "Hướng dẫn:",
-        "1. Chọn 1 trong 3 Concept dưới đây phù hợp nhất với phong cách video của bạn.",
-        "2. Mở ChatGPT (chọn mô hình GPT-4o).",
-        "3. Bấm nút đính kèm (dấu +) và tải lên các tệp ảnh tham chiếu tương ứng của Concept đó.",
-        "4. Copy duy nhất đoạn MASTER PROMPT của Concept đó dán vào ChatGPT để sinh ảnh Thumbnail 16:9.",
+        "1. Mở ChatGPT (mô hình GPT-4o), Midjourney v6, hoặc Flux.",
+        "2. Bấm nút đính kèm (+) và tải lên các ảnh panel tham chiếu (Ảnh 1: Nam chính, Ảnh 2: Nữ phụ/Boss).",
+        "3. Copy toàn bộ đoạn MASTER PROMPT của Concept bạn chọn dán vào khung chat để sinh ảnh Thumbnail 16:9 chuẩn Manhwa 2.5D.",
         "=" * 80,
     ]
 
@@ -809,109 +1161,12 @@ def generate_us_apocalypse_metadata(
             "--------------------------------------------------------------------------------",
         ])
 
-    # Alternative concepts library
-    prompt_alt_lewd = (
-        f"Create a high-impact, provocative 16:9 widescreen YouTube thumbnail illustration in the signature Redice Studio webtoon manhwa art style. "
-        f"Sharp graphic linework, vibrant cel-shaded colors, cinematic volumetric lighting, and glowing holographic digital particles.\n\n"
-        f"[CHARACTER REFERENCES & COMPOSITION - SYSTEM QUEST PROVOCATION]:\n"
-        f"1. PROUD ALLURING FEMALE LEAD ({f1_name} - Please match Image 2):\n"
-        f"Positioned in the center-right, turned slightly away to showcase her voluptuous feminine silhouette. She wears snug fantasy combat leggings or a high-slit battle skirt. "
-        f"Clearly visible on her curve is a vivid glowing crimson handprint mark. She looks back over her shoulder with beet-red blushing cheeks, teary humiliated eyes, and biting her lower lip in fierce embarrassment.\n\n"
-        f"2. CONFIDENT MALE PROTAGONIST ({mc_name} - Please match Image 1):\n"
-        f"Standing in the foreground left, viewed from an over-the-shoulder angle. A handsome warrior with an amused, nonchalant smirk, holding a dark glowing weapon as he watches the floating system notification.\n\n"
-        f"[SYSTEM QUEST HOLOGRAM]:\n"
-        f"Floating between them is a prominent, glowing crimson-red system quest window with caution borders, displaying bold white-and-yellow typography: \"! ALERT QUEST: TOUCH HER ! REWARD: LEVEL UP +99\".\n\n"
-        f"[SCENE & ATMOSPHERE]:\n"
-        f"A grand fantasy arena or dungeon chamber with blue-and-red glowing holographic runes floating in the background."
-    )
-
-    prompt_alt_base = (
-        f"Create an eye-catching, dramatic 16:9 widescreen YouTube thumbnail illustration in authentic Korean webtoon manhwa art style. "
-        f"Dynamic composition contrasting warmth and devastation, sharp ink linework, and vibrant neon lighting.\n\n"
-        f"[CHARACTER REFERENCES & COMPOSITION - SAFEZONE VS WASTELAND]:\n"
-        f"1. FIRST-PERSON / SPLIT-SCREEN PERSPECTIVE:\n"
-        f"On the LEFT (MC'S SAFEZONE): A luxurious, warm sanctuary with air conditioning, comfortable seating, and fresh food. "
-        f"Male protagonist ({mc_name} - Please match Image 1) stands relaxed in modern adventurer gear, holding fresh food, gazing coolly toward the entrance.\n\n"
-        f"2. DESPERATE ALLURING SURVIVORS ({f1_name} & {f2_name} - Please match Image 2 & Image 3):\n"
-        f"On the RIGHT (FROZEN WASTELAND): Through a glowing blue dimensional portal or vault doorway, two extraordinarily gorgeous female awakened warriors are kneeling or stepping desperately into the safezone. "
-        f"They wear battle-torn, form-fitting athletic crop tops and snug leggings accentuating their hourglass curves. Both have flushed cheeks, disheveled silky hair, and pleading, seductive bedroom eyes begging to enter.\n\n"
-        f"[THUMBNAIL GRAPHIC OVERLAYS]:\n"
-        f"At the top-center, render massive bold all-caps typography reading \"ALL GIRLS WANT IN\" in vibrant yellow (#FFE500) with a thick black stroke. "
-        f"Add contrasting glowing neon badges: \"SAFEZONE\" in neon cyan on the left, and \"APOCALYPSE\" in fiery crimson on the right."
-    )
-
-    alternative_archetypes = [
-        {
-            "id": "alt_lewd_system",
-            "name": "The Lewd System Quest & Handprint (Nhiệm Vụ Hệ Thống Táo Bạo / Vết Tát Mông)",
-            "thumbnail_text": "! ALERT QUEST: TOUCH HER !",
-            "text_style": "Bảng nhiệm vụ System Hologram đỏ rực màu máu, font in hoa 'REWARD: STATS +999', mũi tên vàng neon chỉ vào vòng 3 có vết bàn tay đỏ ửng phát sáng.",
-            "characters": [
-                {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
-                {"role": f"Nữ phụ ({f1_name})", "image_reference": f1_ref_path},
-            ],
-            "gpt_prompt": prompt_alt_lewd,
-        },
-        {
-            "id": "alt_base_portal",
-            "name": "The Apocalypse Base & Food Sanctuary (Trùm Căn Cứ / Cổng Không Gian Đón Gái Xinh)",
-            "thumbnail_text": "ALL GIRLS WANT IN",
-            "text_style": "Font Impact màu vàng chanh viền đen 8px ở giữa trên, chia đôi nhãn SAFEZONE (xanh neon) và APOCALYPSE (đỏ rực) ở hai bên cổng.",
-            "characters": [
-                {"role": f"Nam chính ({mc_name})", "image_reference": mc_ref_path},
-                {"role": f"Nữ phụ 1 ({f1_name})", "image_reference": f1_ref_path},
-                {"role": f"Nữ phụ 2 ({f2_name})", "image_reference": f2_ref_path},
-            ],
-            "gpt_prompt": prompt_alt_base,
-        },
-    ]
-
-    # Section 6: Alternative Viral Concepts Catalog
-    if alternative_archetypes:
-        kit_lines.extend([
-            "",
-            "=" * 80,
-            "[6. ALTERNATIVE VIRAL CONCEPTS CATALOG (DANH MỤC CONCEPT DỰ PHÒNG & THỬ NGHIỆM CTR ĐỘC LẠ)]",
-            "Ghi chú: Nếu bạn muốn thử nghiệm phong cách thị giác khác cho video này (ví dụ: Nhiệm Vụ Hệ Thống Táo Bạo,",
-            "Trùm Căn Cứ Tiếp Tế Lương Thực, hoặc Nữ Chỉ Huy Học Viện), hãy copy các Master Prompt dưới đây:",
-            "=" * 80,
-        ])
-        for idx, alt in enumerate(alternative_archetypes, 1):
-            kit_lines.extend([
-                "",
-                f"▶ ALTERNATIVE CONCEPT {idx}: {alt['name'].upper()}",
-                f"  • Clickbait Text Overlay : {alt['thumbnail_text']}",
-                f"  • Text Styling Guide     : {alt['text_style']}",
-                "  • Nhân vật & Tệp ảnh tham chiếu:",
-            ])
-            for c_idx, char in enumerate(alt['characters'], 1):
-                kit_lines.append(f"    - Ảnh {c_idx} ({char['role']}) : {char['image_reference']}")
-            kit_lines.extend([
-                "",
-                "  • MASTER PROMPT CHO CHATGPT (Copy toàn bộ dán vào GPT-4o):",
-                "--------------------------------------------------------------------------------",
-                alt['gpt_prompt'],
-                "--------------------------------------------------------------------------------",
-            ])
-
-    # Section 7: Universal Manhwa Recap Meta-Prompt (For Generating Bespoke Concepts For Any Comic)
-    meta_prompt_text = (
-        "You are an elite YouTube Manhwa Recap Art Director specializing in 500K+ view high-CTR thumbnails.\n"
-        "Given the following manhwa synopsis or chapter plot, invent 3 UNIQUE, STORY-SPECIFIC thumbnail concepts.\n"
-        "RULES:\n"
-        "1. Do NOT use generic formulas. Adapt directly to the unique weapons, monsters, and absurd moments of this story.\n"
-        "2. Include 1 or 2 gorgeous female characters with intense sensual tension, seductive curiosity, or blushing embarrassment.\n"
-        "3. Provide exactly ONE Master Prompt per concept for ChatGPT (GPT-4o) specifying 16:9 widescreen, Redice Studio manhwa art style, character reference mappings (Image 1, Image 2), cinematic lighting, and clickbait graphic overlays (comic speech bubbles, yellow typography with black stroke, or system quest hologram).\n"
-        "4. Keep prompts strictly filter-safe against OpenAI moderation while maximizing visual allure (form-fitting gowns, blushing cheeks, intimate proximity).\n\n"
-        "[PASTE YOUR COMIC TITLE & PLOT SUMMARY HERE]"
-    )
-
     kit_lines.extend([
         "",
         "=" * 80,
-        "[7. UNIVERSAL AI META-PROMPT (CÔNG CỤ TẠO THUMBNAIL ĐỘC BẢN CHO BẤT KỲ BỘ TRUYỆN MỚI)]",
-        "Hướng dẫn: Bạn có thể copy đoạn Meta-Prompt dưới đây dán vào ChatGPT hoặc Gemini, kèm đoạn tóm tắt của bất kỳ",
-        "bộ truyện nào để AI tự động sáng tạo 3 Thumbnail Concept mới tinh, bám sát 100% tình tiết cốt truyện thực tế:",
+        "[6. UNIVERSAL 6-LAYER AI META-DIRECTOR PROMPT (CÔNG CỤ TẠO THUMBNAIL SÁNG TẠO TỰ DO)]",
+        "Hướng dẫn: Copy đoạn Meta-Prompt dưới đây dán vào ChatGPT hoặc Gemini để AI tự do 'flex' thêm vô số",
+        "concept độc bản tuân thủ chuẩn 6 Layer chuyên nghiệp:",
         "=" * 80,
         meta_prompt_text,
         "=" * 80,
@@ -927,7 +1182,5 @@ def generate_us_apocalypse_metadata(
         "tags": base_tags,
         "narrative_chapters": narrative_chapters,
         "thumbnail_concepts": thumbnail_concepts,
-        "alternative_concepts": alternative_archetypes,
         "formatted_kit": formatted_kit,
     }
-

@@ -201,17 +201,17 @@ class ArcClimaxMiner:
                 try:
                     with Image.open(img_path) as img:
                         score, bd = VisualSemanticScorer.calculate_score_from_pil(img)
-                        if not bd.get("is_meaningless", False):
-                            np_gray = np.array(img.convert("L"))
-                            white_ratio = float(np.mean(np_gray > 240))
-                            composite = score * 0.5 - (white_ratio * 40.0)
-                            scored_images.append({
-                                "filename": f,
-                                "path": img_path,
-                                "score": score,
-                                "white_ratio": white_ratio,
-                                "composite": composite
-                            })
+                        np_gray = np.array(img.convert("L"))
+                        white_ratio = float(np.mean(np_gray > 240))
+                        penalty = 50.0 if bd.get("is_meaningless", False) else 0.0
+                        composite = score * 0.5 - (white_ratio * 40.0) - penalty
+                        scored_images.append({
+                            "filename": f,
+                            "path": img_path,
+                            "score": score,
+                            "white_ratio": white_ratio,
+                            "composite": composite
+                        })
                 except Exception:
                     continue
             scored_images.sort(key=lambda x: x["composite"], reverse=True)
@@ -713,7 +713,7 @@ class MicroIntroRenderer:
                 loaded_pil[p] = im
 
                 # Smart panel isolation (cuts off speech bubbles & solid gutters)
-                bounds, focal, skin_ratio, _ = detect_clean_panel_and_focal_point(im)
+                bounds, focal, skin_ratio, _, _ = detect_clean_panel_and_focal_point(im)
                 image_meta[p] = (bounds, focal, skin_ratio)
 
                 # Precompute blurred ambient background from CLEAN panel only

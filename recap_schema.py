@@ -186,3 +186,20 @@ def validate_recap_file(path: str | Path, *, max_page: int | None = None) -> boo
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False
     return True
+
+
+def normalize_recap_priorities(images: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Normalizes a list of image dicts [{"page": p, "priority": ...}]
+    guaranteeing that priorities strictly sum to 1.0 (v1.8.0).
+    """
+    if not images:
+        return []
+    n = len(images)
+    if n == 1:
+        return [{"page": int(images[0]["page"]), "priority": 1.0}]
+    p_val = round(1.0 / n, 2)
+    res = [{"page": int(img["page"]), "priority": p_val} for img in images[:-1]]
+    res.append({"page": int(images[-1]["page"]), "priority": round(1.0 - p_val * (n - 1), 2)})
+    return res
+

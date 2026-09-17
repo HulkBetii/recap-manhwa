@@ -625,15 +625,16 @@ def draw_subtitles_on_frame(image, text, font_size=42):
         y_cursor += line_height
 
 
-def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple, float, tuple]:
+def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple, float, tuple, float]:
     """
     Detects the character focal point (with speech bubble suppression and skin tone boost)
     and automatically isolates the active comic panel (excluding neighboring panels and solid gutters).
-    Returns (bounds, focal_point, skin_ratio, bubble_centroid) where:
+    Returns (bounds, focal_point, skin_ratio, bubble_centroid, bubble_coverage_ratio) where:
       bounds = (cb_x, cb_y, W_c, H_c)
       focal_point = (focal_x, focal_y) relative to bounds — real subject position, NOT center-locked.
       skin_ratio = float [0..1] fraction of panel pixels with skin tone (drives adaptive zoom strength).
       bubble_centroid = (bx, by) centroid of speech bubble region relative to bounds (for repulsion).
+      bubble_coverage_ratio = float [0..1] fraction of panel area covered by speech bubbles.
     """
     import cv2
     import numpy as np
@@ -684,8 +685,25 @@ def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple, float, tu
     else:
         mean_x, mean_y = w_full / 2.0, h_full / 2.0
 
-    raw_focal_x = float(np.clip(mean_x, 0.15 * w_full, 0.85 * w_full))
-    raw_focal_y = float(np.clip(mean_y, 0.10 * h_full, 0.90 * h_full))
+    # AI Face Detection Priority (YuNet ONNX)
+    detected_faces = []
+    try:
+        from visual_scorer import VisualSemanticScorer
+        bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        detected_faces = VisualSemanticScorer.detect_faces(bgr)
+    except Exception:
+        detected_faces = []
+
+    if detected_faces:
+        # Choose the most prominent face
+        best_face = max(detected_faces, key=lambda f: float(f[2] * f[3]) * (1.0 + float(f[-1])))
+        fx0, fy0, fw, fh = float(best_face[0]), float(best_face[1]), float(best_face[2]), float(best_face[3])
+        # Eye-line focal point with Headroom Protection
+        raw_focal_x = float(np.clip(fx0 + fw / 2.0, 0.15 * w_full, 0.85 * w_full))
+        raw_focal_y = float(np.clip(fy0 + fh * 0.42, 0.10 * h_full, 0.90 * h_full))
+    else:
+        raw_focal_x = float(np.clip(mean_x, 0.15 * w_full, 0.85 * w_full))
+        raw_focal_y = float(np.clip(mean_y, 0.10 * h_full, 0.90 * h_full))
 
     # 6. Active panel isolation: detect horizontal gutters and dividers
     mid_strip = crop_gray[:, int(w_full * 0.08):int(w_full * 0.92)]
@@ -733,38 +751,65 @@ def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple, float, tu
     panel_bot = min(bot_gutter, panel_bot + 5)
 
     h_panel = panel_bot - panel_top
-    if h_panel >= 250:
-        clean_bounds = (0, panel_top, w_full, h_panel)
-        local_focal_x = w_full / 2.0
-        local_focal_y = float(np.clip(raw_focal_y - panel_top, 0.20 * h_panel, 0.80 * h_panel))
-        panel_region = bubble_mask_dilated[panel_top:panel_bot, :]
-    else:
-        clean_bounds = (0, top_gutter, w_full, max(20, bot_gutter - top_gutter))
-        local_focal_x = w_full / 2.0
-        local_focal_y = float(np.clip(raw_focal_y - top_gutter, 0.20 * clean_bounds[3], 0.80 * clean_bounds[3]))
-        panel_region = bubble_mask_dilated[top_gutter:bot_gutter, :]
+    p_top = panel_top if h_panel >= 250 else top_gutter
+    p_bot = panel_bot if h_panel >= 250 else bot_gutter
+    h_act = max(20, p_bot - p_top)
 
-    # Compute skin_ratio within the active panel region
-    panel_h = clean_bounds[3]
-    panel_skin = skin_mask[clean_bounds[1]:clean_bounds[1] + panel_h, :]
+    # 7. Asymmetric Void & Vertical Gutter Trimming (Left & Right outer gutters)
+    panel_slice = crop_gray[p_top:p_bot, :]
+    col_std = np.std(panel_slice, axis=0)
+    col_mean = np.mean(panel_slice, axis=0)
+
+    max_left = int(w_full * 0.45)
+    left_gutter = 0
+    while left_gutter < max_left and col_std[left_gutter] < 4.5 and (col_mean[left_gutter] <= 20 or col_mean[left_gutter] >= 235):
+        left_gutter += 1
+
+    min_right = int(w_full * 0.55)
+    right_gutter = w_full - 1
+    while right_gutter > min_right and col_std[right_gutter] < 4.5 and (col_mean[right_gutter] <= 20 or col_mean[right_gutter] >= 235):
+        right_gutter -= 1
+    right_gutter += 1
+
+    w_act = right_gutter - left_gutter
+    if w_act < 200:
+        left_gutter = 0
+        w_act = w_full
+
+    clean_bounds = (left_gutter, p_top, w_act, h_act)
+    local_focal_x = float(np.clip(raw_focal_x - left_gutter, 0.15 * w_act, 0.85 * w_act))
+    local_focal_y = float(np.clip(raw_focal_y - p_top, 0.15 * h_act, 0.85 * h_act))
+
+    panel_region = bubble_mask_dilated[p_top:p_bot, left_gutter:left_gutter + w_act]
+    panel_skin = skin_mask[p_top:p_bot, left_gutter:left_gutter + w_act]
     total_panel_pixels = max(1, panel_skin.size)
     skin_ratio = float(np.count_nonzero(panel_skin)) / total_panel_pixels
 
-    # Compute bubble_centroid (center of mass of speech bubble region) for repulsion
-    bubble_coords = np.argwhere(panel_region)
-    if len(bubble_coords) > 0:
-        bubble_cy = float(np.mean(bubble_coords[:, 0]))
-        bubble_cx = float(np.mean(bubble_coords[:, 1]))
+    # Dominant Bubble Centroid (v1.7.0): Select largest connected bubble to prevent vector cancellation
+    if np.any(panel_region):
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(panel_region.astype(np.uint8))
+        if num_labels > 1:
+            areas = stats[1:, cv2.CC_STAT_AREA]
+            max_idx = 1 + int(np.argmax(areas))
+            bubble_cx = float(centroids[max_idx][0])
+            bubble_cy = float(centroids[max_idx][1])
+        else:
+            bubble_cx = w_act / 2.0
+            bubble_cy = h_act / 2.0
     else:
         # No bubbles detected — centroid at panel center (neutral repulsion)
-        bubble_cx = w_full / 2.0
-        bubble_cy = panel_h / 2.0
+        bubble_cx = w_act / 2.0
+        bubble_cy = h_act / 2.0
 
-    return clean_bounds, (local_focal_x, local_focal_y), skin_ratio, (bubble_cx, bubble_cy)
+    # Compute bubble_coverage_ratio within the active panel (for downstream crop/repulsion)
+    panel_bubble = bubble_mask_dilated[p_top:p_bot, left_gutter:left_gutter + w_act]
+    bubble_coverage_ratio = float(np.mean(panel_bubble)) if panel_bubble.size > 0 else 0.0
+
+    return clean_bounds, (local_focal_x, local_focal_y), skin_ratio, (bubble_cx, bubble_cy), bubble_coverage_ratio
 
 
 def detect_content_bounds(img: Image) -> tuple:
-    bounds, _, _, _ = detect_clean_panel_and_focal_point(img)
+    bounds, _, _, _, _ = detect_clean_panel_and_focal_point(img)
     return bounds
 
 
@@ -820,6 +865,21 @@ def detect_focal_point(img_pil, bounds: tuple = None) -> tuple[float, float]:
     else:
         mean_x, mean_y = W_c / 2.0, H_c / 2.0
 
+    # AI Face Detection Priority (YuNet ONNX)
+    detected_faces = []
+    try:
+        from visual_scorer import VisualSemanticScorer
+        crop_bgr = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2BGR)
+        detected_faces = VisualSemanticScorer.detect_faces(crop_bgr)
+    except Exception:
+        detected_faces = []
+
+    if detected_faces:
+        best_face = max(detected_faces, key=lambda f: float(f[2] * f[3]) * (1.0 + float(f[-1])))
+        fx0, fy0, fw, fh = float(best_face[0]), float(best_face[1]), float(best_face[2]), float(best_face[3])
+        mean_x = fx0 + fw / 2.0
+        mean_y = fy0 + fh * 0.42
+
     focal_x = float(np.clip(mean_x, 0.15 * W_c, 0.85 * W_c))
     focal_y = float(np.clip(mean_y, 0.15 * H_c, 0.85 * H_c))
     return focal_x, focal_y
@@ -838,6 +898,21 @@ def ease_in_out_cubic(t: float) -> float:
         return 4 * (t ** 3)
     else:
         return 1 - ((-2 * t + 2) ** 3) / 2
+
+def soft_linear_glide(t: float) -> float:
+    """
+    Continuous smooth gliding curve: 5% gentle ease-in, 90% constant velocity, 5% gentle ease-out.
+    Prevents abrupt stops while maintaining continuous pacing.
+    """
+    t = max(0.0, min(1.0, float(t)))
+    p = 0.05
+    if t < p:
+        return 0.5 * (t / p) ** 2 * (p / (1.0 - p))
+    elif t > (1.0 - p):
+        dt = (1.0 - t) / p
+        return 1.0 - 0.5 * (dt ** 2) * (p / (1.0 - p))
+    else:
+        return (t - p * 0.5) / (1.0 - p)
 
 
 def apply_motion_blur(img_np, dx: float, dy: float):
@@ -885,169 +960,242 @@ class CameraPlanner:
         transition: str = "cross_fade",
         skin_ratio: float = 0.0,
         bubble_centroid: tuple = None,
+        bubble_coverage_ratio: float = 0.0,
         shot_index: int = 0,
     ) -> dict:
         """
-        Generates a balanced, clear cinematic camera plan that focuses on the subject
-        (characters, objects, events) with subtle, non-intrusive micro-motion (1.00x -> 1.025x-1.055x).
-        Preserves full subject clarity and panel context without aggressive cropping.
-        Supports Ken Burns Alternating Motion (In-Out-In-Out) based on shot_index.
+        Generates a continuous, smooth cinematic camera plan for webtoon storytelling.
+        - Primary motion: Smooth continuous Vertical Pan (sliding top-to-bottom or bottom-to-top)
+          for all portrait and tall panels (aspect_ratio < 1.15).
+        - Wide panels (aspect_ratio >= 1.15): Smooth continuous Horizontal Pan.
+        - 2D Bubble Repulsion: Repels camera focal point away from speech bubble regions in both X and Y.
+        - Zero-Clamping Freeze: Interpolation glides continuously across the full shot duration without stopping.
         """
         cb_x, cb_y, W_c, H_c = bounds
-
         center_x = W_c / 2.0
         center_y = H_c / 2.0
+        aspect_ratio = W_c / max(1.0, float(H_c))
 
-        # Alternating motion flag: even shots Zoom In, odd shots Zoom Out
-        is_zoom_out = (shot_index % 2 == 1)
-
-        # Bubble-centroid repulsion: gently shift focal_x AWAY from text bubble region
-        # instead of hard-locking to center_x. Max displacement capped at 12% panel width.
+        # Enhanced 2D Bubble-Centroid Repulsion & Exclusion Offset (X & Y)
+        y_bias = 0.0
+        x_bias = 0.0
         if bubble_centroid:
-            bubble_cx, _ = bubble_centroid
-            dx_bubble = center_x - bubble_cx  # vector from bubble → center
-            if abs(dx_bubble) > W_c * 0.12:
-                focal_x = center_x + dx_bubble * 0.12
-                focal_x = float(np.clip(focal_x, 0.20 * W_c, 0.80 * W_c))
-            else:
-                focal_x = center_x
-        else:
-            focal_x = center_x
+            bubble_cx, bubble_cy = bubble_centroid
+            repulsion_strength = 0.25 + min(0.25, bubble_coverage_ratio * 0.6)
+            dx_bubble = center_x - bubble_cx
+            if abs(dx_bubble) > W_c * 0.05:
+                x_bias = dx_bubble * repulsion_strength
+            
+            # Y repulsion: push away from bubbles at the top or bottom of panel
+            dy_bubble = center_y - bubble_cy
+            if abs(dy_bubble) > H_c * 0.05:
+                y_bias = dy_bubble * repulsion_strength
+
+            # Strong vertical directional push when bubble is concentrated at top or bottom
+            if bubble_coverage_ratio >= 0.18:
+                if bubble_cy < 0.38 * H_c:
+                    y_bias = max(y_bias, H_c * 0.20)
+                elif bubble_cy > 0.62 * H_c:
+                    y_bias = min(y_bias, -H_c * 0.22)
+                if bubble_cx < 0.38 * W_c:
+                    x_bias = max(x_bias, W_c * 0.16)
+                elif bubble_cx > 0.62 * W_c:
+                    x_bias = min(x_bias, -W_c * 0.16)
 
         if focal_point is None:
-            focal_y = center_y
+            focal_x = center_x + x_bias
+            focal_y = center_y + y_bias
         else:
-            _, fy_raw = focal_point
-            # Gentle vertical bias towards character eye-line / action while staying well inside safe margins
-            focal_y = center_y * 0.60 + float(fy_raw) * 0.40
+            fx_raw, fy_raw = focal_point
+            focal_x = center_x * 0.25 + float(fx_raw) * 0.75 + x_bias
+            focal_y = center_y * 0.25 + float(fy_raw) * 0.75 + y_bias
 
-        focal_y = float(np.clip(focal_y, 0.25 * H_c, 0.75 * H_c))
+        focal_x = float(np.clip(focal_x, 0.15 * W_c, 0.85 * W_c))
+        focal_y = float(np.clip(focal_y, 0.18 * H_c, 0.82 * H_c))
 
-        aspect_ratio = W_c / max(1.0, float(H_c))
-        easing = "easeInOutSine"
+        easing = "soft_linear_glide"
 
-        # Skin-ratio adaptive zoom dampening: character close-ups (skin_ratio > 0.08)
-        # get slightly less zoom to avoid cropping facial expressions
-        skin_zoom_factor = 0.92 if skin_ratio > 0.08 else 1.0
-
-        # Mode 1: Short Duration (< 1.8s) -> Subtle Micro-Motion Breathing (1.00x <-> 1.030x)
-        if duration < 1.8:
-            target_scale = 1.030
-            if is_zoom_out:
-                animation_type = "subtle_breath_out"
-                keyframes = [
-                    {"time": 0.0, "x": center_x, "y": focal_y, "scale": target_scale},
-                    {"time": duration, "x": center_x, "y": center_y, "scale": 1.00}
-                ]
-            else:
-                animation_type = "subtle_breath"
-                keyframes = [
-                    {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
-                    {"time": duration, "x": center_x, "y": focal_y, "scale": target_scale}
-                ]
-            return {
-                "page": page_num,
-                "duration": duration,
-                "animation_type": animation_type,
-                "easing": easing,
-                "keyframes": keyframes,
-                "transition": transition
-            }
-
-        # Mode 2: Ultra-Long Duration (> 7.0s) -> Continuous 2-Phase Ken Burns Motion
-        # Smoothly zooms into the focal subject, then eases back out to full overview.
-        # Continuous 3-keyframe motion without discontinuous jump cut (eliminates video jitter).
-        if duration > 7.0:
-            animation_type = "dual_shot_cinematic"
-            t_split = round(duration * 0.5, 3)
-            s_peak = 1.0 + (0.080 * skin_zoom_factor)
+        # Mode A: Landscape / Extreme Panoramic Panels (aspect_ratio >= 2.20) -> Smooth Cinematic Horizontal Pan
+        # (Allows natural scanning across wide manga spreads and landscape battle scenes)
+        if aspect_ratio >= 2.20:
+            animation_type = "cinematic_pan_horizontal"
+            dir_x = 1.0 if (shot_index % 2 == 0) else -1.0
+            direction = "left_to_right" if dir_x > 0 else "right_to_left"
+            pan_span = max(15.0, min(W_c * 0.12, 80.0))
+            x_start = float(np.clip(center_x - dir_x * pan_span * 0.5, 0.15 * W_c, 0.85 * W_c))
+            x_end = float(np.clip(center_x + dir_x * pan_span * 0.5, 0.15 * W_c, 0.85 * W_c))
             keyframes = [
-                # Phase 1: Subject Zoom In (0.0 -> t_split)
-                {"time": 0.0, "x": center_x * 0.5 + focal_x * 0.5, "y": center_y * 0.5 + focal_y * 0.5, "scale": 1.00},
-                {"time": t_split, "x": focal_x, "y": focal_y, "scale": s_peak},
-                # Phase 2: Smooth continuous ease-out to wide context (t_split -> duration)
-                {"time": duration, "x": center_x, "y": center_y, "scale": 1.00},
+                {"time": 0.0, "x": x_start, "y": focal_y, "scale": 1.00, "progress": 0.0},
+                {"time": duration, "x": x_end, "y": focal_y, "scale": 1.00, "progress": 1.0}
             ]
             return {
                 "page": page_num,
                 "duration": duration,
                 "animation_type": animation_type,
+                "direction": direction,
                 "easing": easing,
                 "keyframes": keyframes,
                 "transition": transition,
+                "bubble_centroid": bubble_centroid,
+                "bubble_coverage_ratio": bubble_coverage_ratio,
             }
 
-        # Mode 2b: Long Duration (4.5s < duration <= 7.0s) -> Deep Gentle Cinematic Motion (1.00x <-> 1.10x)
-        if duration > 4.5:
-            target_scale = 1.0 + (0.10 * skin_zoom_factor)
-            if is_zoom_out:
-                animation_type = "virtual_multicam_out"
-                keyframes = [
-                    {"time": 0.0, "x": focal_x, "y": focal_y, "scale": target_scale},
-                    {"time": duration, "x": center_x, "y": center_y, "scale": 1.00}
-                ]
+        # Measure usable vertical travel distance for vertical pan
+        # Only tall webtoon strips (aspect_ratio < 0.70) have vertical sliding headroom
+        if aspect_ratio < 0.70:
+            h_view_ref = W_c / 0.68
+            usable_v_travel = H_c - h_view_ref
+        else:
+            usable_v_travel = 0.0
+
+        # Mode B: Tall Webtoon Strip Panel (usable_v_travel >= 160px) -> Continuous Vertical Pan Glide
+        # Adaptive Velocity Clamping (v1.7.0): Cap pan speed at 120 px/s to prevent dizzying camera motion
+        max_travel_by_speed = max(20.0, float(duration) * 120.0)
+        max_travel_by_panel = H_c * 0.35
+        travel_span = min(max_travel_by_panel, max_travel_by_speed)
+
+        h_cam_ref = W_c / 0.68
+        min_valid_y = float(h_cam_ref * 0.5)
+        max_valid_y = float(H_c - h_cam_ref * 0.5)
+        if min_valid_y >= max_valid_y:
+            min_valid_y, max_valid_y = 0.10 * H_c, 0.90 * H_c
+
+        actual_span = min(travel_span, max(0.0, max_valid_y - min_valid_y))
+
+        if usable_v_travel >= 160.0 and actual_span >= 50.0:
+            animation_type = "vertical_pan_glide"
+            
+            # Smart direction: If bubble is concentrated in upper 38%, pan bottom-to-top to emphasize character first
+            if bubble_centroid and bubble_coverage_ratio > 0.18 and bubble_centroid[1] < 0.38 * H_c:
+                direction = "bottom_to_top"
+            elif bubble_centroid and bubble_coverage_ratio > 0.18 and bubble_centroid[1] > 0.62 * H_c:
+                direction = "top_to_bottom"
             else:
-                animation_type = "virtual_multicam"
-                keyframes = [
-                    {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
-                    {"time": duration, "x": focal_x, "y": focal_y, "scale": target_scale}
-                ]
-            return {
-                "page": page_num,
-                "duration": duration,
-                "animation_type": animation_type,
-                "easing": easing,
-                "keyframes": keyframes,
-                "transition": transition
-            }
+                direction = "top_to_bottom" if (shot_index % 2 == 0) else "bottom_to_top"
 
-        # Mode 3: Wide Horizontal Panel (W/H >= 1.25) -> Cinematic Horizontal Micro-Pan (scale 1.00x <-> 1.060x)
-        if aspect_ratio >= 1.25:
-            animation_type = "cinematic_pan_horizontal"
-            pan_span = max(10.0, min(W_c * 0.04, 30.0))
-            # Alternate horizontal direction by shot_index
-            dir_x = 1.0 if (shot_index % 2 == 0) else -1.0
-            scale_peak = 1.0 + (0.060 * skin_zoom_factor)
-            scale_start = 1.00 if not is_zoom_out else scale_peak
-            scale_end = scale_peak if not is_zoom_out else 1.00
+            y_anchor = float(np.clip(focal_y, min_valid_y + actual_span * 0.5, max_valid_y - actual_span * 0.5))
+            y_top = y_anchor - actual_span * 0.5
+            y_bot = y_anchor + actual_span * 0.5
+
+            # Bubble-Exclusion Clamping: Prevent camera from panning over speech bubbles at top/bottom
+            if bubble_centroid and bubble_coverage_ratio >= 0.15:
+                bubble_cx, bubble_cy = bubble_centroid
+                if bubble_cy < 0.35 * H_c:
+                    bubble_bottom_edge = float(bubble_cy + H_c * 0.14)
+                    y_top = max(y_top, min(bubble_bottom_edge, y_anchor))
+                elif bubble_cy > 0.65 * H_c:
+                    bubble_top_edge = float(bubble_cy - H_c * 0.14)
+                    y_bot = min(y_bot, max(bubble_top_edge, y_anchor))
+
+            if y_top >= y_bot:
+                y_top = max(min_valid_y, y_anchor - 20.0)
+                y_bot = min(max_valid_y, y_anchor + 20.0)
+
+            if direction == "top_to_bottom":
+                y_start, y_end = y_top, y_bot
+            else:
+                y_start, y_end = y_bot, y_top
+
             keyframes = [
-                {"time": 0.0, "x": center_x - dir_x * pan_span, "y": center_y if not is_zoom_out else focal_y, "scale": scale_start},
-                {"time": duration, "x": center_x + dir_x * pan_span, "y": focal_y if not is_zoom_out else center_y, "scale": scale_end}
+                {"time": 0.0, "x": focal_x, "y": y_start, "scale": 1.00, "progress": 0.0},
+                {"time": duration, "x": focal_x, "y": y_end, "scale": 1.00, "progress": 1.0}
             ]
             return {
                 "page": page_num,
                 "duration": duration,
                 "animation_type": animation_type,
+                "direction": direction,
                 "easing": easing,
                 "keyframes": keyframes,
-                "transition": transition
+                "transition": transition,
+                "bubble_centroid": bubble_centroid,
+                "bubble_coverage_ratio": bubble_coverage_ratio,
             }
 
-        # Mode 4: Standard Panels -> Dynamic Focal Micro-Zoom (Alternating In / Out: 1.00x <-> 1.080x)
-        base_target = 1.080 if duration >= 3.0 else 1.050
-        target_scale = 1.0 + (base_target - 1.0) * skin_zoom_factor
-
-        if is_zoom_out:
-            animation_type = "focal_zoom_out"
+        # Mode C: Standard / Square / Landscape Panels (usable_v_travel < 160px)
+        # Ultra-Long Duration (> 7.0s): Dual-phase continuous Ken Burns motion (Scale 1.00 -> 1.10 -> 1.00)
+        # Prevents visual stagnation on long narration without jarring cuts
+        if duration > 7.0:
+            animation_type = "dual_shot_cinematic"
+            direction = "zoom_in_out"
+            t_split = round(duration * 0.5, 3)
             keyframes = [
-                {"time": 0.0, "x": focal_x, "y": focal_y, "scale": target_scale},
-                {"time": duration, "x": center_x, "y": center_y, "scale": 1.00}
+                {"time": 0.0, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 0.0},
+                {"time": t_split, "x": focal_x, "y": focal_y, "scale": 1.10, "progress": 0.5},
+                {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 1.0},
+            ]
+            return {
+                "page": page_num,
+                "duration": duration,
+                "animation_type": animation_type,
+                "direction": direction,
+                "easing": easing,
+                "keyframes": keyframes,
+                "transition": transition,
+                "bubble_centroid": bubble_centroid,
+                "bubble_coverage_ratio": bubble_coverage_ratio,
+            }
+
+        # Smooth Ken Burns Focus Zoom In / Zoom Out luân phiên (Scale 1.00 <-> 1.10)
+        # Keeps 100% of panel artwork visible at all times with gentle, cinematic motion
+        if shot_index % 2 == 0:
+            animation_type = "focal_zoom_in"
+            direction = "zoom_in"
+            keyframes = [
+                {"time": 0.0, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 0.0},
+                {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.10, "progress": 1.0}
             ]
         else:
-            animation_type = "focal_zoom_in"
+            animation_type = "focal_zoom_out"
+            direction = "zoom_out"
             keyframes = [
-                {"time": 0.0, "x": center_x, "y": center_y, "scale": 1.00},
-                {"time": duration, "x": focal_x, "y": focal_y, "scale": target_scale}
+                {"time": 0.0, "x": focal_x, "y": focal_y, "scale": 1.10, "progress": 0.0},
+                {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 1.0}
             ]
 
         return {
             "page": page_num,
             "duration": duration,
             "animation_type": animation_type,
+            "direction": direction,
             "easing": easing,
             "keyframes": keyframes,
-            "transition": transition
+            "transition": transition,
+            "bubble_centroid": bubble_centroid,
+            "bubble_coverage_ratio": bubble_coverage_ratio,
         }
+
+
+def interpolate_camera_progress(plan: dict, t_local: float) -> float:
+    keyframes = plan.get("keyframes", [])
+    if not keyframes:
+        return 0.0
+    t0 = keyframes[0]["time"]
+    t1 = keyframes[-1]["time"]
+    if t_local <= t0:
+        return float(keyframes[0].get("progress", 0.0))
+    if t_local >= t1:
+        return float(keyframes[-1].get("progress", 1.0))
+    
+    easing_name = plan.get("easing", "soft_linear_glide")
+    if easing_name == "soft_linear_glide":
+        ease_func = soft_linear_glide
+    elif easing_name == "linear":
+        ease_func = lambda t: t
+    elif easing_name == "easeInOutSine":
+        ease_func = ease_in_out_sine
+    elif easing_name == "easeOutQuart":
+        ease_func = ease_out_quart
+    elif easing_name == "easeInOutCubic":
+        ease_func = ease_in_out_cubic
+    else:
+        ease_func = soft_linear_glide
+
+    dur = t1 - t0
+    if dur <= 0.001:
+        return 0.0
+    local_t = (t_local - t0) / dur
+    return ease_func(local_t)
 
 
 def interpolate_camera_plan(plan: dict, t_local: float) -> tuple:
@@ -1057,15 +1205,19 @@ def interpolate_camera_plan(plan: dict, t_local: float) -> tuple:
     if t_local >= keyframes[-1]["time"]:
         return keyframes[-1]["x"], keyframes[-1]["y"], keyframes[-1]["scale"]
 
-    easing_name = plan.get("easing", "easeInOutSine")
-    if easing_name == "easeInOutSine":
+    easing_name = plan.get("easing", "soft_linear_glide")
+    if easing_name == "soft_linear_glide":
+        ease_func = soft_linear_glide
+    elif easing_name == "linear":
+        ease_func = lambda t: t
+    elif easing_name == "easeInOutSine":
         ease_func = ease_in_out_sine
     elif easing_name == "easeOutQuart":
         ease_func = ease_out_quart
     elif easing_name == "easeInOutCubic":
         ease_func = ease_in_out_cubic
     else:
-        ease_func = lambda t: t
+        ease_func = soft_linear_glide
 
     for i in range(len(keyframes) - 1):
         kf1 = keyframes[i]
@@ -1129,27 +1281,16 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             overlay_path = os.path.join(project_dir, "images", "overlay.png")
         subtitles_enabled = bool(task.payload.get("burn_subtitles", False))
 
-        bgm_path = task.payload.get("bgm_path")
-        enable_bgm = task.payload.get("enable_bgm", False)
-        if not bgm_path and enable_bgm:
-            market_id = (task.payload.get("market_id") or "").strip().lower()
-            bgm_genre = task.payload.get("bgm_genre", "")
-            if market_id in ("us_apocalypse", "korea_apocalypse") or bgm_genre == "apocalypse":
-                default_bgm = os.path.join(project_dir, "static", "bgm", "apocalypse", "01_dark_wasteland_ambient.mp3")
-                if os.path.exists(default_bgm):
-                    bgm_path = default_bgm
-
-        bgm_volume = float(task.payload.get("bgm_volume", 0.18))
-
-        def _render_episode_video_sync_impl(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, bgm_path=None, bgm_volume=0.18, stderr_file=None, stderr_log_path=None):
+        def _render_episode_video_sync_impl(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, stderr_file=None, stderr_log_path=None, min_panel_duration=3.5, hard_floor_duration=3.0, **kwargs):
             from PIL import Image, ImageFilter, ImageEnhance, ImageDraw
             import subprocess
             import numpy as np
             import cv2
+            import math
             
             # Start single unified FFmpeg process with high quality settings
             if "nvenc" in str(working_encoder).lower():
-                extra_args = ["-preset", "p6", "-cq", "19", "-rc", "constqp", "-b:v", "12M"]
+                extra_args = ["-preset", "p4", "-cq", "19", "-rc", "constqp", "-b:v", "12M"]
             elif "amf" in str(working_encoder).lower():
                 extra_args = ["-rc", "cqp", "-qp_i", "19", "-qp_p", "19", "-b:v", "12M"]
             elif "libx264" in str(working_encoder).lower():
@@ -1158,30 +1299,23 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 extra_args = ["-b:v", "6M"]
             
             ep_dir = os.path.dirname(output_video_path)
+            images_pdf_dir = os.path.join(ep_dir, "images_pdf")
             logo_rel = os.path.relpath(logo_path, ep_dir).replace('\\', '/')
             overlay_rel = os.path.relpath(overlay_path, ep_dir).replace('\\', '/')
             
-            has_bgm = bool(bgm_path and os.path.exists(bgm_path))
-            if has_bgm:
-                filter_complex_str = (
-                    f"movie={logo_rel} [logo_raw]; [logo_raw]scale=50:50[logo]; "
-                    f"movie={overlay_rel} [ol_raw]; [ol_raw]scale=1920:1080,format=rgba,colorchannelmixer=aa=0.005[ol]; "
-                    f"[0:v][ol]overlay[temp1]; [temp1][logo]overlay=25:25[v]; "
-                    f"[1:a]aformat=channel_layouts=stereo,aresample=44100,asplit=2[voice_main][voice_sidechain]; "
-                    f"[2:a]aformat=channel_layouts=stereo,aresample=44100,volume={bgm_volume}[bgm_raw]; "
-                    f"[bgm_raw][voice_sidechain]sidechaincompress=threshold=0.08:ratio=4:attack=100:release=600[ducked_bgm]; "
-                    f"[voice_main][ducked_bgm]amix=inputs=2:duration=first:dropout_transition=2,aformat=channel_layouts=stereo[aout]"
-                )
-                audio_inputs = ["-i", audio_path, "-stream_loop", "-1", "-i", bgm_path]
-                audio_maps = ["-map", "[aout]"]
-            else:
+            has_custom_logo = bool(logo_path and os.path.exists(logo_path) and os.path.basename(logo_path) != "logo.png")
+            has_custom_overlay = bool(overlay_path and os.path.exists(overlay_path) and os.path.basename(overlay_path) != "overlay.png")
+
+            audio_inputs = ["-i", audio_path]
+            if has_custom_logo or has_custom_overlay:
                 filter_complex_str = (
                     f"movie={logo_rel} [logo_raw]; [logo_raw]scale=50:50[logo]; "
                     f"movie={overlay_rel} [ol_raw]; [ol_raw]scale=1920:1080,format=rgba,colorchannelmixer=aa=0.005[ol]; "
                     f"[0:v][ol]overlay[temp1]; [temp1][logo]overlay=25:25[v]"
                 )
-                audio_inputs = ["-i", audio_path]
-                audio_maps = ["-map", "1:a"]
+                filter_args = ["-filter_complex", filter_complex_str, "-map", "[v]", "-map", "1:a"]
+            else:
+                filter_args = ["-map", "0:v", "-map", "1:a"]
 
             cmd = [
                 ffmpeg_exe, "-y",
@@ -1190,10 +1324,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 "-s", "1920x1080",
                 "-r", str(fps),
                 "-i", "-",               # Raw video from stdin [0:v]
-            ] + audio_inputs + [
-                "-filter_complex", filter_complex_str,
-                "-map", "[v]",
-            ] + audio_maps + [
+            ] + audio_inputs + filter_args + [
                 "-c:v", working_encoder,
                 "-pix_fmt", "yuv420p"
             ] + extra_args + [
@@ -1222,6 +1353,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             # Create flat list of page displays
             page_displays = []
             current_time = 0.0
+            recent_used_donors = []
             for s_idx, seg in enumerate(segments):
                 end_time = timings[s_idx]["end"] if s_idx < len(timings) else current_time + 3.0
                 segment_duration = end_time - current_time
@@ -1246,51 +1378,98 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             try:
                                 im_bgr = cv2.imread(im_path)
                                 sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
-                                is_bad = bd.get("is_meaningless", False) or sc < 40
+                                bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
+                                char_p = bd.get("character_presence", 0.0)
+                                is_bad = (
+                                    bd.get("is_meaningless", False)
+                                    or sc < 50
+                                    or (bubble_cov > 0.65 and char_p < 40.0)
+                                    or bubble_cov > 0.78
+                                    or char_p < 25.0
+                                )
                             except Exception:
-                                sc, is_bad = 70, False
-                            scored_candidates.append((img_obj, sc, is_bad))
-                    valid_art = [item[0] for item in scored_candidates if not item[2]]
+                                sc, char_p, is_bad = 70, 50.0, False
+                                bd = {}
+                            scored_candidates.append((img_obj, sc, char_p, is_bad, bd.get("is_meaningless", False)))
+                    valid_art = [item[0] for item in scored_candidates if not item[3]]
                     if valid_art:
                         seg_images = valid_art
                         tot_p = sum(float(img.get("priority", 1.0)) for img in seg_images)
                         for img in seg_images:
                             img["priority"] = float(img.get("priority", 1.0)) / max(0.001, tot_p)
                     else:
-                        # All images are junk — find best adjacent page as replacement
+                        # All images are bad, meaningless, low-character, or bubble-heavy — find best adjacent page as replacement
+                        # Ranked by composite score: 60% total + 40% character_presence (character-first priority)
                         best_item = max(scored_candidates, key=lambda x: x[1]) if scored_candidates else None
                         if best_item:
                             bad_page_idx = int(best_item[0]["page"]) - 1
-                            best_score = -1
+                            best_composite = -1
                             best_idx = bad_page_idx
-                            for delta in [1, -1, 2, -2, 3, -3]:
+                            for delta in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5]:
                                 candidate = bad_page_idx + delta
                                 if 0 <= candidate < len(image_files):
+                                    cand_page = candidate + 1
                                     im_path = os.path.join(images_blur_dir, image_files[candidate])
                                     if not os.path.exists(im_path):
                                         im_path = os.path.join(images_pdf_dir, image_files[candidate])
                                     try:
                                         im_bgr = cv2.imread(im_path)
                                         sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
-                                        if not bd.get("is_meaningless", False) and sc > best_score:
-                                            best_score = sc
+                                        char_p = bd.get("character_presence", 0.0)
+                                        bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
+                                        # Stateful Deduplication Penalty (v1.7.0): penalize recently used donors to avoid repeated imagery
+                                        recent_penalty = 25.0 if cand_page in recent_used_donors[-2:] else 0.0
+                                        composite = sc * 0.60 + char_p * 0.40 - recent_penalty
+                                        # Adaptive Donor Qualification: char_p >= 30.0 covers shaded/hooded character portraits (sc >= 58)
+                                        donor_valid = (
+                                            not bd.get("is_meaningless", False)
+                                            and bubble_cov < 0.50
+                                            and ((char_p >= 40.0 and sc >= 55) or (char_p >= 30.0 and sc >= 58))
+                                            and composite > best_composite
+                                        )
+                                        if donor_valid:
+                                            best_composite = composite
                                             best_idx = candidate
                                     except Exception:
                                         pass
-                            if best_score >= 40:
-                                seg_images = [{"page": best_idx + 1, "priority": 1.0}]
-                                print(f"  [Stage10] Replaced junk page {bad_page_idx + 1} with adjacent page {best_idx + 1} (score={best_score})")
-                            # else: keep original — no good replacement found
+                            if best_composite >= 50:
+                                chosen_page = best_idx + 1
+                                seg_images = [{"page": chosen_page, "priority": 1.0}]
+                                recent_used_donors.append(chosen_page)
+                                print(f"  [Stage10] Replaced low-quality/junk/bubble page {bad_page_idx + 1} with character page {chosen_page} (composite={best_composite:.1f})")
+                            else:
+                                # Fallback: drop any explicitly meaningless panels from seg_images if better candidates exist
+                                non_meaningless = [c[0] for c in scored_candidates if not c[4] and c[1] >= 40]
+                                if non_meaningless:
+                                    seg_images = [non_meaningless[0]]
+                                elif best_item:
+                                    seg_images = [{"page": best_item[0]["page"], "priority": 1.0}]
 
-                # Guardrail against rapid image transitions:
-                # Ensure each image is displayed for a comfortable duration (minimum 2.5 seconds).
-                # If a segment is too short for multiple images, keep only the highest-priority image(s).
-                min_image_duration = 2.5
-                if seg_images and len(seg_images) > 1 and (segment_duration / len(seg_images)) < min_image_duration:
-                    max_allowed = max(1, int(segment_duration // min_image_duration))
+                # Cinematic Pacing Guardrail & Dynamic Hero Image Selector (Industry Standard >= 3.5s):
+                # If a segment is too short for multiple images, keep only the highest-scoring Hero Image(s).
+                if seg_images and len(seg_images) > 1 and (segment_duration / len(seg_images)) < min_panel_duration:
+                    max_allowed = max(1, int(segment_duration // min_panel_duration))
+
+                    def candidate_hero_score(img_dict):
+                        p_num = int(img_dict.get("page", 1)) - 1
+                        base_priority = float(img_dict.get("priority", 1.0))
+                        if 0 <= p_num < len(image_files):
+                            im_p = os.path.join(images_blur_dir, image_files[p_num])
+                            if not os.path.exists(im_p):
+                                im_p = os.path.join(images_pdf_dir, image_files[p_num])
+                            try:
+                                im_mat = cv2.imread(im_p)
+                                sc, bd = VisualSemanticScorer.calculate_score(im_mat)
+                                char_p = bd.get("character_presence", 0.0)
+                                bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
+                                return (sc * 0.60 + char_p * 0.40 - bubble_cov * 15.0) * base_priority
+                            except Exception:
+                                pass
+                        return 50.0 * base_priority
+
                     sorted_indices = sorted(
                         range(len(seg_images)),
-                        key=lambda i: float(seg_images[i].get("priority", 0)),
+                        key=lambda i: candidate_hero_score(seg_images[i]),
                         reverse=True
                     )
                     kept_indices = set(sorted_indices[:max_allowed])
@@ -1329,11 +1508,11 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 else:
                     merged_page_displays.append(pd)
 
-            # Hard Floor (>= 1.8s) Display Guardrail:
-            # Eliminate sub-1.8s flicker displays by merging duration into adjacent display
+            # Hard Floor (>= 3.0s default) Display Guardrail:
+            # Eliminate sub-3.0s flicker displays by merging duration into adjacent display
             cleaned_page_displays = []
             for pd in merged_page_displays:
-                if cleaned_page_displays and pd["duration"] < 1.8:
+                if cleaned_page_displays and pd["duration"] < hard_floor_duration:
                     cleaned_page_displays[-1]["duration"] += pd["duration"]
                     cleaned_page_displays[-1]["end_time"] = (
                         cleaned_page_displays[-1]["start_time"] + cleaned_page_displays[-1]["duration"]
@@ -1341,8 +1520,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 else:
                     cleaned_page_displays.append(pd)
 
-            # If the very first display is < 1.8s and there are subsequent displays, merge into next display
-            if len(cleaned_page_displays) > 1 and cleaned_page_displays[0]["duration"] < 1.8:
+            # If the very first display is < hard_floor_duration and there are subsequent displays, merge into next display
+            if len(cleaned_page_displays) > 1 and cleaned_page_displays[0]["duration"] < hard_floor_duration:
                 first = cleaned_page_displays.pop(0)
                 cleaned_page_displays[0]["duration"] += first["duration"]
                 cleaned_page_displays[0]["start_time"] = first["start_time"]
@@ -1362,7 +1541,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             # Precompute bounds, focal points, and plans
             bounds_cache_path = os.path.join(ep_dir, "content_bounds_cache.json")
             bounds_cache = {}
-            if os.path.exists(bounds_cache_path):
+            if not kwargs.get("force_render", False) and os.path.exists(bounds_cache_path):
                 try:
                     with open(bounds_cache_path, "r", encoding="utf-8") as f:
                         bounds_cache = json.load(f)
@@ -1381,14 +1560,16 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     focal_point = tuple(cached_data["focal_point"])
                     skin_ratio = float(cached_data["skin_ratio"])
                     bubble_centroid = tuple(cached_data["bubble_centroid"]) if "bubble_centroid" in cached_data else None
+                    bubble_coverage_ratio = float(cached_data.get("bubble_coverage_ratio", 0.0))
                 elif isinstance(cached_data, dict) and "bounds" in cached_data and "focal_point" in cached_data:
                     # Legacy cache entry without skin_ratio — recompute
                     try:
                         with Image.open(img_path) as img:
-                            bounds, focal_point, skin_ratio, bubble_centroid = detect_clean_panel_and_focal_point(img)
+                            bounds, focal_point, skin_ratio, bubble_centroid, bubble_coverage_ratio = detect_clean_panel_and_focal_point(img)
                             bounds_cache[img_file] = {
                                 "bounds": list(bounds), "focal_point": list(focal_point),
-                                "skin_ratio": skin_ratio, "bubble_centroid": list(bubble_centroid)
+                                "skin_ratio": skin_ratio, "bubble_centroid": list(bubble_centroid),
+                                "bubble_coverage_ratio": bubble_coverage_ratio
                             }
                             dirty_cache = True
                     except Exception:
@@ -1396,28 +1577,33 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         focal_point = tuple(cached_data["focal_point"])
                         skin_ratio = 0.0
                         bubble_centroid = None
+                        bubble_coverage_ratio = 0.0
                 elif isinstance(cached_data, list) and len(cached_data) == 4:
                     bounds = tuple(cached_data)
                     try:
                         with Image.open(img_path) as img:
-                            _, focal_point_new, skin_ratio, bubble_centroid = detect_clean_panel_and_focal_point(img)
+                            _, focal_point_new, skin_ratio, bubble_centroid, bubble_coverage_ratio = detect_clean_panel_and_focal_point(img)
                             focal_point = focal_point_new
                     except Exception:
                         focal_point = (bounds[2] / 2.0, bounds[3] / 2.0)
                         skin_ratio = 0.0
                         bubble_centroid = None
+                        bubble_coverage_ratio = 0.0
                     bounds_cache[img_file] = {
                         "bounds": list(bounds), "focal_point": list(focal_point),
-                        "skin_ratio": skin_ratio, "bubble_centroid": list(bubble_centroid) if bubble_centroid else [bounds[2] / 2.0, bounds[3] / 2.0]
+                        "skin_ratio": skin_ratio,
+                        "bubble_centroid": list(bubble_centroid) if bubble_centroid else [bounds[2] / 2.0, bounds[3] / 2.0],
+                        "bubble_coverage_ratio": bubble_coverage_ratio
                     }
                     dirty_cache = True
                 else:
                     try:
                         with Image.open(img_path) as img:
-                            bounds, focal_point, skin_ratio, bubble_centroid = detect_clean_panel_and_focal_point(img)
+                            bounds, focal_point, skin_ratio, bubble_centroid, bubble_coverage_ratio = detect_clean_panel_and_focal_point(img)
                             bounds_cache[img_file] = {
                                 "bounds": list(bounds), "focal_point": list(focal_point),
-                                "skin_ratio": skin_ratio, "bubble_centroid": list(bubble_centroid)
+                                "skin_ratio": skin_ratio, "bubble_centroid": list(bubble_centroid),
+                                "bubble_coverage_ratio": bubble_coverage_ratio
                             }
                             dirty_cache = True
                     except Exception:
@@ -1425,6 +1611,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         focal_point = (960.0, 540.0)
                         skin_ratio = 0.0
                         bubble_centroid = None
+                        bubble_coverage_ratio = 0.0
                 
                 is_last_page = (idx == len(page_displays) - 1)
                 trans = "dip_to_black" if is_last_page else "cross_fade"
@@ -1433,6 +1620,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     pd["page"], pd["duration"], bounds,
                     focal_point=focal_point, transition=trans,
                     skin_ratio=skin_ratio, bubble_centroid=bubble_centroid,
+                    bubble_coverage_ratio=bubble_coverage_ratio,
                     shot_index=idx
                 )
                 plans.append(plan)
@@ -1444,56 +1632,83 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 except Exception:
                     pass
 
-            # Page frame rendering helper (Fixed-Dimension Viewport & Flat Edge-to-Edge Card)
-            def render_page_frame(img, bg_image, bounds, plan, t_local, card_dims):
+            # Page frame rendering helper (Wide Framing, Bubble-Exclusion & Hybrid Motion with OpenCV SIMD)
+            def render_page_frame(img_rgb, bg_image, bounds, plan, t_local, card_dims):
                 cb_x, cb_y, W_c, H_c = bounds
                 card_x, card_y, card_w, card_h, aspect_card = card_dims
                 x_focal, y_focal, scale = interpolate_camera_plan(plan, t_local)
                 scale = max(1.0, float(scale))
 
-                # Viewport base dimensions matching the card's exact aspect ratio
-                if aspect_card <= (W_c / max(1.0, float(H_c))):
-                    h_base = float(H_c)
-                    w_base = min(float(W_c), h_base * aspect_card)
+                # True Adaptive Safe-Zone Framing (v1.8.0):
+                # Tall webtoon strips with ample sliding travel (usable_v >= 160): w_base = W_c and h_base = W_c / aspect_card
+                # Standard / Square / Low-travel panels (usable_v < 160): Fit full panel artwork (w_base = W_c, h_base = H_c)
+                aspect_nat = W_c / float(max(1, H_c))
+                H_img, W_img = img_rgb.shape[:2]
+                usable_v = H_c - (W_c / aspect_card)
+
+                if aspect_nat < 0.70 and usable_v >= 160:
+                    w_base = float(W_c)
+                    h_base = w_base / aspect_card
+                    if h_base > float(H_c):
+                        h_base = float(H_c)
+                        w_base = h_base * aspect_card
                 else:
                     w_base = float(W_c)
-                    h_base = min(float(H_c), w_base / aspect_card)
+                    h_base = float(H_c)
+                    # Maintain isotropic scale with zero anamorphic distortion
+                    if aspect_card > 0.001:
+                        if (w_base / h_base) < aspect_card:
+                            w_base = h_base * aspect_card
+                        elif (w_base / h_base) > aspect_card:
+                            h_base = w_base / aspect_card
 
+                # Clamp to actual image bounds to prevent out-of-bounds crop
+                w_base = min(w_base, float(W_img) - cb_x)
+                h_base = min(h_base, float(H_img) - cb_y)
+
+                # Dynamic Camera Viewport: scales smoothly with zoom (Ken Burns)
                 w_cam = w_base / scale
                 h_cam = h_base / scale
 
-                cx_ideal = cb_x + float(x_focal)
-                cy_ideal = cb_y + float(y_focal)
-
+                # Travel boundaries inside active panel
                 cx_min = cb_x + w_cam / 2.0
                 cx_max = cb_x + W_c - w_cam / 2.0
-                cx = cx_min if cx_min >= cx_max else float(np.clip(cx_ideal, cx_min, cx_max))
 
                 cy_min = cb_y + h_cam / 2.0
                 cy_max = cb_y + H_c - h_cam / 2.0
+
+                # Keyframe-Driven Camera Centering (v1.7.0):
+                # Directly honors keyframe coordinates (x_focal, y_focal) from CameraPlanner,
+                # guaranteeing velocity clamping, speech bubble exclusion margins, and smooth gliding.
+                cy_ideal = cb_y + float(y_focal)
                 cy = cy_min if cy_min >= cy_max else float(np.clip(cy_ideal, cy_min, cy_max))
 
-                box_to_crop = (cx - w_cam / 2.0, cy - h_cam / 2.0, cx + w_cam / 2.0, cy + h_cam / 2.0)
+                cx_ideal = cb_x + float(x_focal)
+                cx = cx_min if cx_min >= cx_max else float(np.clip(cx_ideal, cx_min, cx_max))
 
-                # Sub-pixel float crop & resize directly to fixed card dimensions (100% rock-solid, zero jitter)
-                fg_resized = img.resize((card_w, card_h), resample=Image.Resampling.BICUBIC, box=box_to_crop)
+                x1 = cx - w_cam / 2.0
+                y1 = cy - h_cam / 2.0
+                x2 = cx + w_cam / 2.0
+                y2 = cy + h_cam / 2.0
 
-                # Apply color enhancement (Vibrance & Contrast & Sharpness)
-                enh_color = ImageEnhance.Color(fg_resized).enhance(1.06)
-                enh_cont = ImageEnhance.Contrast(enh_color).enhance(1.04)
-                enh_sharp = ImageEnhance.Sharpness(enh_cont).enhance(1.06)
-                fg_enhanced = enh_sharp
+                # High-speed sub-pixel float crop & resize via OpenCV C++ SIMD warpAffine
+                sx = float(card_w) / max(0.001, (x2 - x1))
+                sy = float(card_h) / max(0.001, (y2 - y1))
+                M = np.array([
+                    [sx, 0.0, -x1 * sx],
+                    [0.0, sy, -y1 * sy]
+                ], dtype=np.float32)
 
-                # Flat clean frame paste without 3D shadow or rounded corners
+                fg_panel = cv2.warpAffine(
+                    img_rgb, M, (card_w, card_h),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_REPLICATE
+                )
+
+                # Composite directly onto background copy in C++ memory
                 final_frame = bg_image.copy()
-                final_frame.paste(fg_enhanced, (card_x, card_y))
-
-                fg_resized.close()
-                enh_color.close()
-                enh_cont.close()
-                fg_enhanced.close()
+                final_frame[card_y:card_y+card_h, card_x:card_x+card_w] = fg_panel
                 return final_frame
-
 
             # Ensure video duration is aligned with audio duration to prevent cutoffs
             audio_dur = 0.0
@@ -1528,24 +1743,36 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     H_c = max(10, H_c)
                     aspect_nat = W_c / float(H_c)
 
-                    if aspect_nat < 0.55:
-                        # Smart viewport for ultra-tall pages: widen the card to reduce
-                        # pillarbox and let the camera zoom into the character region.
-                        # Clamp between 9:16 (0.5625) and 3:4 (0.75).
-                        aspect_card = max(0.5625, min(0.75, aspect_nat * 1.4))
+                    # True Adaptive Card Dimensions (v1.8.0):
+                    # Preserves 100% of panel artwork without arbitrary cropping or decapitation
+                    usable_v = H_c - (W_c / 0.68)
+                    if aspect_nat < 0.70 and usable_v >= 160:
+                        # Tall webtoon scroll panel with ample vertical headroom -> pillarbox card (0.68) for smooth pan
+                        aspect_card = 0.68
+                        card_h = 1080
+                        card_w = max(10, min(1920, int(round(card_h * aspect_card))))
+                        card_x = (1920 - card_w) // 2
+                        card_y = 0
+                    elif aspect_nat <= 16.0 / 9.0:
+                        # Standard / Square / Portrait / Landscape panel -> Fit height 1080, width expands naturally
+                        aspect_card = max(0.56, aspect_nat)
+                        card_h = 1080
+                        card_w = max(10, min(1920, int(round(card_h * aspect_card))))
+                        card_x = (1920 - card_w) // 2
+                        card_y = 0
                     else:
-                        # Normal pages: floor raised from 0.25 to 0.50 (Change #6)
-                        aspect_card = max(0.50, min(16.0 / 9.0, aspect_nat))
+                        # Ultra-wide panorama (AR > 1.777) -> Fit width 1920, height centered
+                        aspect_card = aspect_nat
+                        card_w = 1920
+                        card_h = max(10, min(1080, int(round(card_w / aspect_card))))
+                        card_x = 0
+                        card_y = (1080 - card_h) // 2
 
-                    card_h = 1080
-                    card_w = max(10, min(1920, int(round(card_h * aspect_card))))
-                    card_x = (1920 - card_w) // 2
-                    card_y = 0
                     card_dims_map[f_name] = (card_x, card_y, card_w, card_h, aspect_card)
             
             def get_img(img_file, t):
                 if img_file not in loaded_images:
-                    # Close unused images
+                    # Clean up unused cached arrays to keep memory footprint low
                     for k in list(loaded_images.keys()):
                         still_needed = False
                         for pd_check in page_displays:
@@ -1553,51 +1780,49 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 still_needed = True
                                 break
                         if not still_needed:
-                            try:
-                                loaded_images[k].close()
-                            except Exception:
-                                pass
                             del loaded_images[k]
                             if k in cached_backgrounds:
-                                try:
-                                    cached_backgrounds[k].close()
-                                except Exception:
-                                    pass
                                 del cached_backgrounds[k]
-                                    
+
                     img_path = os.path.join(images_blur_dir, img_file)
-                    img_open = Image.open(img_path)
-                    if img_open.mode != "RGB":
-                        img_open = img_open.convert("RGB")
-                    loaded_images[img_file] = img_open
+                    with Image.open(img_path) as pil_im:
+                        if pil_im.mode != "RGB":
+                            pil_im = pil_im.convert("RGB")
+                        # Pre-enhance quality ONCE on load (Vibrance 1.06, Contrast 1.04, Sharpness 1.06)
+                        enh_color = ImageEnhance.Color(pil_im).enhance(1.06)
+                        enh_cont = ImageEnhance.Contrast(enh_color).enhance(1.04)
+                        enh_sharp = ImageEnhance.Sharpness(enh_cont).enhance(1.06)
+                        img_arr = np.array(enh_sharp, dtype=np.uint8)
+                    loaded_images[img_file] = img_arr
                 return loaded_images[img_file]
 
-            def get_blurred_background(img_file, img, bounds):
+            def get_blurred_background(img_file, img_rgb, bounds):
                 if img_file not in cached_backgrounds:
                     cb_x, cb_y, W_c, H_c = bounds
-                    cropped = img.crop((cb_x, cb_y, cb_x + W_c, cb_y + H_c))
-                    
-                    bg_scale = max(1920 / W_c, 1080 / H_c)
-                    bg_w = max(1920, int(W_c * bg_scale))
-                    bg_h = max(1080, int(H_c * bg_scale))
-                    bg_resized = cropped.resize((bg_w, bg_h), Image.Resampling.BOX)
-                    cropped.close()
-                    
+                    H_img, W_img = img_rgb.shape[:2]
+                    x1 = max(0, min(W_img - 1, int(cb_x)))
+                    y1 = max(0, min(H_img - 1, int(cb_y)))
+                    x2 = max(x1 + 1, min(W_img, int(cb_x + W_c)))
+                    y2 = max(y1 + 1, min(H_img, int(cb_y + H_c)))
+                    cropped = img_rgb[y1:y2, x1:x2]
+
+                    crop_h, crop_w = cropped.shape[:2]
+                    bg_scale = max(1920.0 / max(1, crop_w), 1080.0 / max(1, crop_h))
+                    bg_w = max(1920, int(round(crop_w * bg_scale)))
+                    bg_h = max(1080, int(round(crop_h * bg_scale)))
+                    bg_resized = cv2.resize(cropped, (bg_w, bg_h), interpolation=cv2.INTER_AREA)
+
                     bg_x1 = (bg_w - 1920) // 2
                     bg_y1 = (bg_h - 1080) // 2
-                    bg_cropped = bg_resized.crop((bg_x1, bg_y1, bg_x1 + 1920, bg_y1 + 1080))
-                    bg_resized.close()
-                    
-                    bg_small = bg_cropped.resize((160, 90), Image.Resampling.BOX)
-                    bg_small_blurred = bg_small.filter(ImageFilter.GaussianBlur(radius=8))
-                    bg_blurred = bg_small_blurred.resize((1920, 1080), Image.Resampling.BILINEAR)
-                    bg_small.close()
-                    bg_small_blurred.close()
-                    bg_cropped.close()
-                    
-                    enhancer = ImageEnhance.Brightness(bg_blurred)
-                    cached_backgrounds[img_file] = enhancer.enhance(0.42)
-                    bg_blurred.close()
+                    bg_cropped = bg_resized[bg_y1:bg_y1+1080, bg_x1:bg_x1+1920]
+
+                    # High performance two-pass Gaussian blur (downscale -> blur -> upscale)
+                    bg_small = cv2.resize(bg_cropped, (160, 90), interpolation=cv2.INTER_AREA)
+                    bg_small_blurred = cv2.GaussianBlur(bg_small, (15, 15), 5)
+                    bg_blurred = cv2.resize(bg_small_blurred, (1920, 1080), interpolation=cv2.INTER_LINEAR)
+
+                    # Ambient dark styling (0.42 brightness)
+                    cached_backgrounds[img_file] = (bg_blurred.astype(np.float32) * 0.42).astype(np.uint8)
                 return cached_backgrounds[img_file]
 
             active_idx = 0
@@ -1639,7 +1864,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             t_trans_start = pd_curr["end_time"] - t_trans_dur
                             
                     if in_transition:
-                        # Blend current and next page
+                        # Blend current and next page with C++ SIMD addWeighted
                         t_local_curr = t - pd_curr["start_time"]
                         img_curr_obj = get_img(pd_curr["image_file"], t)
                         curr_bounds = get_cached_bounds(pd_curr["image_file"])
@@ -1656,18 +1881,11 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         bg_next_obj = get_blurred_background(pd_next["image_file"], img_next_obj, next_bounds)
                         frame_next = render_page_frame(img_next_obj, bg_next_obj, next_bounds, plans[next_idx], t_local_next, next_card_dims)
                         
-                        # Convert both to numpy arrays to blend
-                        np_curr = np.array(frame_curr)
-                        np_next = np.array(frame_next)
-                        frame_curr.close()
-                        frame_next.close()
-                        
                         alpha_linear = (t - t_trans_start) / max(0.001, t_trans_dur)
                         alpha_linear = np.clip(alpha_linear, 0.0, 1.0)
                         # Smooth sinusoidal ease-in-out cross-dissolve
                         alpha = 0.5 * (1.0 - math.cos(math.pi * alpha_linear))
-                        blended_np = cv2.addWeighted(np_curr, 1.0 - alpha, np_next, alpha, 0)
-                        final_frame = Image.fromarray(blended_np)
+                        final_frame = cv2.addWeighted(frame_curr, 1.0 - alpha, frame_next, alpha, 0)
                     else:
                         # Single active page
                         t_local = t - pd_curr["start_time"]
@@ -1682,41 +1900,26 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         alpha_linear = (t - (total_duration - T_trans)) / max(0.001, T_trans)
                         alpha_linear = np.clip(alpha_linear, 0.0, 1.0)
                         alpha = 0.5 * (1.0 - math.cos(math.pi * alpha_linear))
-                        frame_np = np.array(final_frame)
-                        final_frame.close()
-                        # Multiply by (1 - alpha)
-                        frame_np = (frame_np * (1.0 - alpha)).astype(np.uint8)
-                        final_frame = Image.fromarray(frame_np)
+                        final_frame = cv2.convertScaleAbs(final_frame, alpha=1.0 - alpha)
  
-                    # Draw subtitles
+                    # Draw subtitles (if enabled)
                     if active_sub:
-                        draw_subtitles_on_frame(final_frame, active_sub)
+                        pil_frame = Image.fromarray(final_frame)
+                        draw_subtitles_on_frame(pil_frame, active_sub)
+                        final_frame = np.array(pil_frame)
  
-                    # Output raw bytes to FFmpeg pipe
+                    # Output raw bytes directly from C-contiguous array to FFmpeg pipe
                     try:
                         proc.stdin.write(final_frame.tobytes())
                     except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError) as write_err:
                         if is_ffmpeg_pipe_closed_error(write_err):
                             pipe_broken = True
-                            final_frame.close()
                             break
                         else:
-                            final_frame.close()
                             raise
-                    final_frame.close()
                     
             finally:
-                for img in loaded_images.values():
-                    try:
-                        img.close()
-                    except Exception:
-                        pass
                 loaded_images.clear()
-                for img in cached_backgrounds.values():
-                    try:
-                        img.close()
-                    except Exception:
-                        pass
                 cached_backgrounds.clear()
                 
             try:
@@ -1743,15 +1946,17 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 except Exception:
                     pass
 
-        def render_episode_video_sync(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, bgm_path=None, bgm_volume=0.18):
+        def render_episode_video_sync(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, min_panel_duration=3.5, hard_floor_duration=3.0, **kwargs):
             stderr_log_path = os.path.join(os.path.dirname(output_video_path), "ffmpeg_render_stderr.log")
             stderr_file = open(stderr_log_path, "w", encoding="utf-8")
             try:
                 return _render_episode_video_sync_impl(
                     images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe,
                     working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag,
-                    srt_filename, fps=fps, bgm_path=bgm_path, bgm_volume=bgm_volume,
-                    stderr_file=stderr_file, stderr_log_path=stderr_log_path
+                    srt_filename, fps=fps,
+                    stderr_file=stderr_file, stderr_log_path=stderr_log_path,
+                    min_panel_duration=min_panel_duration, hard_floor_duration=hard_floor_duration,
+                    **kwargs
                 )
             finally:
                 if not stderr_file.closed:
@@ -1784,7 +1989,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             recap_json_path = os.path.join(ep_dir, "recap.json")
             srt_path = os.path.join(ep_dir, "transcript.srt")
             audio_path = os.path.join(ep_dir, "audio.mp3")
-            output_video_path = os.path.join(ep_dir, "video.mp4")
+            video_filename = task.payload.get("video_filename", "video.mp4")
+            output_video_path = os.path.join(ep_dir, video_filename)
             cache = EpisodeStageCache(ep_dir)
 
             if not os.path.exists(recap_json_path) or not os.path.exists(srt_path) or not os.path.exists(audio_path):
@@ -1849,6 +2055,23 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         "concurrency": task.payload.get("concurrency", 5),
                     },
                 )
+
+                # On-Demand Inpainting on Selected Recap Pages (Pillar 3)
+                if task.payload.get("remove_text", False) or task.payload.get("auto_remove_text", False):
+                    try:
+                        from tools.text_remover.comic_text_remover import process_image
+                        await context.log(f"Tập {ep}: Bắt đầu xóa chữ/bóng thoại tự động trên {len(selected_files)} trang được chọn...", "info")
+                        for sel_f in selected_files:
+                            target_img_p = os.path.join(images_blur_dir, sel_f)
+                            if os.path.exists(target_img_p):
+                                try:
+                                    process_image(target_img_p, target_img_p, conf_threshold=0.35, inpaint_radius=3)
+                                except Exception as text_err:
+                                    await context.log(f"  [Warn] Lỗi xóa chữ trên {sel_f}: {text_err}", "warning")
+                        await context.log(f"Tập {ep}: Hoàn thành xóa chữ/bóng thoại trên các trang hiển thị.", "success")
+                    except Exception as imp_err:
+                        await context.log(f"  [Warn] Không thể nạp module xóa chữ: {imp_err}", "warning")
+
                 cache.commit(
                     stage="selected_moderation",
                     fingerprint=moderation_fingerprint,
@@ -1861,7 +2084,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 ep,
                 input_paths=[images_blur_dir, recap_json_path, srt_path, audio_path, logo_path, overlay_path],
             )
-            if cache.is_current(
+            force_render = bool(task.payload.get("force_render", False))
+            if not force_render and cache.is_current(
                 stage="video",
                 fingerprint=fingerprint,
                 outputs=[output_video_path],
@@ -1870,7 +2094,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 await context.log(f"Tập {ep}: Cache video hợp lệ. Bỏ qua rendering.", "success")
                 if "final_videos" not in task.artifacts:
                     task.artifacts["final_videos"] = {}
-                task.artifacts["final_videos"][str(ep)] = f"/downloads/{task.artifacts.get('download_folder_name')}/episode_{ep}/video.mp4"
+                task.artifacts["final_videos"][str(ep)] = f"/downloads/{task.artifacts.get('download_folder_name')}/episode_{ep}/{video_filename}"
                 await context.complete_episode(ep)
                 async with progress_lock:
                     completed_eps_count += 1
@@ -1895,6 +2119,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
 
             working_encoder = get_working_encoder(ffmpeg_exe, os.path.join(images_blur_dir, image_files[0]))
             fps = task.payload.get("fps", 30)
+            min_panel_duration = float(task.payload.get("min_panel_duration", 3.5))
+            hard_floor_duration = float(task.payload.get("hard_floor_duration", 3.0))
 
             # Compile episode directly in one single pass
             temp_video_path = output_video_path + ".tmp.mp4"
@@ -1906,7 +2132,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     images_blur_dir, image_files, segments, timings, temp_video_path,
                     ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path,
                     subtitles_enabled, "transcript.srt", fps,
-                    bgm_path, bgm_volume
+                    min_panel_duration, hard_floor_duration,
+                    force_render=force_render
                 )
             except Exception as render_error:
                 if not can_recover_ffmpeg_pipe_output(render_error, temp_video_path):
@@ -1924,7 +2151,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
 
             if "final_videos" not in task.artifacts:
                 task.artifacts["final_videos"] = {}
-            task.artifacts["final_videos"][str(ep)] = f"/downloads/{task.artifacts.get('download_folder_name')}/episode_{ep}/video.mp4"
+            task.artifacts["final_videos"][str(ep)] = f"/downloads/{task.artifacts.get('download_folder_name')}/episode_{ep}/{video_filename}"
 
             await context.complete_episode(ep)
             async with progress_lock:

@@ -15,7 +15,8 @@ MODERATION_MODEL_VERSION = "grounding-dino-base+sam-vit-base:v1"
 MODERATION_PROMPT_VERSION = "sensitive-comic-regions:v1"
 MODERATION_PROMPT = (
     "breast. buttocks. genitalia. nude body. male chest. exposed torso. "
-    "underwear. bikini. speech bubble. comic text. written words."
+    "underwear. bikini. speech bubble. comic text. written words. "
+    "blood. wound. injured person. corpse."
 )
 SAFETY_MARKERS = (
     "safety policy",
@@ -28,6 +29,11 @@ SAFETY_MARKERS = (
     "sexually explicit",
     "sexual content",
     "graphic nudity",
+    "graphic violence",
+    "violent content",
+    "can't help with that image",
+    "cannot help with that image",
+    "against my safety guidelines",
     "nội dung nhạy cảm",
     "chính sách an toàn",
 )
@@ -80,7 +86,9 @@ def list_image_files(directory: str | Path) -> list[str]:
     return sorted(
         item.name
         for item in root.iterdir()
-        if item.is_file() and item.suffix.lower() in IMAGE_SUFFIXES
+        if item.is_file()
+        and item.suffix.lower() in IMAGE_SUFFIXES
+        and not item.stem.endswith(('_orig', '_backup', '_tmp', '_mask'))
     )
 
 

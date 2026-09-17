@@ -34,6 +34,7 @@ from moderation_utils import (
     list_image_files,
     prepare_safe_pdf_bundle,
     should_use_safety_fallback,
+    is_safety_refusal,
 )
 
 def validate_recap_json(file_path):
@@ -137,8 +138,9 @@ class Stage0_ProjectInit(BaseStage):
         
         project_dir = os.path.dirname(os.path.abspath(__file__))
         identity_hash = source_hash(context.task.comic_url)
-        download_folder_name = f"{sanitized_title}_{context.task.from_episode}_{context.task.to_episode}_{context.task.payload.get('language', 'en')}_{identity_hash}"
-        download_dir = os.path.join(project_dir, "downloads", download_folder_name)
+        default_folder_name = f"{sanitized_title}_{context.task.from_episode}_{context.task.to_episode}_{context.task.payload.get('language', 'en')}_{identity_hash}"
+        download_dir = context.task.artifacts.get("download_dir") or os.path.join(project_dir, "downloads", default_folder_name)
+        download_folder_name = os.path.basename(download_dir)
         
         context.task.artifacts["download_folder_name"] = download_folder_name
         context.task.artifacts["download_dir"] = download_dir
@@ -1225,6 +1227,34 @@ class Stage5_GeminiAutomation(BaseStage):
         }
         """
 
+        async def generate_with_gemini_api(target_pdf, target_prompt):
+            api_key = os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                return None
+            try:
+                from google import genai
+                from google.genai import types
+                client = genai.Client(api_key=api_key)
+                with open(target_pdf, "rb") as f:
+                    pdf_bytes = f.read()
+                
+                model_name = task.payload.get("api_fallback_model", "gemini-2.5-flash")
+                loop = asyncio.get_running_loop()
+                def _call_api():
+                    return client.models.generate_content(
+                        model=model_name,
+                        contents=[
+                            types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                            target_prompt,
+                        ]
+                    )
+                resp = await loop.run_in_executor(None, _call_api)
+                if resp and resp.text:
+                    return resp.text
+            except Exception as api_err:
+                print(f"Gemini API fallback error: {api_err}")
+            return None
+
         async def process_episode_vlm(ep):
             nonlocal completed_eps_count
             vlm_name = "Gemini"
@@ -1310,13 +1340,13 @@ class Stage5_GeminiAutomation(BaseStage):
                 pdf_path = raw_pdf_path
                 fingerprint = raw_gemini_fingerprint
 
-            if cache.is_current(
+            if validate_recap_json(recap_json_path) or cache.is_current(
                 stage="gemini",
                 fingerprint=fingerprint,
                 outputs=[raw_response_path, recap_json_path],
                 validate=lambda: validate_recap_json(recap_json_path),
             ):
-                await context.log(f"Tập {ep}: Cache Gemini hợp lệ. Bỏ qua automation.", "success")
+                await context.log(f"Tập {ep}: Cache Gemini hợp lệ / recap.json đã tồn tại. Bỏ qua automation.", "success")
                 try:
                     from story_memory import StoryMemory
                     memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
@@ -1387,8 +1417,9 @@ class Stage5_GeminiAutomation(BaseStage):
                     if attempt_task is not None:
                         attempt_task.cancel()
 
+                hard_attempt_deadline = time.monotonic() + min(timeout, 240)
                 timeout_handle = asyncio.get_running_loop().call_later(
-                    max(0.0, attempt_deadline - time.monotonic()),
+                    max(0.0, min(attempt_deadline, hard_attempt_deadline) - time.monotonic()),
                     cancel_timed_out_attempt,
                 )
 
@@ -1396,8 +1427,9 @@ class Stage5_GeminiAutomation(BaseStage):
                     nonlocal timeout_handle
                     if timeout_handle is not None:
                         timeout_handle.cancel()
+                    remaining_to_hard = max(1.0, hard_attempt_deadline - time.monotonic())
                     timeout_handle = asyncio.get_running_loop().call_later(
-                        max(5.0, additional_seconds),
+                        min(max(5.0, additional_seconds), remaining_to_hard),
                         cancel_timed_out_attempt,
                     )
                 page = None
@@ -1610,12 +1642,13 @@ class Stage5_GeminiAutomation(BaseStage):
                     gen_start = time.time()
                     response_text = ""
                     error_reason = None
-                    response_deadline = time.monotonic() + timeout
-                    extend_attempt_timeout(timeout)
+                    response_deadline = min(time.monotonic() + timeout, hard_attempt_deadline)
+                    extend_attempt_timeout(min(timeout, 180))
                     unchanged_seconds = 0
+                    no_text_seconds = 0
                     last_checked_text = ""
                     
-                    while time.monotonic() < response_deadline:
+                    while time.monotonic() < response_deadline and time.monotonic() < hard_attempt_deadline:
                         if context.cancel_token.is_cancelled():
                             break
                         await asyncio.sleep(3)
@@ -1652,33 +1685,18 @@ class Stage5_GeminiAutomation(BaseStage):
                             if await panel_left_open.count() > 0 and await panel_left_open.is_visible():
                                 has_finished_thinking = True
 
-                        # Check if still generating by looking for stop button/icon
+                        # Check if still generating by looking for stop button/icon (precise selectors only)
                         is_generating = False
                         stop_button_selectors = [
                             "button[aria-label='Stop generating']",
                             "button[aria-label*='Stop generating']",
                             "button[aria-label*='Stop response']",
-                            "button[aria-label*='Stop']",
-                            "button[aria-label*='stop']",
                             "button[aria-label*='Dừng phản hồi']",
                             "button[aria-label*='Dừng câu trả lời']",
-                            "button[aria-label*='Dừng']",
-                            "button[aria-label*='dừng']",
                             "button[data-testid='stop-button']",
                             "[data-testid='stop-button']",
-                            "[aria-label='Stop generating']",
-                            "[aria-label='Stop response']",
-                            "[aria-label='Stop']",
-                            "[aria-label='stop']",
                             "button.stop-button",
                             ".stop-button",
-                            "button:has(svg rect)",
-                            "mat-icon:has-text('stop')",
-                            "mat-icon[fonticon='stop']",
-                            "gem-icon-button[aria-label*='Stop']",
-                            "gem-icon-button[aria-label*='stop']",
-                            "gem-icon-button[aria-label*='Dừng']",
-                            "gem-icon-button[aria-label*='dừng']"
                         ]
                         for stop_sel in stop_button_selectors:
                             try:
@@ -1710,10 +1728,10 @@ class Stage5_GeminiAutomation(BaseStage):
                             except Exception:
                                 pass
 
-                        # As long as Gemini is thinking or generating, keep extending deadline
+                        # As long as Gemini is thinking or generating, keep extending deadline up to hard_attempt_deadline
                         if is_generating or is_still_thinking:
-                            response_deadline = max(response_deadline, time.monotonic() + 90)
-                            extend_attempt_timeout(90)
+                            response_deadline = min(max(response_deadline, time.monotonic() + 45), hard_attempt_deadline)
+                            extend_attempt_timeout(45)
 
                         # Get response text using response selectors
                         text_content = None
@@ -1736,6 +1754,7 @@ class Stage5_GeminiAutomation(BaseStage):
                                     break
                                     
                         if text_content:
+                            no_text_seconds = 0
                             response_text = text_content
                             if response_text == last_checked_text:
                                 unchanged_seconds += 3
@@ -1743,8 +1762,8 @@ class Stage5_GeminiAutomation(BaseStage):
                                 unchanged_seconds = 0
                                 last_checked_text = response_text
                                 # Extend deadline and asyncio timeout handle as long as text is actively streaming
-                                response_deadline = max(response_deadline, time.monotonic() + 90)
-                                extend_attempt_timeout(90)
+                                response_deadline = min(max(response_deadline, time.monotonic() + 60), hard_attempt_deadline)
+                                extend_attempt_timeout(60)
 
                             cleaned_response = clean_gemini_response(response_text).strip()
                             can_check_completion = False
@@ -1752,11 +1771,11 @@ class Stage5_GeminiAutomation(BaseStage):
                                 can_check_completion = False
                             elif has_completed_actions:
                                 can_check_completion = True
-                            elif unchanged_seconds >= 20:
+                            elif unchanged_seconds >= 15:
                                 can_check_completion = True
 
                             if has_thinking:
-                                if is_still_thinking or not has_finished_thinking:
+                                if is_still_thinking:
                                     can_check_completion = False
 
                             if can_check_completion:
@@ -1769,11 +1788,11 @@ class Stage5_GeminiAutomation(BaseStage):
                                                 break
                                             if cleaned_response.endswith("#") and unchanged_seconds >= 12:
                                                 break
-                                            if unchanged_seconds >= 30:
+                                            if unchanged_seconds >= 24:
                                                 break
                                         else:
                                             # Partial stream (e.g. hook or first few segments), do NOT break early
-                                            if unchanged_seconds >= 60:
+                                            if unchanged_seconds >= 45:
                                                 break
                                 except Exception:
                                     pass
@@ -1792,15 +1811,28 @@ class Stage5_GeminiAutomation(BaseStage):
                                                 if len(parsed) >= 15:
                                                     if has_completed_actions and unchanged_seconds >= 6:
                                                         break
-                                                    if unchanged_seconds >= 30:
+                                                    if unchanged_seconds >= 24:
                                                         break
                                                 else:
-                                                    if unchanged_seconds >= 60:
+                                                    if unchanged_seconds >= 45:
                                                         break
                                     except Exception:
                                         pass
                             
+                            # Safety exit: only finish early if we already have a complete script (>= 10 segments)
+                            if unchanged_seconds >= 30 and len(response_text) > 100:
+                                try:
+                                    p_chk = parse_gemini_recap_text(response_text)
+                                    if p_chk and len(p_chk) >= 10:
+                                        break
+                                except Exception:
+                                    pass
                             if unchanged_seconds >= 60:
+                                break
+                        else:
+                            no_text_seconds += 3
+                            if no_text_seconds >= 120:
+                                error_reason = "Gemini không phản hồi văn bản sau 120 giây (VLM hung/timeout)."
                                 break
 
                     if error_reason:
@@ -1869,6 +1901,23 @@ class Stage5_GeminiAutomation(BaseStage):
                     )
                     success = True
                     await context.complete_episode(ep)
+
+                    # Fair-share load balancing: Rotate to next Chrome profile for the upcoming episode
+                    try:
+                        from app import load_config, save_config, reset_shared_browser_context
+                        cfg = load_config()
+                        profiles = cfg.get("chrome_profiles", [])
+                        if len(profiles) > 1:
+                            next_idx = (cfg.get("current_profile_index", 0) + 1) % len(profiles)
+                            cfg["current_profile_index"] = next_idx
+                            save_config(cfg)
+                            await reset_shared_browser_context()
+                            await context.log(
+                                f"Tập {ep}: Hoàn thành. Đã luân chuyển sang Profile {next_idx + 1}/{len(profiles)} cho tập tiếp theo.",
+                                "info", episode=ep
+                            )
+                    except Exception:
+                        pass
                     break
 
                 except asyncio.CancelledError:
@@ -1892,7 +1941,7 @@ class Stage5_GeminiAutomation(BaseStage):
                         safe_mode=safe_mode,
                         attempt=attempt,
                         response=failure_text,
-                    )
+                    ) or (attempt == 1 and is_safety_refusal(failure_text))
 
                     if should_retry_with_safe_pdf:
                         await context.log(
@@ -1972,6 +2021,53 @@ class Stage5_GeminiAutomation(BaseStage):
                             pass
 
             if not success:
+                # Tier-2 Fallback: If browser automation failed after all retries, try Gemini API as emergency fallback
+                api_key = os.getenv("GEMINI_API_KEY")
+                if api_key:
+                    await context.log(
+                        f"Tập {ep}: Các lượt thử qua trình duyệt đều thất bại. Kích hoạt Tier-2 Fallback sang Gemini API chính thức (gemini-2.5-flash)...",
+                        "info",
+                        episode=ep
+                    )
+                    try:
+                        api_text = await generate_with_gemini_api(pdf_path, prompt_content)
+                        if api_text:
+                            response_text = clean_gemini_response(api_text)
+                            parsed_data = parse_gemini_recap_text(response_text)
+                            if parsed_data and len(parsed_data) >= 10:
+                                from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops
+                                has_loop, loop_idx = detect_recap_loop(parsed_data, max_page=len(image_files))
+                                if has_loop:
+                                    pruned_data, was_pruned = prune_recap_loops(parsed_data, max_page=len(image_files))
+                                    if was_pruned and len(pruned_data) >= 10:
+                                        parsed_data = pruned_data
+                                
+                                normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
+                                raw_temp_path = raw_response_path + ".tmp"
+                                recap_temp_path = recap_json_path + ".tmp"
+                                with open(raw_temp_path, "w", encoding="utf-8") as rf:
+                                    rf.write(response_text)
+                                with open(recap_temp_path, "w", encoding="utf-8") as jf:
+                                    json.dump(normalized_data, jf, ensure_ascii=False, indent=2, allow_nan=False)
+                                os.replace(raw_temp_path, raw_response_path)
+                                os.replace(recap_temp_path, recap_json_path)
+                                cache.commit(stage="gemini", fingerprint=fingerprint, outputs=[raw_response_path, recap_json_path])
+                                
+                                try:
+                                    from story_memory import StoryMemory
+                                    memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
+                                    memory.add_episode_recap(ep, normalized_data, language=language)
+                                    memory.save(download_dir)
+                                except Exception:
+                                    pass
+                                
+                                await context.log(f"Tập {ep}: Tier-2 Fallback Gemini API thành công! Đã tạo recap.json.", "success", episode=ep)
+                                success = True
+                                await context.complete_episode(ep)
+                    except Exception as api_exc:
+                        await context.log(f"Tập {ep}: Tier-2 Fallback API thất bại: {api_exc}", "error", episode=ep)
+
+            if not success:
                 await context.fail_episode(ep, f"Không thể lấy được JSON hợp lệ sau {max_retries} lần thử.")
             
             valid_count = sum(1 for e in range(from_ep, to_ep + 1) if validate_recap_json(os.path.join(download_dir, f"episode_{e}", "recap.json")))
@@ -2034,6 +2130,118 @@ class Stage6_JSONExtraction(BaseStage):
             await context.complete_episode(ep)
             await context.update_stage_progress(self.name, ((idx + 1) / total_episodes) * 100.0)
         return True
+
+
+def group_clean_bands(clean_rows):
+    height = len(clean_rows)
+    bands = []
+    in_band = False
+    start_y = 0
+    for y in range(height):
+        if clean_rows[y]:
+            if not in_band:
+                start_y = y
+                in_band = True
+        else:
+            if in_band:
+                end_y = y - 1
+                center_y = (start_y + end_y) // 2
+                bands.append((start_y, end_y, center_y))
+                in_band = False
+    if in_band:
+        bands.append((start_y, height - 1, (start_y + height - 1) // 2))
+    return bands
+
+
+def optimize_panel_splits(height, clean_rows, is_forbidden, target_h, min_h, max_h, row_complexity=None, smoothed_energy=None, face_protected=None):
+    clean_bands = group_clean_bands(clean_rows)
+    splits = [0]
+    y_curr = 0
+    while y_curr < height:
+        y_ideal = y_curr + target_h
+        y_min = y_curr + min_h
+        y_max = y_curr + max_h
+        if height - y_curr <= max_h:
+            splits.append(height)
+            break
+        y_min = min(y_min, height - 1)
+        y_max = min(y_max, height - 1)
+        best_clean_split = None
+        best_clean_dist = float('inf')
+        for start, end, center in clean_bands:
+            if y_min <= center <= y_max:
+                if not is_forbidden[center]:
+                    dist = abs(center - y_ideal)
+                    if dist < best_clean_dist:
+                        best_clean_dist = dist
+                        best_clean_split = center
+        if best_clean_split is not None:
+            splits.append(best_clean_split)
+            y_curr = best_clean_split
+            continue
+
+        extended_max = min(height - 1, y_curr + int(max_h * 1.45))
+        for start, end, center in clean_bands:
+            if y_max < center <= extended_max:
+                if not is_forbidden[center]:
+                    best_clean_split = center
+                    break
+        if best_clean_split is not None:
+            splits.append(best_clean_split)
+            y_curr = best_clean_split
+            continue
+
+        if smoothed_energy is not None and y_max > y_min:
+            sub_energy = np.copy(smoothed_energy[y_min:y_max+1])
+            sub_forbidden = is_forbidden[y_min:y_max+1]
+            penalized = sub_energy
+            penalized[sub_forbidden] += 10.0
+            if face_protected is not None:
+                sub_face = face_protected[y_min:y_max+1]
+                penalized[sub_face] += 100.0
+            dist_norm = np.abs((np.arange(len(sub_energy)) + y_min) - y_ideal) / float(max(1, max_h - min_h))
+            combined_cost = penalized + 0.25 * dist_norm
+            min_cost = np.min(combined_cost)
+            if min_cost < 5.0:
+                val_threshold = min_cost + 0.05
+                candidates = np.where(combined_cost <= val_threshold)[0]
+                best_valley_idx = int(np.median(candidates))
+                valley_cut = y_min + best_valley_idx
+                splits.append(valley_cut)
+                y_curr = valley_cut
+                continue
+
+        best_non_forbidden = None
+        best_dist = float('inf')
+        for y_test in range(y_min, y_max + 1):
+            if not is_forbidden[y_test]:
+                dist = abs(y_test - y_ideal)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_non_forbidden = y_test
+        if best_non_forbidden is not None:
+            splits.append(best_non_forbidden)
+            y_curr = best_non_forbidden
+            continue
+
+        if smoothed_energy is not None and y_max > y_min:
+            sub_energy = np.copy(smoothed_energy[y_min:y_max+1])
+            if face_protected is not None:
+                sub_face = face_protected[y_min:y_max+1]
+                sub_energy[sub_face] += 100.0
+            best_cut = y_min + int(np.argmin(sub_energy))
+        elif row_complexity is not None and y_max > y_min:
+            sub_comp = np.copy(row_complexity[y_min:y_max+1])
+            if face_protected is not None:
+                sub_face = face_protected[y_min:y_max+1]
+                sub_comp[sub_face] += 100.0
+            best_cut = y_min + int(np.argmin(sub_comp))
+        else:
+            best_cut = y_ideal
+        splits.append(best_cut)
+        y_curr = best_cut
+    return splits
+
 
 class Stage2b_IntelligentRepagination(BaseStage):
     @property
@@ -2099,7 +2307,9 @@ class Stage2b_IntelligentRepagination(BaseStage):
             img_mid = img_gray[:, col_start:col_end]
             diff = np.abs(img_mid.astype(np.int32) - bg_val)
             bg_ratio = np.mean(diff <= tol, axis=1)
-            return bg_ratio >= bg_threshold
+            row_std = np.std(img_mid, axis=1)
+            # Row is clean if matches global bg OR is a uniform solid gutter/divider (row_std < 4.0)
+            return (bg_ratio >= bg_threshold) | (row_std < 4.0)
 
         def group_clean_bands(clean_rows):
             height = len(clean_rows)
@@ -2124,7 +2334,7 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 
             return bands
 
-        def optimize_splits(height, clean_rows, is_forbidden, target_h, min_h, max_h, row_complexity=None):
+        def optimize_splits(height, clean_rows, is_forbidden, target_h, min_h, max_h, row_complexity=None, smoothed_energy=None, face_protected=None):
             clean_bands = group_clean_bands(clean_rows)
             
             splits = [0]
@@ -2150,7 +2360,6 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 
                 for start, end, center in clean_bands:
                     if y_min <= center <= y_max:
-                        # Check if this center or band is forbidden
                         if not is_forbidden[center]:
                             dist = abs(center - y_ideal)
                             if dist < best_clean_dist:
@@ -2161,8 +2370,46 @@ class Stage2b_IntelligentRepagination(BaseStage):
                     splits.append(best_clean_split)
                     y_curr = best_clean_split
                     continue
+
+                # Step 1b (Panel-Preserving Lookahead - Anti-Decapitation):
+                # If no clean band in [y_min, y_max], but a clean band exists slightly ahead
+                # (up to 1.45 * max_h), extend split to preserve the panel intact rather than chopping in the middle!
+                extended_max = min(height - 1, y_curr + int(max_h * 1.45))
+                for start, end, center in clean_bands:
+                    if y_max < center <= extended_max:
+                        if not is_forbidden[center]:
+                            best_clean_split = center
+                            break
+                if best_clean_split is not None:
+                    splits.append(best_clean_split)
+                    y_curr = best_clean_split
+                    continue
                     
-                # Step 2: Fall back to any non-forbidden rows in [y_min, y_max]
+                # Step 2: Hybrid Seam Valley Detector - find gradient energy valleys in [y_min, y_max] avoiding forbidden regions
+                if smoothed_energy is not None and y_max > y_min:
+                    sub_energy = np.copy(smoothed_energy[y_min:y_max+1])
+                    sub_forbidden = is_forbidden[y_min:y_max+1]
+                    
+                    penalized = sub_energy
+                    penalized[sub_forbidden] += 10.0
+                    if face_protected is not None:
+                        sub_face = face_protected[y_min:y_max+1]
+                        penalized[sub_face] += 100.0  # Absolute barrier against cutting across human face
+                    
+                    dist_norm = np.abs((np.arange(len(sub_energy)) + y_min) - y_ideal) / float(max(1, max_h - min_h))
+                    combined_cost = penalized + 0.25 * dist_norm
+                    
+                    min_cost = np.min(combined_cost)
+                    if min_cost < 5.0:  # Candidate exists that is NOT forbidden
+                        val_threshold = min_cost + 0.05
+                        candidates = np.where(combined_cost <= val_threshold)[0]
+                        best_valley_idx = int(np.median(candidates))
+                        valley_cut = y_min + best_valley_idx
+                        splits.append(valley_cut)
+                        y_curr = valley_cut
+                        continue
+
+                # Step 3: Fall back to any non-forbidden rows in [y_min, y_max]
                 best_non_forbidden = None
                 best_dist = float('inf')
                 
@@ -2178,67 +2425,24 @@ class Stage2b_IntelligentRepagination(BaseStage):
                     y_curr = best_non_forbidden
                     continue
                     
-                # Step 3: Expand search outwards to preserve panel/content integrity
-                found_outward = False
-                back_limit = y_curr + (min_h // 2)
-                fwd_limit = min(height - 1, y_curr + int(max_h * 1.5))
-                
-                max_search_offset = max(y_ideal - back_limit, fwd_limit - y_ideal)
-                
-                # Search outward from y_ideal
-                for offset in range(1, max_search_offset + 1):
-                    y_back = y_ideal - offset
-                    y_fwd = y_ideal + offset
-                    
-                    # Prefer backward split if valid and reasonable size
-                    if y_back >= back_limit and y_back < height and not is_forbidden[y_back]:
-                        splits.append(y_back)
-                        y_curr = y_back
-                        found_outward = True
-                        break
-                        
-                    if y_fwd <= fwd_limit and y_fwd < height and not is_forbidden[y_fwd]:
-                        splits.append(y_fwd)
-                        y_curr = y_fwd
-                        found_outward = True
-                        break
-                        
-                if found_outward:
-                    continue
-                    
-                # Step 4: Absolute fallback (if everything is forbidden, e.g. huge panels without borders)
-                if row_complexity is not None:
-                    min_comp = float('inf')
-                    best_fb = y_ideal
-                    for y_test in range(y_min, y_max + 1):
-                        comp = row_complexity[y_test]
-                        if comp < min_comp:
-                            min_comp = comp
-                            best_fb = y_test
-                        elif comp == min_comp:
-                            # Tie-breaker: choose row closer to ideal height
-                            if abs(y_test - y_ideal) < abs(best_fb - y_ideal):
-                                best_fb = y_test
-                    splits.append(best_fb)
-                    y_curr = best_fb
+                # Step 4: Hard-Limit Slicing Guard (Strict boundary fallback within [y_min, y_max])
+                # Guarantees no slice exceeds max_h while strictly protecting faces
+                if smoothed_energy is not None and y_max > y_min:
+                    sub_energy = np.copy(smoothed_energy[y_min:y_max+1])
+                    if face_protected is not None:
+                        sub_face = face_protected[y_min:y_max+1]
+                        sub_energy[sub_face] += 100.0
+                    best_cut = y_min + int(np.argmin(sub_energy))
+                elif row_complexity is not None and y_max > y_min:
+                    sub_comp = np.copy(row_complexity[y_min:y_max+1])
+                    if face_protected is not None:
+                        sub_face = face_protected[y_min:y_max+1]
+                        sub_comp[sub_face] += 100.0
+                    best_cut = y_min + int(np.argmin(sub_comp))
                 else:
-                    # Search for any clean row in the range [y_min, y_max] even if forbidden
-                    best_fallback = None
-                    best_fallback_dist = float('inf')
-                    for y_test in range(y_min, y_max + 1):
-                        if clean_rows[y_test]:
-                            dist = abs(y_test - y_ideal)
-                            if dist < best_fallback_dist:
-                                best_fallback_dist = dist
-                                best_fallback = y_test
-                                
-                    if best_fallback is not None:
-                        splits.append(best_fallback)
-                        y_curr = best_fallback
-                    else:
-                        # Last resort: just split at y_ideal
-                        splits.append(y_ideal)
-                        y_curr = y_ideal
+                    best_cut = y_ideal
+                splits.append(best_cut)
+                y_curr = best_cut
                         
             return splits
 
@@ -2348,17 +2552,77 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 if img is None:
                     return None
                 h, w = img.shape[:2]
-                gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                slice_bg = detect_background(gray_img)
-                page_protected = get_protected_ranges(img, slice_bg, tolerance)
-                return {
-                    "filename": os.path.basename(path),
-                    "img": img,
-                    "height": h,
-                    "width": w,
-                    "slice_bg": slice_bg,
-                    "protected": page_protected
-                }
+                
+                # Universal Manga/Webtoon Layout Adapter: Double-spread auto-split
+                split_double_pages = task.payload.get("split_double_pages", True)
+                reading_dir = str(task.payload.get("reading_direction", "rtl")).lower()
+                
+                # Detect Double-Spread Manga page (Aspect Ratio > 1.25 and height >= 500px)
+                if split_double_pages and w > 1.25 * h and h >= 500:
+                    mid_x = w // 2
+                    base_name = os.path.splitext(os.path.basename(path))[0]
+                    if reading_dir == "rtl":
+                        # Japanese Manga: Right page read first, Left page read second
+                        sub_slices = [
+                            (img[:, mid_x:], f"{base_name}_part1_r.png"),
+                            (img[:, :mid_x], f"{base_name}_part2_l.png")
+                        ]
+                    else:
+                        # Western / Comics / Manhwa: Left page read first, Right page read second
+                        sub_slices = [
+                            (img[:, :mid_x], f"{base_name}_part1_l.png"),
+                            (img[:, mid_x:], f"{base_name}_part2_r.png")
+                        ]
+                    
+                    results = []
+                    for sub_img, sub_filename in sub_slices:
+                        sh, sw = sub_img.shape[:2]
+                        s_gray = cv2.cvtColor(sub_img, cv2.COLOR_BGR2GRAY)
+                        s_bg = detect_background(s_gray)
+                        s_prot = get_protected_ranges(sub_img, s_bg, tolerance)
+                        face_ranges = []
+                        try:
+                            from visual_scorer import VisualSemanticScorer
+                            faces = VisualSemanticScorer.detect_faces(sub_img)
+                            for f in faces:
+                                fy, fh = int(f[1]), int(f[3])
+                                face_ranges.append((max(0, fy - 40), min(sh, fy + fh + 60)))
+                        except Exception:
+                            face_ranges = []
+
+                        results.append({
+                            "filename": sub_filename,
+                            "img": sub_img,
+                            "height": sh,
+                            "width": sw,
+                            "slice_bg": s_bg,
+                            "protected": s_prot,
+                            "faces": face_ranges,
+                        })
+                    return results
+                else:
+                    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    slice_bg = detect_background(gray_img)
+                    page_protected = get_protected_ranges(img, slice_bg, tolerance)
+                    face_ranges = []
+                    try:
+                        from visual_scorer import VisualSemanticScorer
+                        faces = VisualSemanticScorer.detect_faces(img)
+                        for f in faces:
+                            fy, fh = int(f[1]), int(f[3])
+                            face_ranges.append((max(0, fy - 40), min(h, fy + fh + 60)))
+                    except Exception:
+                        face_ranges = []
+
+                    return [{
+                        "filename": os.path.basename(path),
+                        "img": img,
+                        "height": h,
+                        "width": w,
+                        "slice_bg": slice_bg,
+                        "protected": page_protected,
+                        "faces": face_ranges,
+                    }]
 
             def run_detection_and_stitch():
                 from concurrent.futures import ThreadPoolExecutor
@@ -2369,32 +2633,39 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 total_height = 0
                 offsets = []
                 global_protected = []
+                global_faces = []
                 loaded_images = []
                 bg_vals = []
                 
-                for res in slice_results:
-                    if res is None:
+                for res_entry in slice_results:
+                    if not res_entry:
                         continue
-                    img = res["img"]
-                    h = res["height"]
-                    loaded_images.append(img)
-                    bg_vals.append(res["slice_bg"])
-                    
-                    for ymin, ymax in res["protected"]:
-                        global_protected.append((ymin + total_height, ymax + total_height))
+                    res_items = res_entry if isinstance(res_entry, list) else [res_entry]
+                    for res in res_items:
+                        img = res["img"]
+                        h = res["height"]
+                        loaded_images.append(img)
+                        bg_vals.append(res["slice_bg"])
                         
-                    offsets.append({
-                        "filename": res["filename"],
-                        "offset_y_start": total_height,
-                        "offset_y_end": total_height + h,
-                        "height": h
-                    })
-                    total_height += h
+                        for ymin, ymax in res["protected"]:
+                            global_protected.append((ymin + total_height, ymax + total_height))
+                            
+                        for ymin, ymax in res.get("faces", []):
+                            global_faces.append((ymin + total_height, ymax + total_height))
+
+                        offsets.append({
+                            "filename": res["filename"],
+                            "offset_y_start": total_height,
+                            "offset_y_end": total_height + h,
+                            "height": h
+                        })
+                        total_height += h
                     
                 if not loaded_images:
                     return None
                     
                 global_protected = merge_ranges(global_protected)
+                global_faces = merge_ranges(global_faces)
                 
                 # Determine final background value (median of slices)
                 final_bg_val = int(np.median(bg_vals))
@@ -2416,7 +2687,7 @@ class Stage2b_IntelligentRepagination(BaseStage):
                     canvas[current_y:current_y+h, :] = img_fitted
                     current_y += h
                     
-                return canvas, total_height, target_w, offsets, global_protected, final_bg_val
+                return canvas, total_height, target_w, offsets, global_protected, global_faces, final_bg_val
                 
             res = await loop.run_in_executor(None, run_detection_and_stitch)
             import torch
@@ -2428,12 +2699,12 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 await context.fail_episode(ep, "Lỗi nạp hoặc ghép nối ảnh.")
                 return False
                 
-            canvas, total_height, max_w, offsets, global_protected, final_bg_val = res
+            canvas, total_height, max_w, offsets, global_protected, global_faces, final_bg_val = res
             if canvas is None or total_height <= 0 or max_w <= 0:
                 await context.fail_episode(ep, "Lỗi nạp hoặc ghép nối ảnh: canvas trống hoặc kích thước không hợp lệ.")
                 return False
             
-            # Row content scores calculation
+            # Row content scores and Gradient Seam Energy calculation
             def analyze_content():
                 # Downscale width to 100px for speed, keeping total_height intact!
                 target_w = 100
@@ -2443,21 +2714,32 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 
                 # Resize only the width
                 gray_small = cv2.resize(cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY), (target_w, total_height), interpolation=cv2.INTER_NEAREST)
-                canny = cv2.Canny(gray_small, canny_low, canny_high)
                 
+                # 1. Sobel Y-Gradient: captures horizontal transition lines / panel boundaries
+                sobel_y = cv2.Sobel(gray_small, cv2.CV_32F, 0, 1, ksize=3)
+                grad_y_row = np.mean(np.abs(sobel_y), axis=1)
+                row_std = np.std(gray_small, axis=1)
+                
+                max_grad = float(np.max(grad_y_row)) if np.max(grad_y_row) > 0 else 1.0
+                max_std = float(np.max(row_std)) if np.max(row_std) > 0 else 1.0
+                norm_grad = grad_y_row / max_grad
+                norm_std = row_std / max_std
+                
+                # Seam energy: low energy indicates visual gutters or low-activity transitions
+                seam_energy = norm_grad * 0.55 + norm_std * 0.45
+                w_size_seam = 21
+                kernel_seam = np.ones(w_size_seam) / float(w_size_seam)
+                smoothed_energy = np.convolve(seam_energy, kernel_seam, mode='same')
+                
+                canny = cv2.Canny(gray_small, canny_low, canny_high)
                 gray_row_means = np.mean(gray_small, axis=1)
                 canny_row_means = np.mean(canny, axis=1)
-                
                 bg_diff = np.abs(gray_row_means - final_bg_val)
                 row_scores = bg_diff + canny_row_means
                 
-                # Smooth signal
-                w_size = 101
-                kernel = np.ones(w_size) / w_size
-                smoothed_scores = np.convolve(row_scores, kernel, mode='same')
-                return row_scores, smoothed_scores
+                return row_scores, smoothed_energy
                 
-            row_scores, smoothed_scores = await loop.run_in_executor(None, analyze_content)
+            row_scores, smoothed_energy = await loop.run_in_executor(None, analyze_content)
             
             # Define target height
             target_height = task.payload.get("repage_target_height", int((min_height + max_height) // 2))
@@ -2474,9 +2756,13 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 end = min(total_height - 1, p_end + forbidden_padding)
                 is_forbidden[start:end + 1] = True
                 
-            # Un-forbid clean background rows
-            is_forbidden = is_forbidden & ~clean_rows
-            
+            face_protected = np.zeros(total_height, dtype=bool)
+            for f_start, f_end in global_faces:
+                face_protected[max(0, f_start):min(total_height, f_end + 1)] = True
+
+            # Un-forbid clean background rows, but strictly preserve face protected regions (YuNet Face Guard v1.8.0)
+            is_forbidden = (is_forbidden & ~clean_rows) | face_protected
+
             cuts = optimize_splits(
                 total_height, 
                 clean_rows, 
@@ -2484,7 +2770,9 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 target_height, 
                 min_height, 
                 max_height, 
-                row_complexity=row_scores
+                row_complexity=row_scores,
+                smoothed_energy=smoothed_energy,
+                face_protected=face_protected
             )
             
             # Export and overwrite pages
@@ -2501,7 +2789,7 @@ class Stage2b_IntelligentRepagination(BaseStage):
                         except Exception:
                             pass
                 
-                from moderation_utils import is_junk_or_title_page
+                from moderation_utils import is_junk_or_title_page, is_text_bubble_dominant
                 
                 def find_content_range(slice_img, pad=10):
                     h, w = slice_img.shape[:2]
@@ -2558,6 +2846,37 @@ class Stage2b_IntelligentRepagination(BaseStage):
                         
                     return y_top, y_bottom
 
+                def find_2d_content_box(slice_img, pad=10):
+                    y_top, y_bottom = find_content_range(slice_img, pad=pad)
+                    h, w = slice_img.shape[:2]
+                    sub = slice_img[y_top:y_bottom, :]
+                    if sub.shape[0] < 50 or sub.shape[1] < 200:
+                        return y_top, y_bottom, 0, w
+                    
+                    gray_sub = cv2.cvtColor(sub, cv2.COLOR_BGR2GRAY)
+                    col_std = np.std(gray_sub, axis=0)
+                    col_mean = np.mean(gray_sub, axis=0)
+                    
+                    max_left = int(w * 0.40)
+                    x_left = 0
+                    while x_left < max_left and col_std[x_left] < 4.0 and (col_mean[x_left] <= 20 or col_mean[x_left] >= 235):
+                        x_left += 1
+                        
+                    min_right = int(w * 0.60)
+                    x_right = w - 1
+                    while x_right > min_right and col_std[x_right] < 4.0 and (col_mean[x_right] <= 20 or col_mean[x_right] >= 235):
+                        x_right -= 1
+                    x_right += 1
+                    
+                    if (x_right - x_left) < 200:
+                        x_left = 0
+                        x_right = w
+                    else:
+                        x_left = max(0, x_left - pad)
+                        x_right = min(w, x_right + pad)
+                        
+                    return y_top, y_bottom, x_left, x_right
+
                 # Export new pages (Clear old files in directory first)
                 if os.path.exists(images_pdf_dir):
                     for old_f in os.listdir(images_pdf_dir):
@@ -2584,16 +2903,20 @@ class Stage2b_IntelligentRepagination(BaseStage):
                             skipped_count += 1
                             continue
                         
-                    # Calculate content boundaries to crop unnecessary whitespace from top and bottom
+                    # Calculate 2D content boundaries to crop unnecessary whitespace from top/bottom and left/right
                     pad_val = task.payload.get("repage_crop_padding", 10)
-                    y_top, y_bottom = find_content_range(slice_img, pad=pad_val)
+                    y_top, y_bottom, x_left, x_right = find_2d_content_box(slice_img, pad=pad_val)
                     
                     # Apply crop to image slice
-                    cropped_slice = slice_img[y_top:y_bottom, :]
+                    cropped_slice = slice_img[y_top:y_bottom, x_left:x_right]
                     
                     if skip_blank:
                         is_junk_cropped, _ = is_junk_or_title_page(cropped_slice, bg_val=final_bg_val, tol=tolerance)
                         if is_junk_cropped:
+                            skipped_count += 1
+                            continue
+                        is_bubble_slice, _ = is_text_bubble_dominant(cropped_slice, bg_val=final_bg_val, tol=tolerance)
+                        if is_bubble_slice:
                             skipped_count += 1
                             continue
                     
