@@ -956,3 +956,71 @@ class FastIntroPrepender:
         os.replace(temp_out_vid, output_video_path)
         os.replace(temp_out_srt, output_srt_path)
         return True
+
+    @classmethod
+    def prepend_intro_to_master(
+        cls,
+        intro_video_path: str,
+        intro_srt_path: str,
+        intro_duration: float,
+        target_video_path: str,
+        target_srt_path: str,
+        output_video_path: str,
+        output_srt_path: str,
+        target_chapters_path: Optional[str] = None,
+        output_chapters_path: Optional[str] = None,
+    ) -> bool:
+        """
+        Merges the micro-intro clip in front of the master movie, shifts SRT subtitles,
+        and automatically offsets chapter markers with a Chapter 0 (Climax Preview Hook).
+        """
+        ok = cls.prepend_intro(
+            intro_video_path=intro_video_path,
+            intro_srt_path=intro_srt_path,
+            intro_duration=intro_duration,
+            target_video_path=target_video_path,
+            target_srt_path=target_srt_path,
+            output_video_path=output_video_path,
+            output_srt_path=output_srt_path,
+        )
+        if not ok:
+            return False
+
+        if target_chapters_path and os.path.exists(target_chapters_path):
+            try:
+                with open(target_chapters_path, "r", encoding="utf-8") as f:
+                    chapters = json.load(f)
+
+                def format_ts(sec: float) -> str:
+                    hrs = int(sec // 3600)
+                    mins = int((sec % 3600) // 60)
+                    secs = int(sec % 60)
+                    return f"{hrs:02d}:{mins:02d}:{secs:02d}" if hrs > 0 else f"{mins:02d}:{secs:02d}"
+
+                new_chapters = [
+                    {
+                        "episode": 0,
+                        "timestamp": "00:00",
+                        "title": "Climax Preview (In Medias Res Hook)",
+                        "duration_seconds": round(intro_duration, 2),
+                        "start_seconds": 0.0
+                    }
+                ]
+
+                for ch in chapters:
+                    shifted_sec = float(ch.get("start_seconds", 0.0)) + intro_duration
+                    new_ch = dict(ch)
+                    new_ch["start_seconds"] = round(shifted_sec, 2)
+                    new_ch["timestamp"] = format_ts(shifted_sec)
+                    new_chapters.append(new_ch)
+
+                out_chap_p = output_chapters_path or target_chapters_path
+                temp_chap_p = out_chap_p + ".tmp.json"
+                with open(temp_chap_p, "w", encoding="utf-8") as f:
+                    json.dump(new_chapters, f, ensure_ascii=False, indent=2)
+                os.replace(temp_chap_p, out_chap_p)
+            except Exception as e:
+                print(f"[Warning] Failed to shift chapters for master movie: {e}")
+
+        return True
+

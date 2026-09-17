@@ -45,11 +45,14 @@ def get_character_names(comic_title: str, story_memory: Optional[Dict[str, Any]]
 
     if story_memory:
         raw_mc = story_memory.get("protagonist_name", "").strip()
-        if raw_mc and len(raw_mc) > 1 and raw_mc.lower() not in ["a", "protagonist", "mc", "unknown", "hero", "the hero"]:
+        invalid_placeholders = {"a", "b", "c", "x", "y", "z", "protagonist", "mc", "unknown", "hero", "the hero", "the mc", "main character", "the protagonist", "our boy", "our girl"}
+        if raw_mc and len(raw_mc) > 1 and raw_mc.lower() not in invalid_placeholders:
             mc_name = raw_mc
         raw_fl = story_memory.get("female_lead", "") or story_memory.get("companion_name", "")
-        if raw_fl and len(raw_fl) > 1 and raw_fl.lower() not in ["a", "companion", "female", "unknown"]:
-            female_lead = raw_fl
+        if raw_fl:
+            raw_fl = str(raw_fl).strip()
+            if len(raw_fl) > 1 and raw_fl.lower() not in invalid_placeholders and raw_fl.lower() not in ["companion", "female", "girl", "lead"]:
+                female_lead = raw_fl
 
     if not mc_name:
         if "world after the fall" in title_lower:

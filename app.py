@@ -1923,8 +1923,16 @@ def parse_gemini_recap_text(text: str) -> list:
                 pass
 
     # Apply Anti-Loop Guardrail auto-healing to prune duplicate narrative loops
-    from recap_schema import prune_recap_loops
+    from recap_schema import prune_recap_loops, sanitize_recap_speech, stitch_fragmented_recap_segments
     parsed_list, _ = prune_recap_loops(parsed_list)
+
+    # Auto-heal fragmented sentence enjambments (stitch broken clauses and merge image allocations)
+    parsed_list = stitch_fragmented_recap_segments(parsed_list)
+
+    # Sanitize narration speech (strip OCR artifacts like 'Sir,', fix placeholders, slips, punctuation and capitalization)
+    for idx, item in enumerate(parsed_list):
+        if isinstance(item, dict) and "speech" in item:
+            item["speech"] = sanitize_recap_speech(item["speech"], is_first_segment=(idx == 0))
                 
     # Normalize priorities for downstream components
     for item in parsed_list:
@@ -3565,27 +3573,32 @@ def generate_gemini_prompt(
         intro_rule = f"""
 EPISODE 1 HIGH-RETENTION HOOK (0–5s GOLDEN RULE):
 
-The very first output line MUST be an intense, high-retention opening hook that instantly grips the viewer's curiosity and prevents drop-off in the first 5 seconds.
+The very first output line MUST be an explosive, high-retention opening hook that instantly grips the viewer's curiosity and prevents drop-off in the first 5 seconds.
 
 - PROTAGONIST NAME IDENTIFICATION & ANCHORING (CRITICAL):
   * Identify the protagonist's actual name from the comic pages (e.g. dialogue, character status window, subtitles, or title, such as 'Paran', 'Jinwoo', etc.).
-  * The opening hook (Segment 1 or 2, 0-15s) MUST explicitly introduce the protagonist by their actual name so the audience immediately knows who the central character is.
+  * The opening hook (Segment 1, 0-5s) MUST explicitly introduce the protagonist by their actual name so the audience immediately knows who the central character is.
   * NEVER leave the audience guessing who the protagonist is.
 
-Hook Formula:
-[Shocking Paradox / Dire Crisis] + [Protagonist Name] + [Mysterious Twist / Hidden Power / High Stakes Teaser]
+- STRICT GRAMMAR & PUNCTUATION RULE:
+  * Segment 1 MUST be a complete, grammatically capitalized sentence starting with a capital letter and ending with a period ('.').
+  * NEVER produce passive fragments, lowercase starts (e.g. 'sudden monster cataclysm...'), or end with a comma (',').
+
+Hook Formula (Extreme Paradox & High-Stakes Contrast):
+[Extreme Irony / Paradox] + [Protagonist Name] + [Shocking Cataclysm / Superpower Reveal]
 
 Examples of Top US Recap Hooks:
-- "Branded the weakest hunter on Earth and left for dead in a double dungeon, Jinwoo is about to wake up with a power that defies the gods."
-- "Betrayed by the very guild he built from scratch, Arthur was executed in silence—only to open his eyes ten years in the past."
-- "Everyone called Paran's survival bunker completely insane, until the apocalypse arrived and made him the sole ruler of the wasteland."
+- "Branded the weakest hunter on Earth and left for dead in a double dungeon, Jinwoo awakens with a glitched power that defies the gods."
+- "Betrayed by the very guild he built from scratch, Arthur was executed in silence—only to open his eyes ten years in the past with all his memories."
+- "Everyone called Paran an absolute lunatic for spending billions hoarding survival supplies, until the global apocalypse froze the world overnight."
 
 Requirements:
-- Write in punchy, natural {lang_name} (< 18 words, 2.5s–4.0s spoken).
+- Write in punchy, natural {lang_name} (18–24 words, 3.0s–4.5s spoken).
 - Maximum curiosity gap: make it impossible for the viewer to click away.
 - Zero throat-clearing (NEVER start with "Welcome", "Today we", or generic introductions).
+- Zero manga OCR artifacts (NEVER include "Sir,", "Ah,", "Hey,", "Ugh,").
 - Assign this hook to the most visually striking opening page showing the protagonist or the inciting incident.
-- No comedy or sarcasm in this opening line—keep it tense, cinematic, and high-stakes.
+- Keep it tense, cinematic, and high-stakes.
 """
 
     elif previous_context:
@@ -3669,6 +3682,16 @@ LANGUAGE & VIETNAMESE CONVERSATIONAL STORYTELLING RULES:
 - RÀO CẢN ĐỊNH DANH NHÂN VẬT PHỤ (SIDE CHARACTER ISOLATION SHIELD):
   * CẤM TUYỆT ĐỐI dùng các từ danh xưng của MC ('thanh niên', 'anh chàng', 'cô nàng', 'chị đại') để gọi nhân vật phụ (đồng đội, quái vật, NPC qua đường).
   * Nhân vật phụ BẮT BUỘC phải có nhãn định danh cụ thể: 'hai đồng đội hám danh', 'gã láng giềng biến dị', 'tên cầm đầu', 'cô em gái'. Không bao giờ để khán giả nhầm lẫn giữa MC và nhân vật phụ!
+- QUY TẮC CÂU HOÀN CHỈNH TỰ THÂN (SELF-CONTAINED SENTENCE MANDATE):
+  * Mỗi dòng kết thúc bằng dấu "#" BẮT BUỘC phải là một câu hoàn chỉnh về ngữ pháp, có đầy đủ Chủ ngữ, Vị ngữ và Tân ngữ.
+  * CẤM TUYỆT ĐỐI việc xé lẻ câu thành nhiều dòng "#" chỉ để đổi trang ảnh!
+  * Nếu một hành động kéo dài qua 2-3 trang tranh, hãy dùng cú pháp dải trang: "[<trang_bắt_đầu>, <trang_kết_thúc>] - <Câu hoàn chỉnh>.#" thay vì viết câu què.
+- CẤM TRƯỢT NGÔI XƯNG (STRICT 3RD-PERSON POV MANDATE):
+  * Kịch bản hoàn toàn là lời dẫn chuyện từ ngôi thứ 3 ("Người bạn xem cùng / Couch Companion").
+  * CẤM dùng đại từ ngôi thứ nhất ('tôi', 'mình', 'chúng tôi') để kể hành động hoặc suy nghĩ của nhân vật.
+  * Mọi suy nghĩ nội tâm trong bóng thoại truyện tranh phải được chuyển thành lời dẫn gián tiếp (ví dụ: 'Anh nhận ra mình không thể hoảng loạn lúc này...' thay vì 'Tôi không thể hoảng loạn...').
+- CẤM TÊN KÝ TỰ ĐƠN RÁC (ZERO PLACEHOLDER NAMES):
+  * CẤM TUYỆT ĐỐI gọi tên nhân vật là 'A', 'B', 'MC', 'Unknown'. Hãy dùng danh xưng tự nhiên theo archetype ('gã thợ săn lão luyện', 'chàng trai trẻ', 'chỉ huy tổ đội', 'anh', 'cô').
 - Từ nối văn nói tự nhiên: Dùng linh hoạt 'Hóa ra', 'Và đoán xem', 'Nhìn xem', 'Thế nhưng', 'Đúng lúc này', 'Chưa kịp thở phào thì'.
 - CẤM TUYỆT ĐỐI văn phong dịch thô kiểu Google Translate:
   * Không dùng cấu trúc bị động rườm rà: 'đã được nhìn thấy đang...', 'bị làm cho bất ngờ'. Thay bằng câu chủ động giàu năng lượng.
@@ -3715,6 +3738,17 @@ LANGUAGE & US MANHWA/WEBTOON CULTURE RULES:
 - Use natural Western manhwa community terminology and tropes where appropriate:
   * Awakened abilities, Hunter rankings (S-Rank, E-Rank), Dungeon Break, Status Window / System Prompt, Leveling Up;
   * Overpowered (OP) Protagonist, Regressor, Reincarnator, Hidden Mastermind, Aura / Killing Intent, flexing / humbled.
+- SELF-CONTAINED SENTENCE MANDATE (ZERO SENTENCE ENJAMBMENT):
+  * Every single segment ending in "#" MUST be a complete, grammatically self-contained sentence with a clear Subject, Verb, and Object.
+  * NEVER split a single sentence across multiple lines or hash marks "#" just to change page numbers!
+  * If a narrative beat or combat sequence spans across 2-3 pages, use multi-panel syntax: "[<start>, <end>] - <Complete sentence>.#" rather than fragmenting clauses.
+- STRICT 3RD-PERSON NARRATIVE POV (ZERO FIRST-PERSON DRIFT):
+  * The entire recap is narrated from a 3rd-person observer perspective ("Couch Companion").
+  * NEVER use 1st-person pronouns ("I", "me", "my", "myself", "we") when narrating character actions or thoughts.
+  * Convert internal comic thoughts to indirect speech (e.g., "He realizes he cannot afford to panic..." rather than "I can't afford to panic...").
+- ZERO PLACEHOLDER / SINGLE-LETTER CHARACTER NAMES:
+  * NEVER refer to any character as a single letter (e.g. "A", "B", "C") or placeholder token ("MC", "Hero", "Unknown").
+  * If the specific name is unknown, use natural descriptive titles ("the veteran survivor", "the young hunter", "the party leader", "he", "she").
 - Verbal Velocity: Use strong, active transitive verbs (e.g., 'obliterates', 'stockpiles', 'outsmarts', 'dispatches', 'unleashes', 'corners', 'exposes', 'shatters', 'ambushes') rather than passive explanations ('is seen doing', 'was attacked by').
 
 YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY:

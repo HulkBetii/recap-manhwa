@@ -87,5 +87,25 @@ def test_generate_gemini_prompt_us_recap_culture_and_retention_hook():
     prompt_ep2_en = generate_gemini_prompt("Solo Leveling", 2, 45, "en")
     assert "EPISODE CONTINUATION" in prompt_ep2_en
     assert "in media res" in prompt_ep2_en
+    assert "SELF-CONTAINED SENTENCE MANDATE" in prompt_ep2_en
+    assert "STRICT 3RD-PERSON NARRATIVE POV" in prompt_ep2_en
+
+
+def test_parse_gemini_recap_text_auto_stitches_fragmented_lines():
+    raw_response = """
+5 - When the catastrophe hit the city, civilians desperately tried to find their#
+6 - way into the underground shelter before the toxic cloud spread.#
+[12, 13] - Meanwhile, A turns his attention to the perimeter defense grid.#
+"""
+    parsed = parse_gemini_recap_text(raw_response)
+    assert len(parsed) == 2
+    assert parsed[0]["speech"] == "When the catastrophe hit the city, civilians desperately tried to find their way into the underground shelter before the toxic cloud spread."
+    assert len(parsed[0]["images"]) == 2
+    assert parsed[0]["images"][0]["page"] == 5
+    assert parsed[0]["images"][1]["page"] == 6
+
+    # Verify placeholder 'A' was sanitized to 'he'
+    assert "Meanwhile, he turns his attention to the perimeter defense grid." in parsed[1]["speech"]
+
 
 

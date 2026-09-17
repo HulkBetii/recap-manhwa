@@ -31,18 +31,24 @@ def get_us_apocalypse_prompt(
     if ep == 1:
         intro_rule = """
 EPISODE 1 HIGH-RETENTION HOOK (0-15s GOLDEN HOOK RULE):
-The very first output line MUST be an explosive, high-retention opening hook that grabs the viewer's undivided attention and prevents immediate drop-off.
+The very first output line MUST be an explosive, high-retention opening hook that grabs the viewer's undivided attention and prevents immediate drop-off in the first 5 seconds.
 - PROTAGONIST NAME IDENTIFICATION & ANCHORING (CRITICAL):
-  * Identify the protagonist's actual name from the comic pages (e.g. dialogue, character status window, subtitles, or title, such as 'Paran', 'Jinwoo', etc.).
-  * The opening hook (Segment 1 or 2, 0-15s) MUST explicitly introduce the protagonist by their actual name so the audience immediately bonds with the main character.
+  * Identify the protagonist's actual name from the comic pages (e.g. dialogue, character status window, subtitles, or title, such as 'Paran', 'Jaehwan', 'Jinwoo', etc.).
+  * The opening hook (Segment 1, 0-5s) MUST explicitly introduce the protagonist by their actual name so the audience immediately bonds with the main character.
   * NEVER leave the audience guessing who the protagonist is.
-- Hook Formula: [Shocking Crisis / Insane Prepper Paradox] + [Protagonist Name] + [Hidden Spatial Ability / Ruthless Retaliation / High Stakes Reveal]
-- Examples of Top US Apocalypse Hooks:
-  * "Everyone called Paran a lunatic for spending billions hoarding 100,000 tons of food—until the global ice age hit and the world froze to minus one hundred degrees."
+- STRICT GRAMMAR & PUNCTUATION RULE:
+  * Segment 1 MUST be a complete, grammatically capitalized sentence starting with a capital letter and ending with a period ('.').
+  * NEVER produce passive fragments, lowercase starts (e.g. 'sudden monster cataclysm...'), or end with a comma (',').
+- HOOK FORMULA (EXTREME PARADOX & HIGH-STAKES CONTRAST):
+  [Extreme Irony / Prepper Paradox] + [Protagonist Name] + [Shocking Cataclysm / Superpower Reveal]
+- EXAMPLES OF 1M+ VIEWS US HOOKS:
+  * "Everyone called Paran an absolute lunatic for spending billions hoarding 100,000 tons of food—until the global ice age struck and the world froze to minus one hundred degrees."
   * "Betrayed and left to freeze by his own family in his past life, Paran wakes up thirty days before the apocalypse with an infinite dimensional warehouse."
   * "When the asteroid crashed and toxic spores turned humanity into mindless zombies, they laughed at Paran's survival bunker—until they were begging at his door."
-- Zero throat-clearing: NEVER start with greetings ('Welcome', 'Today we are watching', 'Hello guys').
-- Make it punchy, cinematic, and under 25 words.
+- STRICT FORBIDDEN ARTIFACTS:
+  * NEVER start with greetings ('Welcome', 'Today we are watching', 'Hello guys').
+  * NEVER include manga speech bubble artifacts (e.g. 'Sir,', 'Ah,', 'Hey,', 'Ugh,', 'Wait,').
+  * Zero generic passive exposition. Make it punchy, cinematic, high-stakes, and 18-24 words.
 """
     elif previous_context:
         prev_cliffhanger = previous_context.get("closing_cliffhanger", "")
@@ -144,7 +150,17 @@ CORE TONE & NARRATION RULES (US APOCALYPSE RECAP ARCHETYPE):
       * ZERO MISGENDERING: If the protagonist is FEMALE, NEVER use 'he', 'him', 'boy', or 'dude'! If MALE, NEVER use 'she', 'her', or 'girl'.
     - SIDE CHARACTER ISOLATION SHIELD:
       * NEVER refer to teammates, raiders, party members, or monsters as 'boy', 'girl', 'dude', or 'our guy'. Those terms are strictly reserved for the protagonist.
-      * Side characters MUST ALWAYS have distinct, descriptive labels: 'the greedy teammates', 'the party leader', 'the mutated neighbor', 'the arrogant bandit', 'his/her younger sister'.
+    - SELF-CONTAINED SENTENCE MANDATE (ZERO SENTENCE ENJAMBMENT):
+      * Every single output line ending in "#" MUST be a complete, grammatically self-contained sentence with a clear Subject, Verb, and Object.
+      * NEVER split a single sentence across multiple lines or hash marks "#" just to change page numbers!
+      * If a narrative beat or combat sequence spans across 2-3 pages, use multi-panel syntax: "[<start>, <end>] - <Complete sentence>.#" rather than fragmenting clauses.
+    - STRICT 3RD-PERSON NARRATIVE POV (ZERO FIRST-PERSON DRIFT):
+      * The entire recap is narrated strictly from a 3rd-person observer perspective ("Couch Companion").
+      * NEVER use 1st-person pronouns ("I", "me", "my", "myself", "we") when narrating character actions or thoughts.
+      * Convert internal comic thoughts to indirect speech (e.g., "He realizes he cannot afford to panic..." rather than "I can't afford to panic...").
+    - ZERO PLACEHOLDER / SINGLE-LETTER CHARACTER NAMES:
+      * NEVER refer to any character as a single letter (e.g. "A", "B", "C") or placeholder token ("MC", "Hero", "Unknown").
+      * If the specific name is unknown, use natural descriptive titles ("the veteran survivor", "the young hunter", "the party leader", "he", "she").
     - Deadpan Sarcasm & Pragmatic Wit: Call out ridiculous apocalyptic situations with realistic dry humor (e.g., manipulative exes crying crocodile tears for food, clowns trying to buy bread with useless paper money, bandits acting tough right before getting humiliated).
     - Use strong, active transitive verbs: 'obliterates', 'stockpiles', 'outsmarts', 'dispatches', 'unleashes', 'corners', 'humbles', 'shatters'.
     - Avoid slow passive phrasing ('is seen walking towards', 'there is an explosion'). Instead write: 'The protagonist steps forward and detonates the corridor.'
