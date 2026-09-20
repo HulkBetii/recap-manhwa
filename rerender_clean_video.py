@@ -3,53 +3,31 @@ import sys
 import asyncio
 import json
 import time
-import shutil
-from pathlib import Path
 
-# Ensure UTF-8 output on Windows
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
-# Ensure working directory is project root
-PROJECT_DIR = r"d:\VibeCoding\recap_comics-windows_version\recap_comics-windows_version"
-os.chdir(PROJECT_DIR)
-sys.path.insert(0, PROJECT_DIR)
+os.chdir(r"d:\VibeCoding\recap_comics-windows_version\recap_comics-windows_version")
+sys.path.insert(0, r"d:\VibeCoding\recap_comics-windows_version\recap_comics-windows_version")
 
 import config
 from workflow_base import WorkflowTask, WorkflowState, StageState
-from workflow_stages_1 import (
-    Stage0_ProjectInit,
-    Stage1_ComicParsing,
-    Stage2_AsyncImageCrawling,
-    Stage2b_IntelligentRepagination,
-    Stage3_NSFWModeration,
-    Stage4_PDFGeneration,
-    Stage5_GeminiAutomation,
-    Stage6_JSONExtraction,
-)
+from workflow_stages_1 import Stage0_ProjectInit
 from workflow_stages_2 import (
-    Stage7_NarrationAggregation,
-    Stage8_LocalTTS,
-    Stage9_SubtitleNormalization,
-    Stage10_EpisodeVideoRendering,
-    Stage11_FinalVideoAssembly,
-    Stage12_MetadataReports,
-    Stage13_Cleanup,
+    Stage10_EpisodeVideoRendering, Stage11_FinalVideoAssembly,
+    Stage12_MetadataReports, Stage13_Cleanup,
 )
 
 class SimpleCancelToken:
-    def is_cancelled(self) -> bool:
-        return False
+    def is_cancelled(self): return False
 
 class ConsoleContext:
-    def __init__(self, task: WorkflowTask):
+    def __init__(self, task):
         self.task = task
         self.cancel_token = SimpleCancelToken()
         self.payload = task.payload
-
-    async def log(self, message: str, level: str = "info", *args, **kwargs):
-        prefix = f"[{level.upper()}]"
-        print(f"{prefix} {message}", flush=True)
+    async def log(self, message, level="info", *a, **kw):
+        print(f"[{level.upper()}] {message}", flush=True)
         self.task.logs.append({
             "timestamp": time.strftime("%H:%M:%S"),
             "level": level,
@@ -58,25 +36,19 @@ class ConsoleContext:
             "episode": self.task.current_episode
         })
         self._sync_task_db()
-
     async def start_episode(self, ep: int):
         self.task.current_episode = ep
         await self.log(f"Bắt đầu xử lý tập {ep}...", "info")
-
     async def complete_episode(self, ep: int):
         await self.log(f"Hoàn thành tập {ep}.", "success")
-
     async def fail_episode(self, ep: int, error: str):
         await self.log(f"Lỗi tập {ep}: {error}", "error")
-
     async def update_stage_progress(self, stage_name: str, progress: float):
         print(f"[PROGRESS] {stage_name}: {progress:.1f}%", flush=True)
         self._sync_task_db()
-
     async def update_progress(self, progress: float, stage_name: str = None, episode: int = None):
         print(f"[PROGRESS] {stage_name or self.task.current_stage}: {progress:.1f}%", flush=True)
         self._sync_task_db()
-
     def _sync_task_db(self):
         try:
             db_path = "tasks_db.json"
@@ -102,37 +74,14 @@ class ConsoleContext:
             pass
 
 async def main():
-    target_url = "https://mgread.io/manga/global-freeze-i-created-an-apocalypse-shelter/"
+    target_url = "https://www.webtoons.com/en/action/ultimate-shut-in/list?title_no=7457"
     print("=" * 75)
-    print("  START WORKFLOW: Global Freeze - TẬP 1 & TẬP 2 (Tiếng Việt)")
-    print(f"  URL: {target_url}")
-    print("  Episodes: 1 -> 2")
-    print("  Model VLM: Google Gemini 3.8 Flash (Vietnamese Prompt + Point Scoring)")
-    print(f"  Voice TTS: OmniVoice ({config.DEFAULT_VI_VOICE})")
-    print("  Intro Policy: Cold Open / Direct Story Start (Bỏ Intro)")
+    print("  RE-RENDER VIDEO: Ultimate Shut-in - Tập 1-2 (100% SẮC NÉT, KHÔNG LÀM MỜ)")
     print("=" * 75)
 
-    # Pre-seed episode 1 cache to avoid redundant recalculation
-    ep1_source_dir = os.path.join(PROJECT_DIR, "downloads", "global_freeze_i_created_an_apocalypse_shelter_1_1_vi_059c2710", "episode_1")
-    target_folder_name = "global_freeze_i_created_an_apocalypse_shelter_1_2_vi_059c2710"
-    target_download_dir = os.path.join(PROJECT_DIR, "downloads", target_folder_name)
-    target_ep1_dir = os.path.join(target_download_dir, "episode_1")
-
-    if os.path.exists(ep1_source_dir) and not os.path.exists(target_ep1_dir):
-        print(f"\n[CACHE SEED] Copying cached Episode 1 from 1_1 to 1_2 to preserve tokens/time...")
-        os.makedirs(target_download_dir, exist_ok=True)
-        shutil.copytree(ep1_source_dir, target_ep1_dir)
-        # Copy manifest if exists
-        ep1_manifest = os.path.join(os.path.dirname(ep1_source_dir), "artifact_manifest.json")
-        if os.path.exists(ep1_manifest):
-            target_manifest = os.path.join(target_download_dir, "artifact_manifest.json")
-            if not os.path.exists(target_manifest):
-                shutil.copy2(ep1_manifest, target_manifest)
-        print(f"[CACHE SEED] Successfully pre-seeded Episode 1 cache! ✅")
-
-    task_id = f"global-freeze-ep1-2-vi-{int(time.time())}"
+    task_id = "ultimate-shut-in-ep1-2-vi-1789677899"
     task = WorkflowTask(
-        comic_title="Global Freeze: I Created An Apocalypse Shelter",
+        comic_title="Ultimate Shut-in",
         comic_url=target_url,
         from_episode=1,
         to_episode=2,
@@ -141,37 +90,30 @@ async def main():
             "language": "vi",
             "voice_id": config.DEFAULT_VI_VOICE_ID,
             "ref_audio_path": config.DEFAULT_VI_REF_AUDIO,
+            "min_panel_duration": 3.5,
+            "hard_floor_duration": 3.0,
             "enable_flash_forward_intro": False,
             "cleanup": False,
             "safe_mode": False,
-            "retry_count": 3,
-            "timeout": 300,
-            "concurrency": 4,
+            "retry_count": 5,
+            "timeout": 360,
+            "concurrency": 1,
             "burn_subtitles": False,
             "remove_text": False,
         },
         id=task_id
     )
+    task.artifacts["download_dir"] = os.path.abspath(r"downloads\ultimate_shutin_1_2_vi_87452f90")
 
     ctx = ConsoleContext(task)
 
     pipeline = [
-        Stage0_ProjectInit(),
-        Stage1_ComicParsing(),
-        Stage2_AsyncImageCrawling(),
-        Stage2b_IntelligentRepagination(),
-        Stage3_NSFWModeration(),
-        Stage4_PDFGeneration(),
-        Stage5_GeminiAutomation(),
-        Stage6_JSONExtraction(),
-        Stage7_NarrationAggregation(),
-        Stage8_LocalTTS(),
-        Stage9_SubtitleNormalization(),
         Stage10_EpisodeVideoRendering(),
         Stage11_FinalVideoAssembly(),
         Stage12_MetadataReports(),
         Stage13_Cleanup(),
     ]
+
 
     for stage in pipeline:
         task.current_stage = stage.name
@@ -203,18 +145,17 @@ async def main():
         print(f"[DONE] Giai đoạn {stage.name} hoàn thành 100%.")
 
     task.status = WorkflowState.SUCCESS
-    task.current_stage = "Completed"
-    task.overall_progress = 100.0
     ctx._sync_task_db()
-
-    final_video_url = task.artifacts.get("final_video_url")
-    print(f"\n=======================================================")
-    print("  CHÚC MỪNG: TẬP 1 VÀ TẬP 2 TIẾNG VIỆT ĐÃ HOÀN THÀNH XUẤT SẮC!")
-    print(f"  Final Video URL: {final_video_url}")
-    print(f"  Artifacts: {task.artifacts.get('download_dir')}")
-    print("=======================================================")
+    print("\n================================================================================")
+    print("  [SUCCESS] HOÀN TẤT RE-RENDER VIDEO 100% SẮC NÉT KHÔNG BỊ MỜ!")
+    download_dir = task.artifacts.get("download_dir", "")
+    print(f"  Thư mục kết quả: {download_dir}")
+    final_vids = task.artifacts.get("final_videos", {})
+    for ep_k, v_path in final_vids.items():
+        print(f"  Tập {ep_k} Video: {v_path}")
+    print("================================================================================")
     return 0
 
 if __name__ == "__main__":
-    exit_code = asyncio.run(main())
-    sys.exit(exit_code)
+    ret = asyncio.run(main())
+    sys.exit(ret)

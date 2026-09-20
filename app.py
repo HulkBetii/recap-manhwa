@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 
 # Ensure UTF-8 output on Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
@@ -503,7 +504,7 @@ async def get_app_config():
 async def get_app_version():
     return {
         "app": getattr(config, "APP_NAME", "Recap Comics Automation"),
-        "version": getattr(config, "APP_VERSION", "1.6.0"),
+        "version": getattr(config, "APP_VERSION", "1.5.0"),
     }
 
 
@@ -868,7 +869,6 @@ class CrawlRequest(BaseModel):
     remove_text_radius: int = 3
     comix_group_id: Optional[str] = None
     market_id: Optional[str] = None
-    enable_bgm: bool = False
     enable_flash_forward_intro: bool = False
     flash_forward_custom_hook: Optional[str] = None
 
@@ -1904,8 +1904,22 @@ def parse_gemini_recap_text(text: str) -> list:
                 imgs = _parse_gemini_image_specs(page_spec)
                 if imgs and content:
                     # Clean any trailing leaked segment headers accidentally glued into content
-                    content = re.sub(r"\s*\[\s*\d+\s*(?:,\s*\d+\s*)*\s*\]\s*[\-:].*$", "", content).strip()
+                    content = re.sub(r"\s*\[\s*\d+\s*(?:[:%,\d\s]*)*\s*\]\s*[\-:].*$", "", content).strip()
+                    # Clean any bracket weight/page references leaked inside speech text
+                    content = re.sub(r'\[\s*\d+\s*(?::\s*\d+%?)?(?:\s*,\s*\d+\s*(?::\s*\d+%?)?)*\s*\]', '', content).strip()
                     if content:
+                        # Validate: drop truncated/incomplete speech fragments
+                        if len(content) < 15:
+                            logging.getLogger(__name__).warning(
+                                "Dropped short segment (len=%d): '%s'", len(content), content[:50]
+                            )
+                            continue
+                        if not re.search(r'[.!?…。\u2026]$', content):
+                            logging.getLogger(__name__).warning(
+                                "Dropped truncated segment (no ending punctuation): '%s...'",
+                                content[:50],
+                            )
+                            continue
                         parsed_list.append({
                             "speech": content,
                             "images": imgs
@@ -1923,16 +1937,10 @@ def parse_gemini_recap_text(text: str) -> list:
                 pass
 
     # Apply Anti-Loop Guardrail auto-healing to prune duplicate narrative loops
-    from recap_schema import prune_recap_loops, sanitize_recap_speech, stitch_fragmented_recap_segments
+    from recap_schema import prune_recap_loops, auto_split_long_segments, enforce_monotonic_page_order
     parsed_list, _ = prune_recap_loops(parsed_list)
-
-    # Auto-heal fragmented sentence enjambments (stitch broken clauses and merge image allocations)
-    parsed_list = stitch_fragmented_recap_segments(parsed_list)
-
-    # Sanitize narration speech (strip OCR artifacts like 'Sir,', fix placeholders, slips, punctuation and capitalization)
-    for idx, item in enumerate(parsed_list):
-        if isinstance(item, dict) and "speech" in item:
-            item["speech"] = sanitize_recap_speech(item["speech"], is_first_segment=(idx == 0))
+    parsed_list = auto_split_long_segments(parsed_list, max_words=20)
+    parsed_list = enforce_monotonic_page_order(parsed_list)
                 
     # Normalize priorities for downstream components
     for item in parsed_list:
@@ -3326,7 +3334,6 @@ async def crawl(payload: CrawlRequest):
         "remove_text_radius": payload.remove_text_radius,
         "comix_group_id": payload.comix_group_id,
         "market_id": market_id,
-        "enable_bgm": payload.enable_bgm,
         "enable_flash_forward_intro": payload.enable_flash_forward_intro,
         "flash_forward_custom_hook": payload.flash_forward_custom_hook,
     }
@@ -3509,7 +3516,7 @@ def generate_gemini_prompt(
     target_language: str = "en",
     glossary: str = None,
     market_id: str = None,
-    point_score_threshold: int = 70,
+    point_score_threshold: int = 65,
     previous_context: dict = None,
 ) -> str:
     comic_title = re.sub(r'[\r\n\t"\\]', ' ', str(comic_title or "")).strip()[:150]
@@ -3573,32 +3580,27 @@ def generate_gemini_prompt(
         intro_rule = f"""
 EPISODE 1 HIGH-RETENTION HOOK (0–5s GOLDEN RULE):
 
-The very first output line MUST be an explosive, high-retention opening hook that instantly grips the viewer's curiosity and prevents drop-off in the first 5 seconds.
+The very first output line MUST be an intense, high-retention opening hook that instantly grips the viewer's curiosity and prevents drop-off in the first 5 seconds.
 
 - PROTAGONIST NAME IDENTIFICATION & ANCHORING (CRITICAL):
   * Identify the protagonist's actual name from the comic pages (e.g. dialogue, character status window, subtitles, or title, such as 'Paran', 'Jinwoo', etc.).
-  * The opening hook (Segment 1, 0-5s) MUST explicitly introduce the protagonist by their actual name so the audience immediately knows who the central character is.
+  * The opening hook (Segment 1 or 2, 0-15s) MUST explicitly introduce the protagonist by their actual name so the audience immediately knows who the central character is.
   * NEVER leave the audience guessing who the protagonist is.
 
-- STRICT GRAMMAR & PUNCTUATION RULE:
-  * Segment 1 MUST be a complete, grammatically capitalized sentence starting with a capital letter and ending with a period ('.').
-  * NEVER produce passive fragments, lowercase starts (e.g. 'sudden monster cataclysm...'), or end with a comma (',').
-
-Hook Formula (Extreme Paradox & High-Stakes Contrast):
-[Extreme Irony / Paradox] + [Protagonist Name] + [Shocking Cataclysm / Superpower Reveal]
+Hook Formula:
+[Shocking Paradox / Dire Crisis] + [Protagonist Name] + [Mysterious Twist / Hidden Power / High Stakes Teaser]
 
 Examples of Top US Recap Hooks:
-- "Branded the weakest hunter on Earth and left for dead in a double dungeon, Jinwoo awakens with a glitched power that defies the gods."
-- "Betrayed by the very guild he built from scratch, Arthur was executed in silence—only to open his eyes ten years in the past with all his memories."
-- "Everyone called Paran an absolute lunatic for spending billions hoarding survival supplies, until the global apocalypse froze the world overnight."
+- "Branded the weakest hunter on Earth and left for dead in a double dungeon, Jinwoo is about to wake up with a power that defies the gods."
+- "Betrayed by the very guild he built from scratch, Arthur was executed in silence—only to open his eyes ten years in the past."
+- "Everyone called Paran's survival bunker completely insane, until the apocalypse arrived and made him the sole ruler of the wasteland."
 
 Requirements:
-- Write in punchy, natural {lang_name} (18–24 words, 3.0s–4.5s spoken).
+- Write in punchy, natural {lang_name} (< 18 words, 2.5s–4.0s spoken).
 - Maximum curiosity gap: make it impossible for the viewer to click away.
 - Zero throat-clearing (NEVER start with "Welcome", "Today we", or generic introductions).
-- Zero manga OCR artifacts (NEVER include "Sir,", "Ah,", "Hey,", "Ugh,").
 - Assign this hook to the most visually striking opening page showing the protagonist or the inciting incident.
-- Keep it tense, cinematic, and high-stakes.
+- No comedy or sarcasm in this opening line—keep it tense, cinematic, and high-stakes.
 """
 
     elif previous_context:
@@ -3652,54 +3654,94 @@ Do NOT include any greetings, episode announcements, recaps of past episodes, or
     if lang_key in {"vi", "vietnamese"}:
         language_rules = """
 LANGUAGE & VIETNAMESE CONVERSATIONAL STORYTELLING RULES:
-- Write the entire output in natural, conversational spoken Vietnamese (giọng kể chuyện tự nhiên như người thật đang nói trực tiếp với bạn bè).
-- Thể hiện phong cách "Sarcastic Bro-Commentary": 80% bám sát tình tiết kịch tính, căng thẳng sinh tồn của thế giới Tận thế + 20% châm biếm sâu cay (deadpan sarcasm), thực tế và hóm hỉnh.
-- ĐỊNH DANH THEO NGỮ CẢNH & KỂ CHUYỆN HỮU CƠ (CONTEXTUAL PROTAGONIST ANCHORING):
-  * TUYỆT ĐỐI KHÔNG máy móc lặp lại tên nhân vật cứ mỗi 2-3 câu! Việc lặp tên liên tục khiến câu văn rập khuôn, gượng gạo và nồng nặc mùi AI.
-  * CHỈ GỌI TÊN RIÊNG Ở 4 VỊ TRÍ THẬT SỰ CẦN THIẾT:
-    1. Hook mở đầu tập (0-15s): Xướng tên thật ngay câu 1 để định danh nhân vật chính.
-    2. Chuyển cảnh / Bước nhảy thời gian: Gọi tên khi nhảy cóc không gian/thời gian để định vị lại cho người xem (ví dụ: 'Ba tháng sau, Seongho bắt đầu cuộc sống mới...', 'Quay trở lại căn hầm, Seongho...').
-    3. Phân biệt chủ thể trong cảnh đông người / combat: Khi có đồng đội, NPC hoặc quái vật trong cùng khung hình, gọi tên để người nghe không bị lẫn giữa hành động của MC và đối thủ (ví dụ: 'Trong khi gã chỉ huy còn đang lúng túng, Seongho đã âm thầm luồn ra sau...').
-    4. Cột mốc chiến tích & Flexing cao trào: Khắc ghi tên tuổi khi nhận thưởng hệ thống, hạ trùm hoặc tạo bước ngoặt lớn.
-  * 80% THỜI LƯỢNG CÒN LẠI — GIẢI PHÓNG SỰ TỰ NHIÊN:
-    - Trong các phân cảnh hành động liên tục, sinh tồn một mình hoặc rà soát trang bị: CẤM lặp lại tên riêng!
-    - Hãy dùng CHỦ NGỮ ẨN (cực kỳ tự nhiên trong tiếng Việt): Thay vì viết 'Để không bị lạc, Tổng rút dao gọt vỏ cây...', hãy viết: 'Rút dao gọt từng mảng vỏ cây làm dấu, anh cẩn thận tiến sâu vào trong...'.
-    - Để SỰ KIỆN / MÔI TRƯỜNG dẫn dắt: Thay vì viết 'Tổng nhận thấy quả táo hồi phục...', hãy viết: 'Một quả táo rực sáng rơi dưới gốc cây. Vừa cắn một miếng, thanh thể lực đã đầy ắp trở lại.'
-    - Dùng đại từ tự nhiên lướt nhẹ: 'anh', 'cậu', 'hắn' (nam) hoặc 'cô', 'nàng' (nữ).
-- BỘ LỌC CHỐNG VĂN MẪU AI (ANTI-AI CLICHÉ FILTER):
-  * CẤM TUYỆT ĐỐI các mẫu câu sáo rỗng, sến súa kinh điển của AI:
-    - CẤM: 'khiến anh chàng/thanh niên nhà ta chẳng còn lý do gì để...'
-    - CẤM: 'không hề vội vàng liều lĩnh mà cẩn thận...'
-    - CẤM: 'chứng minh bản năng... đang thức tỉnh mạnh mẽ hơn bao giờ hết'
-    - CẤM: 'nhận thức rõ ngày tàn sắp giáng xuống...'
-    - CẤM: 'cảm thấy tình hình tương đối khả quan...'
-  * TIẾT CHẾ DANH XƯNG CÁ TÍNH: 'anh chàng nhà ta', 'cô nàng nhà ta', 'thanh niên nhà ta' CHỈ ĐƯỢC PHÉP xuất hiện tối đa 1–2 lần trong TOÀN BỘ tập phim, chỉ bung ra ở các pha flex ao trình hoặc châm biếm thật sự đắt giá. Tuyệt đối không câu nào cũng chêm vào!
-- MA TRẬN ĐẠI TỪ THÍCH ỨNG GIỚI TÍNH (ZERO MISGENDERING MANDATE):
-  * Tự động nhận diện giới tính nhân vật chính từ tranh truyện (nét vẽ, trang phục) và ngữ cảnh:
-  * NẾU LÀ NAM CHÍNH: Dùng bộ đại từ Nam ('cậu', 'anh', 'hắn').
-  * NẾU LÀ NỮ CHÍNH: Dùng bộ đại từ Nữ ('cô', 'nàng', 'cô ấy', 'nữ chính', 'chị đại').
-  * CẤM TIỆT việc gọi Nữ chính là 'anh chàng', 'thanh niên', 'ông bạn'. CẤM TIỆT việc gọi Nam chính là 'cô nàng', 'nàng'.
-- RÀO CẢN ĐỊNH DANH NHÂN VẬT PHỤ (SIDE CHARACTER ISOLATION SHIELD):
-  * CẤM TUYỆT ĐỐI dùng các từ danh xưng của MC ('thanh niên', 'anh chàng', 'cô nàng', 'chị đại') để gọi nhân vật phụ (đồng đội, quái vật, NPC qua đường).
-  * Nhân vật phụ BẮT BUỘC phải có nhãn định danh cụ thể: 'hai đồng đội hám danh', 'gã láng giềng biến dị', 'tên cầm đầu', 'cô em gái'. Không bao giờ để khán giả nhầm lẫn giữa MC và nhân vật phụ!
-- QUY TẮC CÂU HOÀN CHỈNH TỰ THÂN (SELF-CONTAINED SENTENCE MANDATE):
-  * Mỗi dòng kết thúc bằng dấu "#" BẮT BUỘC phải là một câu hoàn chỉnh về ngữ pháp, có đầy đủ Chủ ngữ, Vị ngữ và Tân ngữ.
-  * CẤM TUYỆT ĐỐI việc xé lẻ câu thành nhiều dòng "#" chỉ để đổi trang ảnh!
-  * Nếu một hành động kéo dài qua 2-3 trang tranh, hãy dùng cú pháp dải trang: "[<trang_bắt_đầu>, <trang_kết_thúc>] - <Câu hoàn chỉnh>.#" thay vì viết câu què.
-- CẤM TRƯỢT NGÔI XƯNG (STRICT 3RD-PERSON POV MANDATE):
-  * Kịch bản hoàn toàn là lời dẫn chuyện từ ngôi thứ 3 ("Người bạn xem cùng / Couch Companion").
-  * CẤM dùng đại từ ngôi thứ nhất ('tôi', 'mình', 'chúng tôi') để kể hành động hoặc suy nghĩ của nhân vật.
-  * Mọi suy nghĩ nội tâm trong bóng thoại truyện tranh phải được chuyển thành lời dẫn gián tiếp (ví dụ: 'Anh nhận ra mình không thể hoảng loạn lúc này...' thay vì 'Tôi không thể hoảng loạn...').
-- CẤM TÊN KÝ TỰ ĐƠN RÁC (ZERO PLACEHOLDER NAMES):
-  * CẤM TUYỆT ĐỐI gọi tên nhân vật là 'A', 'B', 'MC', 'Unknown'. Hãy dùng danh xưng tự nhiên theo archetype ('gã thợ săn lão luyện', 'chàng trai trẻ', 'chỉ huy tổ đội', 'anh', 'cô').
-- Từ nối văn nói tự nhiên: Dùng linh hoạt 'Hóa ra', 'Và đoán xem', 'Nhìn xem', 'Thế nhưng', 'Đúng lúc này', 'Chưa kịp thở phào thì'.
-- CẤM TUYỆT ĐỐI văn phong dịch thô kiểu Google Translate:
-  * Không dùng cấu trúc bị động rườm rà: 'đã được nhìn thấy đang...', 'bị làm cho bất ngờ'. Thay bằng câu chủ động giàu năng lượng.
-  * Câu văn phải có nhịp thở ngắn gọn (1–2 câu ngắn, 3.0s–4.5s nói), tối ưu cho giọng đọc AI (Voice Cloning / OmniVoice / Jessa).
-- An toàn YouTube & Tránh từ cấm: Thay các từ nhạy cảm bằng từ ngữ hành động mạnh mẽ an toàn:
-  * Dùng 'tiêu diệt', 'hạ gục', 'tiễn lên đường', 'xử đẹp', 'quét sạch', 'cho đo ván'.
-- Use standard Vietnamese Latin script. Do not mix foreign or Chinese characters.
-- Preserve proper names from the glossary when provided.
+- Viết TOÀN BỘ bằng tiếng Việt văn nói tự nhiên (giọng kể chuyện như người thật đang nói trực tiếp với bạn bè).
+- Phong cách "Sarcastic Bro-Commentary": 80% kịch tính sinh tồn + 20% châm biếm sâu cay, hóm hỉnh.
+
+5 QUY TẮC VÀNG CHO GIỌNG KỂ TIẾNG VIỆT:
+
+1. CÓ GÓC NHÌN, CÓ Ý KIẾN (Narrator Có Personality):
+   Mỗi câu phải chứa PHẢN ỨNG, NHẬN XÉT hoặc ĐÁNH GIÁ. Không bao giờ chỉ mô tả sự kiện khô khan.
+   Từ nối văn nói tự nhiên: 'Hóa ra', 'Và đoán xem', 'Nhìn xem', 'Thế nhưng', 'Đúng lúc này', 'Mà khoan đã'.
+   Dùng động từ mạnh: 'tiêu diệt', 'hạ gục', 'xử đẹp', 'quét sạch', 'cho đo ván', 'tiễn lên đường'.
+   CẤM cấu trúc bị động rườm rà: 'đã được nhìn thấy đang...', 'bị làm cho bất ngờ'. Thay bằng câu chủ động.
+
+2. BIẾN TẤU NHỊP CÂU (Rhythm Variation):
+   Xen kẽ nhịp câu tạo sức hút:
+   - Cứ 2-3 câu dài (15-25 từ) → XÉN 1 câu siêu ngắn (3-7 từ).
+   - Câu siêu ngắn = phản ứng, kết luận, hoặc twist: 'Xong.', 'Không có cửa.', 'Sai lầm chết người.'
+   - CẤM 3+ câu liên tiếp bắt đầu bằng cùng một cấu trúc ngữ pháp.
+
+3. ĐỐI LẬP TƯƠNG PHẢN (Contrast Juxtaposition — Dopamine Trigger #1):
+   Với mọi cảnh hầm trú ẩn/tích trữ/sinh tồn, BẮT BUỘC dùng cấu trúc:
+   "Bên ngoài, [cảnh khốn khổ/hỗn loạn]. Bên trong? [MC tận hưởng tiện nghi/an toàn]."
+
+4. MÔ TẢ CỤ THỂ, KHÔNG GIẢI THÍCH (Show Don't Tell):
+   CẤM dùng: 'cho thấy', 'chứng tỏ rằng', 'thể hiện sự'.
+   Thay bằng: mô tả CHI TIẾT CỤ THỂ (vết sẹo, ánh mắt, hành vi, vật thể) để khán giả TỰ CẢM NHẬN.
+
+5. GIỮ CHÂN KHÁN GIẢ (Audience Pulse Check):
+   Cứ mỗi 4-6 segment, BẮT BUỘC chèn 1 trong:
+   (a) Câu hỏi tu từ: "Đoán xem?" / "Bạn nghĩ sao?"
+   (b) Xưng hô trực tiếp: "Và thay vì X, anh làm gì?"
+   (c) Hook dự báo: "Nhưng cái điên rồ nhất còn ở phía sau."
+   Tối thiểu 2 lần / tập, tối đa 1 lần / 45 giây.
+
+PHONG CÁCH THAM CHIẾU — TRƯỚC VÀ SAU (HỌC THEO PHONG CÁCH "SAU"):
+
+❌ TRƯỚC (nhạt, vô hồn):
+"Cả nền văn minh nhân loại giờ chỉ còn là một đống đổ nát hoang tàn, chìm trong biển lửa và khói bụi nghẹt thở."
+✅ SAU (có personality, có rhythm):
+"Nhìn đi. Toàn bộ nền văn minh mà nhân loại mất hàng ngàn năm gây dựng—tan tành trong chưa đầy sáu phút."
+
+❌ TRƯỚC (tell, không show):
+"Khuôn mặt lạnh tanh nhuốm đầy bụi bặm cho thấy những khắc nghiệt tột cùng mà anh từng trải qua."
+✅ SAU (show, chi tiết cụ thể):
+"Bụi bặm phủ kín, đôi mắt trũng sâu không còn biết chớp—khuôn mặt của một người đã chứng kiến quá nhiều cái chết."
+
+❌ TRƯỚC (thiếu contrast):
+"Căn hầm trú ẩn ấm cúng và đầy đủ tiện nghi này chính là thành quả từ sự chuẩn bị chu đáo trước thảm họa."
+✅ SAU (contrast juxtaposition):
+"Bên ngoài, cả thành phố đang giành giật từng hạt gạo cuối cùng. Bên trong? Anh đang ngồi rung đùi lướt mạng Wi-Fi tốc độ cao, với tủ lạnh chất đầy thực phẩm đủ ăn ba năm."
+
+❌ TRƯỚC (monotone — 3 câu cùng cấu trúc):
+"Trở về thực tại, anh chăm chú chuẩn bị từng công đoạn để đối mặt với cuộc sống sinh tồn cô độc."
+"Đôi mắt sắc lẹm kiên định hướng về phía trước, quyết tâm giành giật sự sống qua từng ngày."
+"Từng bước sinh hoạt diễn ra trật tự bên trong một nơi trú ẩn kín kẽ tách biệt hẳn với hiểm nguy bên ngoài."
+✅ SAU (rhythm variation: Dài→NGẮN→Dài):
+"Quay lại thực tại. Không đồng đội. Không kế hoạch B."
+"Nhưng đôi mắt kia chẳng hề run rẩy—nhìn thẳng vào màn đêm như đang thách thức nó."
+"Từng bữa ăn, từng giấc ngủ, từng nhịp thở—tất cả được tính toán đến mili-giây bên trong căn hầm cách ly hoàn toàn."
+
+❌ TRƯỚC (no audience engagement):
+"Mở diễn đàn mạng lên khoe chiếc hầm kiên cố, anh lập tức bị đám cư dân mạng buông lời mỉa mai."
+✅ SAU (audience pulse check):
+"Và thay vì im lặng tận hưởng, anh làm gì? Lên diễn đàn khoe hầm. Đương nhiên là bị đám anh hùng bàn phím xúm lại chửi cho tơi bời."
+
+6. KHỚP ĐÚNG CHỦ THỂ HÌNH ẢNH (Hero Subject Alignment & Weighted Multi-Panel):
+   - Khi lời dẫn miêu tả quái vật, vũ khí, chiêu thức, hoặc bảng hệ thống, BẮT BUỘC chọn đúng trang đặc tả cận cảnh rõ nét của chủ thể đó.
+   - Tuyệt đối KHÔNG chọn ảnh phụ (như lưng hay biểu cảm mờ nhạt của nhân vật) khi lời đọc đang mô tả quái vật lao tới.
+   - Khi ghép 2 trang (Đòn đánh -> Phản ứng): BẮT BUỘC gán trọng số phần trăm [Trang_chính:70%, Trang_phụ:30%] (ví dụ [39:75%, 40:25%]), KHÔNG chia đều 50/50 làm loãng cảnh hành động chính.
+
+ĐỊNH DANH NHÂN VẬT CHÍNH (CONTEXTUAL PROTAGONIST ANCHORING):
+- CHỈ gọi tên riêng ở 4 vị trí: Hook mở đầu, Chuyển cảnh/thời gian, Phân biệt đông người, Flex cao trào.
+- 80% thời lượng còn lại: Dùng CHỦ NGỮ ẨN hoặc đại từ tự nhiên ('anh', 'cậu', 'hắn' / 'cô', 'nàng').
+- 'anh chàng nhà ta', 'thanh niên nhà ta' tối đa 1-2 lần / toàn bộ tập.
+
+BỘ LỌC CHỐNG VĂN MẪU AI:
+- CẤM: 'khiến anh chàng nhà ta chẳng còn lý do gì để...'
+- CẤM: 'không hề vội vàng liều lĩnh mà cẩn thận...'
+- CẤM: 'chứng minh bản năng đang thức tỉnh mạnh mẽ hơn bao giờ hết'
+- CẤM: 'nhận thức rõ ngày tàn sắp giáng xuống...'
+- CẤM: 'cảm thấy tình hình tương đối khả quan...'
+
+GIỚI TÍNH & NHÂN VẬT PHỤ:
+- Nam chính: 'cậu', 'anh', 'hắn'. CẤM gọi là 'cô nàng'.
+- Nữ chính: 'cô', 'nàng', 'cô ấy'. CẤM gọi là 'anh chàng'.
+- Nhân vật phụ: Phải có nhãn cụ thể ('gã láng giềng', 'tên cầm đầu', 'ông lão'). CẤM dùng danh xưng MC.
+
+AN TOÀN YOUTUBE:
+- Dùng 'tiêu diệt', 'hạ gục', 'tiễn lên đường', 'xử đẹp', 'quét sạch', 'cho đo ván'.
+- Dùng chữ Latin tiêu chuẩn tiếng Việt. Giữ nguyên tên riêng từ glossary.
 """
     else:
         language_rules = f"""
@@ -3738,17 +3780,6 @@ LANGUAGE & US MANHWA/WEBTOON CULTURE RULES:
 - Use natural Western manhwa community terminology and tropes where appropriate:
   * Awakened abilities, Hunter rankings (S-Rank, E-Rank), Dungeon Break, Status Window / System Prompt, Leveling Up;
   * Overpowered (OP) Protagonist, Regressor, Reincarnator, Hidden Mastermind, Aura / Killing Intent, flexing / humbled.
-- SELF-CONTAINED SENTENCE MANDATE (ZERO SENTENCE ENJAMBMENT):
-  * Every single segment ending in "#" MUST be a complete, grammatically self-contained sentence with a clear Subject, Verb, and Object.
-  * NEVER split a single sentence across multiple lines or hash marks "#" just to change page numbers!
-  * If a narrative beat or combat sequence spans across 2-3 pages, use multi-panel syntax: "[<start>, <end>] - <Complete sentence>.#" rather than fragmenting clauses.
-- STRICT 3RD-PERSON NARRATIVE POV (ZERO FIRST-PERSON DRIFT):
-  * The entire recap is narrated from a 3rd-person observer perspective ("Couch Companion").
-  * NEVER use 1st-person pronouns ("I", "me", "my", "myself", "we") when narrating character actions or thoughts.
-  * Convert internal comic thoughts to indirect speech (e.g., "He realizes he cannot afford to panic..." rather than "I can't afford to panic...").
-- ZERO PLACEHOLDER / SINGLE-LETTER CHARACTER NAMES:
-  * NEVER refer to any character as a single letter (e.g. "A", "B", "C") or placeholder token ("MC", "Hero", "Unknown").
-  * If the specific name is unknown, use natural descriptive titles ("the veteran survivor", "the young hunter", "the party leader", "he", "she").
 - Verbal Velocity: Use strong, active transitive verbs (e.g., 'obliterates', 'stockpiles', 'outsmarts', 'dispatches', 'unleashes', 'corners', 'exposes', 'shatters', 'ambushes') rather than passive explanations ('is seen doing', 'was attacked by').
 
 YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY:
@@ -3761,12 +3792,12 @@ YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY:
 
     if lang_key in {"en", "english"}:
         prompt_examples = """5 - Turns out, Paran wasn't crazy after all—the moment the sirens blare, he's the only one ready.#
-[12, 13] - A mutated beast lunges straight for him, but Paran simply sidesteps and slices off its arm like butter.#
+[12:75%, 13:25%] - A mutated beast lunges straight for him, but Paran simply sidesteps and slices off its arm like butter.#
 [14, 15, 16] - With one clean strike, our boy drops the monster cold, while his greedy teammates are left completely speechless.#
 24 - But just as he catches his breath, an ominous red system alert warns him that the real nightmare has only begun.#"""
     else:
         prompt_examples = """5 - Hóa ra Paran chẳng hề gàn dở—ngay khi còi báo động vang lên, cậu là người duy nhất sẵn sàng nghênh đón thảm họa.#
-[12, 13] - Một con quái vật đột biến lao thẳng tới, nhưng Paran chỉ nhẹ nhàng né sang một bên rồi chém đứt cánh tay nó trong chớp mắt.#
+[12:75%, 13:25%] - Một con quái vật đột biến lao thẳng tới, nhưng Paran chỉ nhẹ nhàng né sang một bên rồi chém đứt cánh tay nó trong chớp mắt.#
 [14, 15, 16] - Một đòn dứt khoát của thanh niên nhà ta tiễn con quái vật đo ván tại chỗ, khiến hai gã đồng đội hám danh chỉ biết đứng hình há hốc mồm.#
 24 - Thế nhưng vừa mới kịp thở phào, một dòng cảnh báo đỏ rực từ hệ thống bất ngờ hiện lên, báo hiệu cơn ác mộng thực sự mới chỉ bắt đầu.#"""
 
@@ -3852,8 +3883,12 @@ what happened in the chapter rather than reading or translating the comic.
 --------------------------------------------------
 
 Create a rich, fast-paced recap of the {total_pages} provided pages with
-approximately 30–45 high-value recap micro-segments (scaled to cover the
-entire chapter thoroughly with minimal story gaps).
+approximately {max(22, total_pages // 2)}–{min(45, total_pages)} high-value recap
+micro-segments (minimum = ceil(total_pages / 2), to ensure dense story coverage).
+
+ANTI-GAP RULE: Never skip more than 4 consecutive pages without at least one
+segment referencing that range. Every significant scene cluster must be covered.
+
 
 Cover the important story progression continuously from the beginning
 toward the end of the provided material.
@@ -3963,11 +3998,12 @@ from the provided comic that visually depicts the event, character, or action
 described in that segment.
 
 Crucial Visual Grounding & Expressiveness Rules:
-- Direct Alignment: If the narration mentions a character, battle, weapon,
-  discovery, or emotion, select the specific page/panel that clearly SHOWS it.
-- Multi-Panel Density on Key Scenes: Select multi-panel ranges (e.g. [5, 6] or
-  [12, 13]) whenever describing consecutive character actions, reactions, or
-  combats within the same meaningful scene.
+- HERO SUBJECT ALIGNMENT MANDATE (CRITICAL):
+  * Direct Alignment: If the narration mentions a monster, boss, weapon, explosive attack, or system window, the selected page MUST be the direct closeup/action panel of THAT EXACT SUBJECT.
+  * NEVER assign a monster attack sentence to a panel showing only the character's back/reaction if a dedicated monster action panel exists!
+  * WEIGHTED MULTI-PANEL RULE: When pairing 2 pages for cause-and-effect (e.g. Monster lunges -> Character knocked back), ALWAYS use weighted percentages: [<hero_subject_page>:70%, <reaction_page>:30%] (e.g. [39:75%, 40:25%]).
+  * DO NOT use equal 50/50 splits on action scenes when one panel is the primary visual subject!
+- Multi-Panel Density on Key Scenes: Select multi-panel ranges (e.g. [5, 6] or [12:70%, 13:30%]) whenever describing consecutive character actions, reactions, or combats within the same meaningful scene.
 - DENSE VISUAL PACING & IMAGE ALLOCATION:
   * For longer narrative sentences exceeding 100 characters (or duration > 6s), allocate 2 distinct consecutive pages with clear visual evidence (e.g. [<page1>, <page2>]) to maintain visual momentum and prevent viewer fatigue.
   * For short, punchy phrases (< 40 characters), allocate exactly 1 page. Never assign multiple pages to rapid short phrases.
@@ -3986,8 +4022,9 @@ Crucial Visual Grounding & Expressiveness Rules:
   * NEVER select pure text cards, floating narrator text boxes without characters,
     or single word splash pages (e.g. 'WAR', 'PEACE', 'BOOM'). Always select panels
     showing characters, faces, monsters, powers, or actions.
-  * CRITICAL DIRECTIVE: You are directing a YouTube VIDEO recap, NOT an audiobook! The audience watches to SEE stunning comic artwork, combat, and expressive characters, NOT to read static text boxes while the voiceover talks. NEVER choose a page merely because its text box contains words matching your narration. ALWAYS choose the page with character art and action!
-  * DO NOT mechanically pair pages in numerical sequence (e.g. [1, 2], [3, 4], [5, 6]).
+  * ANTI-MECHANICAL PAIRING MANDATE: DO NOT mechanically pair pages simply because numbers are consecutive (e.g. [1, 2], [3, 4], [56, 57]).
+  * You MUST ONLY pair 2 pages if BOTH pages show distinct, high-impact story visuals (e.g. [Attack Page: 75%, Impact/Damage Page: 25%] or [Monster Charge: 70%, Hero Counter: 30%]).
+  * If only ONE page contains strong character art or combat, assign THAT SINGLE PAGE only (e.g. 39 - Narration sentence.#). Never drag in a weak, transitional, or bubble-heavy adjacent page!
   * Only select multi-panel ranges if BOTH panels contain meaningful story visuals.
   * If a page lacks meaningful story or character visuals, SKIP IT completely.
 - Prioritize pages containing:
@@ -4111,7 +4148,7 @@ def generate_intro_prompt(
     total_pages: int,
     target_language: str = "en",
     market_id: str = None,
-    point_score_threshold: int = 70,
+    point_score_threshold: int = 65,
 ) -> str:
     """Generate a specialized prompt for Episode 1 Intro Hook only.
 
@@ -5244,7 +5281,6 @@ class VideoRequest(BaseModel):
     remove_text_conf: float = 0.3
     remove_text_radius: int = 3
     ref_audio_path: Optional[str] = None
-    enable_bgm: bool = False
     enable_flash_forward_intro: bool = False
     flash_forward_custom_hook: Optional[str] = None
 
@@ -6159,7 +6195,6 @@ async def generate_video(payload: VideoRequest):
         "remove_text_conf": payload.remove_text_conf,
         "remove_text_radius": payload.remove_text_radius,
         "ref_audio_path": _validated_asset_reference(payload.ref_audio_path),
-        "enable_bgm": payload.enable_bgm,
         "enable_flash_forward_intro": payload.enable_flash_forward_intro,
         "flash_forward_custom_hook": payload.flash_forward_custom_hook,
     }

@@ -282,8 +282,6 @@ async def main():
             "language": "vi",
             "voice_id": config.DEFAULT_VI_VOICE_ID,
             "ref_audio_path": config.DEFAULT_VI_REF_AUDIO,
-            "bgm_genre": "apocalypse",
-            "enable_bgm": False,
             "enable_flash_forward_intro": False,
             "cleanup": False,
             "safe_mode": False,

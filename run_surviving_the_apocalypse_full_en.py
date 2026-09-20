@@ -87,21 +87,21 @@ class ConsoleContext:
             pass
 
 async def main():
-    target_url = "https://www.webtoons.com/en/action/ultimate-shut-in/list?title_no=7457"
+    target_url = "https://www.webtoons.com/en/thriller/surviving-the-apocalypse/list?title_no=6678"
     from_ep = 1
-    to_ep = 85
+    to_ep = 58
     total_eps = to_ep - from_ep + 1
 
     print("=" * 80)
-    print("  START RECAP WORKFLOW: Ultimate Shut-in (Full Series: Episodes 1 -> 85)")
+    print("  START RECAP WORKFLOW: Surviving the Apocalypse (Full Series: Episodes 1 -> 58)")
     print(f"  Target URL: {target_url}")
     print(f"  Episodes: {from_ep} to {to_ep} (Total: {total_eps} episodes)")
     print("  Language: English (en)")
-    print("  Market: US Apocalypse / Action Recaps")
-    print(f"  Voice TTS: OmniVoice Andrew ({config.DEFAULT_EN_VOICE_ID})")
+    print("  Market: US Apocalypse / Survival Thriller Recaps")
+    print(f"  Voice TTS: OmniVoice English ({config.DEFAULT_EN_VOICE_ID})")
     print(f"  Ref Audio: {config.DEFAULT_EN_REF_AUDIO}")
-    print("  VLM Automation: Google Gemini 3.8 Flash (5-Profile Round-Robin + API Fallback)")
-    print("  Video Rendering: OpenCV C++ SIMD NVENC (120 FPS accelerated)")
+    print("  VLM Automation: Google Gemini 3.8 Flash (Narration v2.0 - 5 Golden Rules)")
+    print("  Video Rendering: OpenCV C++ NVENC / Fast-Scan (1080p 9:16)")
     print("=" * 80)
 
     # Check disk space
@@ -109,11 +109,11 @@ async def main():
     free_gb = free // (1024 ** 3)
     print(f"[DISK] Drive D: Free Space: {free_gb} GB")
     if free_gb < 10:
-        print("[WARNING] Dung lượng đĩa D: thấp (< 10 GB).")
+        print("[WARNING] Low disk space on drive D: (< 10 GB).")
 
-    task_id = f"ultimate-shut-in-full-1-85-en-{int(time.time())}"
+    task_id = f"surviving-the-apocalypse-full-1-58-en-{int(time.time())}"
     task = WorkflowTask(
-        comic_title="Ultimate Shut-in",
+        comic_title="Surviving the Apocalypse",
         comic_url=target_url,
         from_episode=from_ep,
         to_episode=to_ep,
@@ -121,6 +121,7 @@ async def main():
             "vlm_model": "3.8 Flash",
             "language": "en",
             "market_id": "us_apocalypse",
+            "market": "us_apocalypse",
             "voice_id": config.DEFAULT_EN_VOICE_ID,
             "ref_audio_path": config.DEFAULT_EN_REF_AUDIO,
             "min_panel_duration": 3.5,
@@ -130,7 +131,7 @@ async def main():
             "safe_mode": False,
             "retry_count": 5,
             "timeout": 360,
-            "concurrency": 6,
+            "concurrency": 4,
             "burn_subtitles": False,
             "remove_text": False,
             "split_double_pages": True,
@@ -139,7 +140,6 @@ async def main():
         id=task_id
     )
 
-    task.artifacts["download_dir"] = os.path.join(PROJECT_ROOT, "downloads", "ultimate_shutin_1_85_en_87452f90")
     ctx = ConsoleContext(task)
 
     pipeline = [
@@ -163,7 +163,7 @@ async def main():
     for stage in pipeline:
         task.current_stage = stage.name
         print(f"\n=======================================================")
-        print(f"  >>> BẮT ĐẦU: {stage.name}")
+        print(f"  >>> STARTING STAGE: {stage.name}")
         print(f"=======================================================")
 
         for s in task.stages:
@@ -185,10 +185,10 @@ async def main():
                     if not (os.path.isfile(os.path.join(download_dir, f"episode_{e}", "recap.json")) and os.path.getsize(os.path.join(download_dir, f"episode_{e}", "recap.json")) > 10)
                 ]
                 if not missing_eps:
-                    print(f"\n[SELF-HEAL] Tất cả {total_eps} tập đều đã có recap.json hợp lệ!", flush=True)
+                    print(f"\n[SELF-HEAL] All {total_eps} episodes now have valid recap.json!", flush=True)
                     ok = True
                     break
-                print(f"\n[SELF-HEAL] Vòng {heal_round}/3: Tự động chạy bù cho {len(missing_eps)} tập thiếu: {missing_eps}...", flush=True)
+                print(f"\n[SELF-HEAL] Round {heal_round}/3: Auto re-running missing {len(missing_eps)} episodes: {missing_eps}...", flush=True)
                 for m_ep in missing_eps:
                     mini_task = WorkflowTask(
                         comic_title=task.comic_title,
@@ -211,7 +211,7 @@ async def main():
                 ok = True
 
         if not ok:
-            print(f"\n[FATAL] Giai đoạn {stage.name} thất bại sau {elapsed:.1f}s. Dừng quy trình.")
+            print(f"\n[FATAL] Stage {stage.name} failed after {elapsed:.1f}s. Aborting workflow.")
             for s in task.stages:
                 if s["name"] == stage.name:
                     s["status"] = StageState.FAILED
@@ -224,17 +224,17 @@ async def main():
                 s["status"] = StageState.SUCCESS
                 s["progress"] = 100.0
         ctx._sync_task_db()
-        print(f"[DONE] Giai đoạn {stage.name} hoàn thành 100% trong {elapsed:.1f}s.")
+        print(f"[DONE] Stage {stage.name} completed 100% in {elapsed:.1f}s.")
 
     task.status = WorkflowState.SUCCESS
     ctx._sync_task_db()
     print("\n================================================================================")
-    print(f"  [SUCCESS] HOÀN TẤT 100% QUY TRÌNH RECAP ULTIMATE SHUT-IN (1 -> 85, TIẾNG ANH)!")
+    print(f"  [SUCCESS] 100% COMPLETED RECAP FOR SURVIVING THE APOCALYPSE (EP 1 -> 57, ENGLISH)!")
     download_dir = task.artifacts.get("download_dir", "")
-    print(f"  Thư mục kết quả: {download_dir}")
+    print(f"  Output Directory: {download_dir}")
     final_vids = task.artifacts.get("final_videos", {})
     for ep_k, v_path in final_vids.items():
-        print(f"  Tập {ep_k} Video: {v_path}")
+        print(f"  Episode {ep_k} Video: {v_path}")
     print("================================================================================")
     return 0
 

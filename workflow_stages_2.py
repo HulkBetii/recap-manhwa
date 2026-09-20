@@ -359,6 +359,17 @@ def align_subtitles_to_segments(subtitles: list, segments: list, audio_duration:
     return normalized_entries
 
 
+def wrap_srt_text(text: str, max_chars: int = 42) -> str:
+    """
+    Splits long subtitle text into clean balanced lines conforming to YouTube CC standards (<= 42 chars/line).
+    """
+    if not text:
+        return ""
+    import textwrap
+    lines = textwrap.wrap(text.strip(), width=max_chars, break_long_words=False, break_on_hyphens=False)
+    return "\n".join(lines)
+
+
 class Stage9_SubtitleNormalization(BaseStage):
     @property
     def name(self) -> str: return "Stage 9 - Subtitle Normalization"
@@ -448,7 +459,8 @@ class Stage9_SubtitleNormalization(BaseStage):
                 for s_idx, sub in enumerate(normalized_srt_entries, 1):
                     start_str = format_time(sub["start"])
                     end_str = format_time(sub["end"])
-                    sf.write(f"{s_idx}\n{start_str} --> {end_str}\n{sub['text']}\n\n")
+                    wrapped_text = wrap_srt_text(sub["text"])
+                    sf.write(f"{s_idx}\n{start_str} --> {end_str}\n{wrapped_text}\n\n")
             os.replace(srt_temp_path, srt_path)
             cache.commit(stage="subtitles", fingerprint=fingerprint, outputs=[srt_path])
 
@@ -901,18 +913,10 @@ def ease_in_out_cubic(t: float) -> float:
 
 def soft_linear_glide(t: float) -> float:
     """
-    Continuous smooth gliding curve: 5% gentle ease-in, 90% constant velocity, 5% gentle ease-out.
-    Prevents abrupt stops while maintaining continuous pacing.
+    Continuous smooth linear gliding curve: maintains constant uniform velocity (1.0)
+    throughout the entire shot until transition, preventing any stall, freeze or slowing down.
     """
-    t = max(0.0, min(1.0, float(t)))
-    p = 0.05
-    if t < p:
-        return 0.5 * (t / p) ** 2 * (p / (1.0 - p))
-    elif t > (1.0 - p):
-        dt = (1.0 - t) / p
-        return 1.0 - 0.5 * (dt ** 2) * (p / (1.0 - p))
-    else:
-        return (t - p * 0.5) / (1.0 - p)
+    return float(max(0.0, min(1.0, float(t))))
 
 
 def apply_motion_blur(img_np, dx: float, dy: float):
@@ -1002,6 +1006,7 @@ class CameraPlanner:
                 elif bubble_cx > 0.62 * W_c:
                     x_bias = min(x_bias, -W_c * 0.16)
 
+        is_face_near_top = (focal_point is not None and float(focal_point[1]) < 0.25 * H_c)
         if focal_point is None:
             focal_x = center_x + x_bias
             focal_y = center_y + y_bias
@@ -1011,22 +1016,34 @@ class CameraPlanner:
             focal_y = center_y * 0.25 + float(fy_raw) * 0.75 + y_bias
 
         focal_x = float(np.clip(focal_x, 0.15 * W_c, 0.85 * W_c))
-        focal_y = float(np.clip(focal_y, 0.18 * H_c, 0.82 * H_c))
+        if is_face_near_top:
+            focal_y = float(np.clip(focal_y, 0.05 * H_c, 0.82 * H_c))
+        else:
+            focal_y = float(np.clip(focal_y, 0.18 * H_c, 0.82 * H_c))
 
         easing = "soft_linear_glide"
 
-        # Mode A: Landscape / Extreme Panoramic Panels (aspect_ratio >= 2.20) -> Smooth Cinematic Horizontal Pan
-        # (Allows natural scanning across wide manga spreads and landscape battle scenes)
-        if aspect_ratio >= 2.20:
+        # Mode A: Landscape / Wide Panels (aspect_ratio >= 1.70) -> Smooth Cinematic Horizontal Pan
+        # (Allows natural scanning across wide manga spreads, landscape battle scenes, and wide room shots)
+        if aspect_ratio >= 1.70:
             animation_type = "cinematic_pan_horizontal"
             dir_x = 1.0 if (shot_index % 2 == 0) else -1.0
             direction = "left_to_right" if dir_x > 0 else "right_to_left"
-            pan_span = max(15.0, min(W_c * 0.12, 80.0))
-            x_start = float(np.clip(center_x - dir_x * pan_span * 0.5, 0.15 * W_c, 0.85 * W_c))
-            x_end = float(np.clip(center_x + dir_x * pan_span * 0.5, 0.15 * W_c, 0.85 * W_c))
+            wide_scale = 1.15 if aspect_ratio >= 2.2 else 1.08
+            w_cam = W_c / wide_scale
+            x_min_safe = float(w_cam * 0.5)
+            x_max_safe = float(max(x_min_safe, W_c - w_cam * 0.5))
+            max_pan = max(0.0, x_max_safe - x_min_safe)
+            pan_span = min(max_pan, max(20.0, float(duration) * 35.0))
+            if pan_span > 0:
+                x_start = float(np.clip(center_x - dir_x * pan_span * 0.5, x_min_safe, x_max_safe))
+                x_end = float(np.clip(center_x + dir_x * pan_span * 0.5, x_min_safe, x_max_safe))
+            else:
+                x_start = center_x
+                x_end = center_x
             keyframes = [
-                {"time": 0.0, "x": x_start, "y": focal_y, "scale": 1.00, "progress": 0.0},
-                {"time": duration, "x": x_end, "y": focal_y, "scale": 1.00, "progress": 1.0}
+                {"time": 0.0, "x": x_start, "y": focal_y, "scale": wide_scale, "progress": 0.0},
+                {"time": duration, "x": x_end, "y": focal_y, "scale": wide_scale, "progress": 1.0}
             ]
             return {
                 "page": page_num,
@@ -1041,55 +1058,72 @@ class CameraPlanner:
             }
 
         # Measure usable vertical travel distance for vertical pan
-        # Only tall webtoon strips (aspect_ratio < 0.70) have vertical sliding headroom
-        if aspect_ratio < 0.70:
-            h_view_ref = W_c / 0.68
-            usable_v_travel = H_c - h_view_ref
+        # Webtoon vertical strips (aspect_ratio < 0.68) have ample vertical sliding headroom
+        h_cam_ref = W_c / 0.68
+        if aspect_ratio < 0.68:
+            # Auto-Upgrade Motion for Ultra-Tall Panels (aspect_ratio < 0.50): guarantee vertical glide
+            if aspect_ratio < 0.50:
+                usable_v_travel = max(180.0, H_c - min(H_c, h_cam_ref))
+            else:
+                usable_v_travel = max(0.0, H_c - min(H_c, h_cam_ref))
         else:
             usable_v_travel = 0.0
 
-        # Mode B: Tall Webtoon Strip Panel (usable_v_travel >= 160px) -> Continuous Vertical Pan Glide
-        # Adaptive Velocity Clamping (v1.7.0): Cap pan speed at 120 px/s to prevent dizzying camera motion
-        max_travel_by_speed = max(20.0, float(duration) * 120.0)
-        max_travel_by_panel = H_c * 0.35
-        travel_span = min(max_travel_by_panel, max_travel_by_speed)
+        # Exact safe viewport center Y boundaries (strictly synchronous with render_page_frame cy_min / cy_max)
+        y_min_valid = float(h_cam_ref * 0.5)
+        y_max_valid = float(max(y_min_valid, H_c - h_cam_ref * 0.5))
+        total_valid_span = max(0.0, y_max_valid - y_min_valid)
 
-        h_cam_ref = W_c / 0.68
-        min_valid_y = float(h_cam_ref * 0.5)
-        max_valid_y = float(H_c - h_cam_ref * 0.5)
-        if min_valid_y >= max_valid_y:
-            min_valid_y, max_valid_y = 0.10 * H_c, 0.90 * H_c
+        # Mode B: Vertical Pan Glide for Vertical Panels (usable_v_travel >= 160px and total_valid_span >= 30px)
+        # Cap speed so pan is smooth and continuous
+        max_travel_by_speed = max(20.0, float(duration) * 100.0)
+        actual_span = min(total_valid_span, max_travel_by_speed)
 
-        actual_span = min(travel_span, max(0.0, max_valid_y - min_valid_y))
-
-        if usable_v_travel >= 160.0 and actual_span >= 50.0:
+        if (usable_v_travel >= 160.0 or aspect_ratio < 0.50) and actual_span >= 30.0:
             animation_type = "vertical_pan_glide"
             
-            # Smart direction: If bubble is concentrated in upper 38%, pan bottom-to-top to emphasize character first
+            # Smart Direction Selection:
+            # 1. Bubble position guidance (avoid starting right on top of text)
             if bubble_centroid and bubble_coverage_ratio > 0.18 and bubble_centroid[1] < 0.38 * H_c:
                 direction = "bottom_to_top"
             elif bubble_centroid and bubble_coverage_ratio > 0.18 and bubble_centroid[1] > 0.62 * H_c:
                 direction = "top_to_bottom"
+            # 2. Composite Action / Subject Asymmetry:
+            # If focal point is detected in lower half (e.g. character reacting below), start from top (threat/monster) and glide down
+            elif focal_point is not None and focal_point[1] > 0.55 * H_c:
+                direction = "top_to_bottom"
+            elif focal_point is not None and focal_point[1] < 0.40 * H_c:
+                direction = "bottom_to_top"
+            # 3. Default: Alternating motion to maintain dynamic rhythm
             else:
                 direction = "top_to_bottom" if (shot_index % 2 == 0) else "bottom_to_top"
 
-            y_anchor = float(np.clip(focal_y, min_valid_y + actual_span * 0.5, max_valid_y - actual_span * 0.5))
-            y_top = y_anchor - actual_span * 0.5
-            y_bot = y_anchor + actual_span * 0.5
+            y_anchor = float(np.clip(focal_y, y_min_valid + actual_span * 0.5, y_max_valid - actual_span * 0.5))
+            if is_face_near_top:
+                # Pin top boundary directly at top viewport edge to preserve 100% hair and crown
+                y_top = y_min_valid
+                y_bot = float(np.clip(y_top + actual_span, y_min_valid, y_max_valid))
+            else:
+                y_top = float(np.clip(y_anchor - actual_span * 0.5, y_min_valid, y_max_valid))
+                y_bot = float(np.clip(y_anchor + actual_span * 0.5, y_min_valid, y_max_valid))
 
             # Bubble-Exclusion Clamping: Prevent camera from panning over speech bubbles at top/bottom
             if bubble_centroid and bubble_coverage_ratio >= 0.15:
                 bubble_cx, bubble_cy = bubble_centroid
-                if bubble_cy < 0.35 * H_c:
+                if bubble_cy < 0.35 * H_c and not is_face_near_top:
                     bubble_bottom_edge = float(bubble_cy + H_c * 0.14)
                     y_top = max(y_top, min(bubble_bottom_edge, y_anchor))
+                    y_top = min(y_top, y_bot - 20.0)
+                    y_top = float(np.clip(y_top, y_min_valid, y_max_valid))
                 elif bubble_cy > 0.65 * H_c:
                     bubble_top_edge = float(bubble_cy - H_c * 0.14)
                     y_bot = min(y_bot, max(bubble_top_edge, y_anchor))
+                    y_bot = max(y_bot, y_top + 20.0)
+                    y_bot = float(np.clip(y_bot, y_min_valid, y_max_valid))
 
             if y_top >= y_bot:
-                y_top = max(min_valid_y, y_anchor - 20.0)
-                y_bot = min(max_valid_y, y_anchor + 20.0)
+                y_top = y_min_valid
+                y_bot = min(y_max_valid, y_top + max(20.0, actual_span))
 
             if direction == "top_to_bottom":
                 y_start, y_end = y_top, y_bot
@@ -1136,9 +1170,18 @@ class CameraPlanner:
                 "bubble_coverage_ratio": bubble_coverage_ratio,
             }
 
+        # Action Punch Zoom for dynamic cadence on standard panels:
+        # Scale 1.00 -> 1.12 with continuous soft_linear_glide (never freezes before cut)
+        if shot_index % 4 == 2 and duration <= 6.0:
+            animation_type = "action_punch_zoom"
+            direction = "punch_in"
+            keyframes = [
+                {"time": 0.0, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 0.0},
+                {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.12, "progress": 1.0}
+            ]
         # Smooth Ken Burns Focus Zoom In / Zoom Out luân phiên (Scale 1.00 <-> 1.10)
-        # Keeps 100% of panel artwork visible at all times with gentle, cinematic motion
-        if shot_index % 2 == 0:
+        # Keeps 100% of panel artwork visible at all times with gentle, cinematic continuous motion
+        elif shot_index % 2 == 0:
             animation_type = "focal_zoom_in"
             direction = "zoom_in"
             keyframes = [
@@ -1328,7 +1371,9 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 "-c:v", working_encoder,
                 "-pix_fmt", "yuv420p"
             ] + extra_args + [
-                "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100", "-shortest", output_video_path
+                "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100",
+                "-af", "loudnorm=I=-14:TP=-1.5:LRA=7",
+                "-shortest", output_video_path
             ]
             
             if stderr_log_path is None:
@@ -1353,7 +1398,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             # Create flat list of page displays
             page_displays = []
             current_time = 0.0
-            recent_used_donors = []
+            recent_displayed_pages = []
             for s_idx, seg in enumerate(segments):
                 end_time = timings[s_idx]["end"] if s_idx < len(timings) else current_time + 3.0
                 segment_duration = end_time - current_time
@@ -1383,20 +1428,44 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 is_bad = (
                                     bd.get("is_meaningless", False)
                                     or sc < 50
-                                    or (bubble_cov > 0.65 and char_p < 40.0)
-                                    or bubble_cov > 0.78
+                                    or (bubble_cov > 0.35 and char_p < 50.0)
+                                    or bubble_cov > 0.52
                                     or char_p < 25.0
                                 )
                             except Exception:
                                 sc, char_p, is_bad = 70, 50.0, False
                                 bd = {}
                             scored_candidates.append((img_obj, sc, char_p, is_bad, bd.get("is_meaningless", False)))
-                    valid_art = [item[0] for item in scored_candidates if not item[3]]
+                    valid_art = [item for item in scored_candidates if not item[3]]
                     if valid_art:
-                        seg_images = valid_art
-                        tot_p = sum(float(img.get("priority", 1.0)) for img in seg_images)
-                        for img in seg_images:
-                            img["priority"] = float(img.get("priority", 1.0)) / max(0.001, tot_p)
+                        # Check if explicit non-equal priorities were provided by prompt
+                        raw_priorities = [float(item[0].get("priority", 1.0)) for item in valid_art]
+                        has_explicit_weights = len(set(raw_priorities)) > 1 or any(p != 1.0 for p in raw_priorities)
+                        
+                        if len(valid_art) == 2 and not has_explicit_weights:
+                            # Auto Semantic Weighting for 2-panel sequences:
+                            # Calculate composite score = 0.6 * score + 0.4 * char_presence
+                            comp0 = 0.6 * valid_art[0][1] + 0.4 * valid_art[0][2]
+                            comp1 = 0.6 * valid_art[1][1] + 0.4 * valid_art[1][2]
+                            if comp0 >= comp1:
+                                valid_art[0][0]["priority"] = 0.75
+                                valid_art[1][0]["priority"] = 0.25
+                            else:
+                                valid_art[0][0]["priority"] = 0.30
+                                valid_art[1][0]["priority"] = 0.70
+                        elif not has_explicit_weights and len(valid_art) > 2:
+                            # Normalize by composite scores with hero bias
+                            comp_scores = [0.6 * it[1] + 0.4 * it[2] for it in valid_art]
+                            max_comp = max(comp_scores) if comp_scores else 1.0
+                            weights = [max(0.15, (cs / max(1.0, max_comp)) ** 1.5) for cs in comp_scores]
+                            tot_w = sum(weights)
+                            for it, w in zip(valid_art, weights):
+                                it[0]["priority"] = w / max(0.001, tot_w)
+                        else:
+                            tot_p = sum(float(it[0].get("priority", 1.0)) for it in valid_art)
+                            for it in valid_art:
+                                it[0]["priority"] = float(it[0].get("priority", 1.0)) / max(0.001, tot_p)
+                        seg_images = [it[0] for it in valid_art]
                     else:
                         # All images are bad, meaningless, low-character, or bubble-heavy — find best adjacent page as replacement
                         # Ranked by composite score: 60% total + 40% character_presence (character-first priority)
@@ -1409,6 +1478,9 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 candidate = bad_page_idx + delta
                                 if 0 <= candidate < len(image_files):
                                     cand_page = candidate + 1
+                                    # Strict Deduplication: Do NOT pick any page that was displayed in the last 2 shots
+                                    if cand_page in recent_displayed_pages[-2:]:
+                                        continue
                                     im_path = os.path.join(images_blur_dir, image_files[candidate])
                                     if not os.path.exists(im_path):
                                         im_path = os.path.join(images_pdf_dir, image_files[candidate])
@@ -1417,13 +1489,13 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                         sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
                                         char_p = bd.get("character_presence", 0.0)
                                         bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
-                                        # Stateful Deduplication Penalty (v1.7.0): penalize recently used donors to avoid repeated imagery
-                                        recent_penalty = 25.0 if cand_page in recent_used_donors[-2:] else 0.0
+                                        # Stateful Deduplication Penalty: penalize recently used pages
+                                        recent_penalty = 35.0 if cand_page in recent_displayed_pages[-4:] else 0.0
                                         composite = sc * 0.60 + char_p * 0.40 - recent_penalty
                                         # Adaptive Donor Qualification: char_p >= 30.0 covers shaded/hooded character portraits (sc >= 58)
                                         donor_valid = (
                                             not bd.get("is_meaningless", False)
-                                            and bubble_cov < 0.50
+                                            and bubble_cov < 0.45
                                             and ((char_p >= 40.0 and sc >= 55) or (char_p >= 30.0 and sc >= 58))
                                             and composite > best_composite
                                         )
@@ -1435,15 +1507,53 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             if best_composite >= 50:
                                 chosen_page = best_idx + 1
                                 seg_images = [{"page": chosen_page, "priority": 1.0}]
-                                recent_used_donors.append(chosen_page)
                                 print(f"  [Stage10] Replaced low-quality/junk/bubble page {bad_page_idx + 1} with character page {chosen_page} (composite={best_composite:.1f})")
                             else:
                                 # Fallback: drop any explicitly meaningless panels from seg_images if better candidates exist
-                                non_meaningless = [c[0] for c in scored_candidates if not c[4] and c[1] >= 40]
+                                non_meaningless = [c[0] for c in scored_candidates if not c[4] and c[1] >= 40 and int(c[0]["page"]) not in recent_displayed_pages[-2:]]
                                 if non_meaningless:
                                     seg_images = [non_meaningless[0]]
                                 elif best_item:
                                     seg_images = [{"page": best_item[0]["page"], "priority": 1.0}]
+
+                # Long-Duration Multi-Image Auto-Donor Injection (v1.9.0):
+                # If segment duration >= 4.8s and only 1 image is assigned, inject high-scoring adjacent donor(s)
+                # to split the shot into 2-3 dynamic sub-shots (achieving 2.5s-4.5s golden pacing).
+                if seg_images and len(seg_images) == 1 and segment_duration >= 4.8:
+                    orig_page_idx = int(seg_images[0]["page"]) - 1
+                    best_donors = []
+                    for delta in [1, -1, 2, -2, 3, -3]:
+                        cand_idx = orig_page_idx + delta
+                        if 0 <= cand_idx < len(image_files):
+                            cand_page_num = cand_idx + 1
+                            if cand_page_num in recent_displayed_pages[-2:] or cand_page_num == (orig_page_idx + 1):
+                                continue
+                            im_path = os.path.join(images_blur_dir, image_files[cand_idx])
+                            if not os.path.exists(im_path):
+                                im_path = os.path.join(images_pdf_dir, image_files[cand_idx])
+                            try:
+                                im_bgr = cv2.imread(im_path)
+                                sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
+                                char_p = bd.get("character_presence", 0.0)
+                                bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
+                                is_bad = bd.get("is_meaningless", False) or sc < 45 or bubble_cov > 0.45
+                                if not is_bad:
+                                    composite = sc * 0.60 + char_p * 0.40
+                                    best_donors.append((cand_idx, composite))
+                            except Exception:
+                                pass
+                    best_donors.sort(key=lambda x: x[1], reverse=True)
+                    if best_donors and best_donors[0][1] >= 45.0:
+                        orig_page = orig_page_idx + 1
+                        if segment_duration >= 9.0 and len(best_donors) >= 2:
+                            d1 = best_donors[0][0] + 1
+                            d2 = best_donors[1][0] + 1
+                            seq = sorted([orig_page, d1, d2])
+                            seg_images = [{"page": p, "priority": 1.0/3.0} for p in seq]
+                        else:
+                            d1 = best_donors[0][0] + 1
+                            seq = sorted([orig_page, d1])
+                            seg_images = [{"page": p, "priority": 0.5} for p in seq]
 
                 # Cinematic Pacing Guardrail & Dynamic Hero Image Selector (Industry Standard >= 3.5s):
                 # If a segment is too short for multiple images, keep only the highest-scoring Hero Image(s).
@@ -1497,6 +1607,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         "end_time": current_time + img_dur,
                         "segment_index": s_idx
                     })
+                    recent_displayed_pages.append(page)
                     current_time += img_dur
 
             # Merge consecutive displays of the exact same image to avoid redundant cross-fading
@@ -1652,6 +1763,13 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     if h_base > float(H_c):
                         h_base = float(H_c)
                         w_base = h_base * aspect_card
+                elif aspect_nat >= 1.70:
+                    # Wide panels (Landscape / Panoramic): fill card height and allow horizontal camera glide
+                    h_base = float(H_c)
+                    w_base = h_base * aspect_card
+                    if w_base > float(W_c):
+                        w_base = float(W_c)
+                        h_base = w_base / aspect_card
                 else:
                     w_base = float(W_c)
                     h_base = float(H_c)
@@ -1770,6 +1888,33 @@ class Stage10_EpisodeVideoRendering(BaseStage):
 
                     card_dims_map[f_name] = (card_x, card_y, card_w, card_h, aspect_card)
             
+            # Selective Inpainting for Episode Pages:
+            # Only remove text/bubbles if explicitly requested in task payload (remove_text=True)
+            images_inpainted_dir = os.path.join(ep_dir, "images_inpainted")
+            os.makedirs(images_inpainted_dir, exist_ok=True)
+            unique_display_files = sorted(list(set(pd["image_file"] for pd in page_displays)))
+            do_remove_text = bool(task.payload.get("remove_text", False))
+            for f_name in unique_display_files:
+                inp_dst = os.path.join(images_inpainted_dir, f_name)
+                src_p = os.path.join(images_blur_dir, f_name)
+                if not os.path.exists(src_p):
+                    src_p = os.path.join(images_pdf_dir, f_name)
+                if os.path.exists(src_p):
+                    if do_remove_text:
+                        cached_d = bounds_cache.get(f_name, {})
+                        bubble_cov = cached_d.get("bubble_coverage_ratio", 0.0) if isinstance(cached_d, dict) else 0.0
+                        if bubble_cov >= 0.12:
+                            try:
+                                from tools.text_remover.comic_text_remover import process_image
+                                process_image(src_p, inp_dst, languages=['en'])
+                            except Exception:
+                                shutil.copy2(src_p, inp_dst)
+                        else:
+                            shutil.copy2(src_p, inp_dst)
+                    else:
+                        shutil.copy2(src_p, inp_dst)
+
+
             def get_img(img_file, t):
                 if img_file not in loaded_images:
                     # Clean up unused cached arrays to keep memory footprint low
@@ -1784,7 +1929,11 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             if k in cached_backgrounds:
                                 del cached_backgrounds[k]
 
-                    img_path = os.path.join(images_blur_dir, img_file)
+                    inpainted_path = os.path.join(images_inpainted_dir, img_file)
+                    if os.path.exists(inpainted_path):
+                        img_path = inpainted_path
+                    else:
+                        img_path = os.path.join(images_blur_dir, img_file)
                     with Image.open(img_path) as pil_im:
                         if pil_im.mode != "RGB":
                             pil_im = pil_im.convert("RGB")
@@ -1825,6 +1974,22 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     cached_backgrounds[img_file] = (bg_blurred.astype(np.float32) * 0.42).astype(np.uint8)
                 return cached_backgrounds[img_file]
 
+            # Precompute luminance map for adaptive lighting transition smoothing
+            lum_map = {}
+            for f_name in unique_display_files:
+                src_p = os.path.join(images_inpainted_dir, f_name)
+                if not os.path.exists(src_p):
+                    src_p = os.path.join(images_blur_dir, f_name)
+                if not os.path.exists(src_p):
+                    src_p = os.path.join(images_pdf_dir, f_name)
+                if os.path.exists(src_p):
+                    try:
+                        im_test = cv2.imread(src_p, cv2.IMREAD_GRAYSCALE)
+                        if im_test is not None:
+                            lum_map[f_name] = float(np.mean(im_test))
+                    except Exception:
+                        lum_map[f_name] = 128.0
+
             active_idx = 0
             active_sub_idx = 0
             
@@ -1851,10 +2016,14 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         if active_sub_idx < len(subtitles) and subtitles[active_sub_idx]["start"] <= t <= subtitles[active_sub_idx]["end"]:
                             active_sub = subtitles[active_sub_idx]["text"]
 
-                    # Check transitions
-                    T_trans = 0.20
-                    in_transition = False
+                    # Adaptive Luminance Transition (v1.8.4):
+                    # For high-contrast lighting jumps (delta_lum >= 90), use longer 0.35s cross-dissolve to eliminate eye fatigue
                     next_idx = active_idx + 1
+                    lum_curr = lum_map.get(pd_curr["image_file"], 128.0)
+                    lum_next = lum_map.get(page_displays[next_idx]["image_file"], 128.0) if next_idx < len(page_displays) else lum_curr
+                    delta_lum = abs(lum_curr - lum_next)
+                    T_trans = 0.35 if delta_lum >= 90.0 else 0.20
+                    in_transition = False
                     
                     if next_idx < len(page_displays):
                         pd_next = page_displays[next_idx]
@@ -2351,13 +2520,30 @@ class Stage11_FinalVideoAssembly(BaseStage):
                 climax_ep = climax_info["climax_episode"]
                 await context.log(f"  -> Phát hiện tập cao trào đỉnh cao: Tập {climax_ep} (Score: {climax_info['climax_score']})", "info")
 
-                top_images = ArcClimaxMiner.select_top_climax_images(download_dir, climax_ep, num_images=3)
+                top_images = ArcClimaxMiner.select_top_climax_images(download_dir, climax_ep, num_images=5)
                 top_paths = [img["path"] for img in top_images]
 
                 comic_title = task.comic_title or "Comic"
                 protagonist_name = task.payload.get("protagonist_name", "")
                 language = task.payload.get("language", "en")
                 custom_hook = task.payload.get("flash_forward_custom_hook")
+
+                # Extract cumulative story memory summary if available
+                story_mem_path = os.path.join(download_dir, "story_memory.json")
+                story_summary = ""
+                if os.path.exists(story_mem_path):
+                    try:
+                        with open(story_mem_path, "r", encoding="utf-8") as f:
+                            sdata = json.load(f)
+                            eps_dict = sdata.get("episodes", {})
+                            summaries = []
+                            for ep_k in sorted(eps_dict.keys(), key=lambda x: int(x) if str(x).isdigit() else 0):
+                                ep_s = eps_dict[ep_k].get("summary", "")
+                                if ep_s:
+                                    summaries.append(f"Tập {ep_k}: {ep_s}")
+                            story_summary = " | ".join(summaries)
+                    except Exception:
+                        pass
 
                 hook_res = await DynamicHookDirector.generate_dynamic_retention_hook(
                     comic_title=comic_title,
@@ -2366,7 +2552,8 @@ class Stage11_FinalVideoAssembly(BaseStage):
                     climax_text=climax_info.get("climax_narration_sample", ""),
                     origin_text=climax_info.get("origin_narration_sample", ""),
                     language=language,
-                    custom_hook=custom_hook
+                    custom_hook=custom_hook,
+                    story_summary=story_summary
                 )
                 hook_script = hook_res["hook_script"]
                 await context.log(f"  -> Kịch bản Hook [{hook_res['archetype']}]: \"{hook_script}\"", "info")
@@ -2382,7 +2569,6 @@ class Stage11_FinalVideoAssembly(BaseStage):
                     language=language,
                     voice_id=voice_id,
                     ref_audio_path=ref_audio,
-                    enable_bgm=False,
                     enable_sfx=True
                 )
 
@@ -2504,16 +2690,38 @@ class Stage11_FinalVideoAssembly(BaseStage):
             proc = await asyncio.create_subprocess_exec(*cmd, cwd=download_dir, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             stdout, stderr = await proc.communicate()
 
+            # Self-Healing Master Video Assembly:
+            # Verify stream sync and duration consistency. If duration deviates or concat failed, transcode audio.
+            expected_master_dur = sum(video_durations)
+            actual_master_dur = get_video_duration(temp_final_video_path, ffmpeg_exe) if os.path.exists(temp_final_video_path) else 0.0
+
+            if proc.returncode != 0 or abs(actual_master_dur - expected_master_dur) > 2.0:
+                await context.log("Phát hiện bất đồng bộ luồng khi ghép nối nhanh; tự động chuyển sang chế độ audio transcode tự chữa lành (44.1kHz Stereo)...", "warning")
+                cmd_repair = [
+                    ffmpeg_exe, "-y",
+                    "-f", "concat",
+                    "-safe", "0",
+                    "-i", "concat_list.txt",
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-ar", "44100",
+                    "-ac", "2",
+                    "-movflags", "faststart",
+                    temp_final_video_path
+                ]
+                proc_rep = await asyncio.create_subprocess_exec(*cmd_repair, cwd=download_dir, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                stdout_rep, stderr_rep = await proc_rep.communicate()
+                if proc_rep.returncode != 0:
+                    err_msg = stderr_rep.decode("utf-8", errors="ignore").strip()
+                    raise Exception(f"FFmpeg final video assembly failed (exit code {proc_rep.returncode}): {err_msg}")
+
             # Clean up the manifest file
             if os.path.exists(concat_list_path):
                 try:
                     os.remove(concat_list_path)
                 except Exception:
                     pass
-
-            if proc.returncode != 0:
-                err_msg = stderr.decode("utf-8", errors="ignore").strip()
-                raise Exception(f"FFmpeg final video assembly failed (exit code {proc.returncode}): {err_msg}")
 
             await context.log("Đang tiến hành gộp các file phụ đề srt...", "info")
             merge_srt_files(srt_paths, video_durations, temp_final_srt_path)

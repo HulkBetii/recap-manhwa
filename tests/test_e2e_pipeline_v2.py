@@ -47,29 +47,37 @@ def test_e2e_pipeline_v2_synthetic_chapter(tmp_path):
     cv2.putText(title_banner, "PREPARE APOCALYPSE", (50, 200), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (255, 255, 255), 3)
 
     # Slice 1: Action Panel 1 (Character face & action) -> Valid Story Panel
-    panel1 = np.ones((800, 720, 3), dtype=np.uint8) * 50
-    for i in range(50):
+    panel1 = np.zeros((800, 720, 3), dtype=np.uint8)
+    for y in range(800):
+        panel1[y, :] = [(y * 80 // 800) + 30, (y * 120 // 800) + 40, (y * 160 // 800) + 50]
+    for i in range(80):
         cv2.circle(panel1, (int((i * 43) % 720), int((i * 61) % 800)), int(15 + (i % 20)), (int(i*5 % 255), int(i*7 % 255), int(i*9 % 255)), -1)
-    for i in range(15):
-        cv2.line(panel1, (0, i * 50), (720, 800 - i * 50), (200, 200, 200), 2)
+    for i in range(25):
+        cv2.line(panel1, (0, i * 32), (720, 800 - i * 32), (200, 200, 200), 2)
     cv2.circle(panel1, (180, 250), 50, (220, 180, 100), -1)  # Face
     cv2.putText(panel1, "Hero Dodge", (50, 450), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
 
     # Slice 2: Action Panel 2 (Sword Strike) -> Valid Story Panel
-    panel2 = np.ones((800, 720, 3), dtype=np.uint8) * 40
-    for i in range(50):
+    panel2 = np.zeros((800, 720, 3), dtype=np.uint8)
+    for y in range(800):
+        panel2[y, :] = [(y * 90 // 800) + 20, (y * 110 // 800) + 30, (y * 140 // 800) + 40]
+    for i in range(80):
         cv2.circle(panel2, (int((i * 53) % 720), int((i * 47) % 800)), int(15 + (i % 20)), (int(i*6 % 255), int(i*8 % 255), int(i*4 % 255)), -1)
-    for i in range(20):
-        cv2.line(panel2, (0, i * 40), (720, 800 - i * 40), (220, 220, 220), 2)
+    for i in range(25):
+        cv2.line(panel2, (0, i * 32), (720, 800 - i * 32), (220, 220, 220), 2)
     cv2.line(panel2, (50, 100), (670, 700), (0, 255, 255), 6)  # Slash
     cv2.circle(panel2, (500, 300), 40, (180, 50, 50), -1)  # Monster hit
 
     # Slice 3: Wide Combat Panel (Landscape combat scene) -> Valid Story Panel
-    panel3 = np.ones((600, 900, 3), dtype=np.uint8) * 60
-    for i in range(60):
-        cv2.circle(panel3, (int((i * 67) % 900), int((i * 37) % 600)), int(12 + (i % 22)), (int(i*7 % 255), int(i*5 % 255), int(i*8 % 255)), -1)
-    for i in range(15):
-        cv2.line(panel3, (i * 60, 0), (900 - i * 60, 600), (240, 240, 240), 2)
+    panel3 = np.zeros((600, 900, 3), dtype=np.uint8)
+    for y in range(600):
+        panel3[y, :] = [(y * 100 // 600) + 30, (y * 150 // 600) + 40, (y * 200 // 600) + 50]
+    for i in range(150):
+        cv2.circle(panel3, (int((i * 67) % 900), int((i * 37) % 600)), int(15 + (i % 25)), (int(i*7 % 255), int(i*5 % 255), int(i*8 % 255)), -1)
+    for i in range(30):
+        cv2.line(panel3, (i * 30, 0), (900 - i * 30, 600), (240, 240, 240), 2)
+    cv2.circle(panel3, (300, 250), 60, (220, 180, 100), -1)  # Character face
+    cv2.putText(panel3, "Boss Encounter", (100, 500), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
 
     # Slice 4: Credit / Donate Card -> Should be dropped
     credit_card = np.ones((350, 720, 3), dtype=np.uint8) * 240
@@ -113,7 +121,7 @@ def test_e2e_pipeline_v2_synthetic_chapter(tmp_path):
     # Simulate Gemini response using multi-panel alignment format
     gemini_simulated_response = """
 [1] - Nhận thấy nguy hiểm cận kề, anh nhanh chóng nghiêng người né đòn chí mạng.#
-[2, 3] - Ngay sau cú né, anh vung thanh bảo kiếm chém đứt quái vật rồi mở đường cho cả đội rút lui.#
+[2, 3] - Ngay sau cú né, anh vung thanh bảo kiếm chém đứt quái vật mở đường rút lui.#
 """
     parsed_script = parse_gemini_recap_text(gemini_simulated_response)
     assert len(parsed_script) == 2

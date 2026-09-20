@@ -308,14 +308,33 @@ class VisualSemanticScorer:
         from moderation_utils import is_text_bubble_dominant
         is_bubble, _ = is_text_bubble_dominant(small_bgr, bg_val=bg_val)
         is_empty_box = (void_ratio >= 0.78 and (art_color_ratio < 0.18 or skin_ratio < 0.015))
-        is_tiny_slice = (h < 400 and (void_ratio > 0.65 or art_color_ratio < 0.20) and skin_ratio < 0.02)
-        is_mostly_bubble = (bubble_coverage_ratio > 0.40 and skin_ratio < 0.03) or (bubble_coverage_ratio > 0.35 and character_presence < 18.0)
+        # Ultra-wide text slices / low-height banners without faces
+        is_tiny_slice = (
+            (h < 350 and (w / max(1, h) > 2.2) and num_faces == 0)
+            or (h < 400 and (void_ratio > 0.65 or art_color_ratio < 0.20) and skin_ratio < 0.02)
+        )
+        is_mostly_bubble = (
+            (bubble_coverage_ratio > 0.40 and skin_ratio < 0.03)
+            or (bubble_coverage_ratio > 0.35 and character_presence < 25.0)
+            or (bubble_coverage_ratio > 0.55 and visual_detail < 30.0)
+        )
         # Low variance / solid / gradient gutter detection (catches grey bars, solid color bars, empty panels)
         is_solid_or_gutter = (gray_std < 14.0 or visual_detail < 8.0) and skin_ratio < 0.02
+        # Dark panel fragments without clear character faces
+        is_dark_fragment = (gray_std < 20.0 and num_faces == 0 and visual_detail < 20.0 and action_context < 20.0 and skin_ratio < 0.02)
         is_limbs_no_face = bool(num_faces == 0 and skin_ratio > 0.35 and visual_detail < 25.0 and action_context < 25.0)
-        is_bubble_no_face = bool(num_faces == 0 and bubble_coverage_ratio > 0.35 and character_presence < 30.0)
+        is_bubble_no_face = bool(num_faces == 0 and bubble_coverage_ratio > 0.40 and character_presence < 30.0 and visual_detail < 35.0)
 
-        is_meaningless = bool(is_bubble or is_empty_box or is_tiny_slice or is_mostly_bubble or is_solid_or_gutter or is_limbs_no_face or is_bubble_no_face)
+        is_meaningless = bool(
+            is_bubble
+            or is_empty_box
+            or is_tiny_slice
+            or is_mostly_bubble
+            or is_solid_or_gutter
+            or is_dark_fragment
+            or is_limbs_no_face
+            or is_bubble_no_face
+        )
 
         # ==================================================================
         # Final Score Combination

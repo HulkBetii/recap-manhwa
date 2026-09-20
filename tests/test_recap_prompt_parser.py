@@ -87,25 +87,65 @@ def test_generate_gemini_prompt_us_recap_culture_and_retention_hook():
     prompt_ep2_en = generate_gemini_prompt("Solo Leveling", 2, 45, "en")
     assert "EPISODE CONTINUATION" in prompt_ep2_en
     assert "in media res" in prompt_ep2_en
-    assert "SELF-CONTAINED SENTENCE MANDATE" in prompt_ep2_en
-    assert "STRICT 3RD-PERSON NARRATIVE POV" in prompt_ep2_en
 
 
-def test_parse_gemini_recap_text_auto_stitches_fragmented_lines():
+def test_parse_gemini_recap_text_drops_truncated_fragments():
     raw_response = """
-5 - When the catastrophe hit the city, civilians desperately tried to find their#
-6 - way into the underground shelter before the toxic cloud spread.#
-[12, 13] - Meanwhile, A turns his attention to the perimeter defense grid.#
+1 - Đây là câu mở đầu hoàn chỉnh với đầy đủ thông tin chi tiết.#
+2 - Quá ngắn.#
+3 - Từng đứng mũi chịu s#
+4 - Căn hầm trú ẩn được gia cố vững chắc trước đợt tấn công đầu tiên của quái vật.#
 """
     parsed = parse_gemini_recap_text(raw_response)
     assert len(parsed) == 2
-    assert parsed[0]["speech"] == "When the catastrophe hit the city, civilians desperately tried to find their way into the underground shelter before the toxic cloud spread."
-    assert len(parsed[0]["images"]) == 2
-    assert parsed[0]["images"][0]["page"] == 5
-    assert parsed[0]["images"][1]["page"] == 6
+    assert parsed[0]["speech"] == "Đây là câu mở đầu hoàn chỉnh với đầy đủ thông tin chi tiết."
+    assert parsed[0]["images"][0]["page"] == 1
+    assert parsed[1]["speech"] == "Căn hầm trú ẩn được gia cố vững chắc trước đợt tấn công đầu tiên của quái vật."
+    assert parsed[1]["images"][0]["page"] == 4
 
-    # Verify placeholder 'A' was sanitized to 'he'
-    assert "Meanwhile, he turns his attention to the perimeter defense grid." in parsed[1]["speech"]
+
+def test_recap_segment_schema_enforces_min_length():
+    from recap_schema import RecapSegment, RecapImage
+    from pydantic import ValidationError
+
+    # Should raise error for < 15 chars
+    with pytest.raises(ValidationError):
+        RecapSegment(
+            speech="Quá ngắn.",
+            images=[RecapImage(page=1, priority=1.0)]
+        )
+
+    # Valid segment
+    valid_seg = RecapSegment(
+        speech="Đây là câu recap hợp lệ với độ dài đầy đủ tiêu chuẩn.",
+        images=[RecapImage(page=1, priority=1.0)]
+    )
+    assert valid_seg.speech.startswith("Đây là câu recap")
+
+
+def test_generate_gemini_prompt_contains_hero_subject_alignment_rules():
+    # Check Vietnamese prompt
+    prompt_vi = generate_gemini_prompt("Ultimate Shut-in", 1, 40, "vi")
+    assert "HERO SUBJECT ALIGNMENT" in prompt_vi or "Hero Subject Alignment" in prompt_vi
+    assert "WEIGHTED MULTI-PANEL" in prompt_vi or "Weighted Multi-Panel" in prompt_vi
+    assert "KHÔNG" in prompt_vi and "50/50" in prompt_vi
+
+    # Check English prompt
+    prompt_en = generate_gemini_prompt("Ultimate Shut-in", 1, 40, "en")
+    assert "HERO SUBJECT ALIGNMENT" in prompt_en or "Hero Subject Alignment" in prompt_en
+    assert "WEIGHTED MULTI-PANEL" in prompt_en or "Weighted Multi-Panel" in prompt_en
+    assert "50/50" in prompt_en
+
+
+def test_parse_gemini_image_specs_weighted_priority():
+    # Test 75% / 25% hero panel split
+    specs = _parse_gemini_image_specs("[39:75%, 40:25%]")
+    assert len(specs) == 2
+    assert specs[0]["page"] == 39
+    assert math.isclose(specs[0]["priority"], 0.75, abs_tol=1e-3)
+    assert specs[1]["page"] == 40
+    assert math.isclose(specs[1]["priority"], 0.25, abs_tol=1e-3)
+
 
 
 

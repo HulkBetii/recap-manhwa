@@ -154,6 +154,12 @@ class StoryMemory:
             "Only", "Because", "From", "Into", "Over", "Under", "Before",
             "Across", "Inside", "Outside", "Along", "Around", "During",
             "Without", "Despite", "Although", "Instead", "Between",
+            "Dilapidated", "Shocked", "Suddenly", "Looking", "Walking", "Holding",
+            "Seeing", "Staring", "Clutching", "Stepping", "Running", "Standing",
+            "Turning", "Leaning", "Whispering", "Screaming", "Falling", "Rising",
+            "Dropping", "Pulling", "Pushing", "Grinding", "Unfazed", "Collapsed",
+            "Bare", "Cold", "Dark", "Heavy", "Deep", "Pure", "Every", "Still",
+            "Spinning", "Sliding", "Day", "Night", "Morning", "Evening",
             "Khi", "Sau", "Trong", "Giữa", "Trước", "Nếu", "Nhưng", "Thế",
             "Tuy", "Dù", "Ngay", "Đúng", "Cùng", "Toàn", "Khắp", "Mọi",
             "Quân", "Đích", "Tiểu", "Vị", "Bản", "Cơn", "Trận", "Cuộc",
@@ -167,13 +173,14 @@ class StoryMemory:
             "President", "General", "Commander", "Captain", "Doctor", "Professor", "Minister",
             "King", "Queen", "Lord", "Lady", "Prince", "Princess",
         }
-        geo_words = {"Earth", "Seoul", "Korea", "America", "Tokyo", "Japan", "Nhật", "Hàn", "Mỹ", "Trái Đất", "Survival", "Life"}
+        geo_words = {"Earth", "Seoul", "Korea", "America", "Tokyo", "Japan", "Nhật", "Hàn", "Mỹ", "Trái Đất", "Survival", "Life", "Truth", "Silence"}
 
         title_pattern = r'\b(Tổng thống|Tổng|Chủ tịch|Thủ tướng|Đại tá|Bác sĩ|President|General|Commander|Doctor|Professor)\s+([A-ZÀ-Ỹa-zà-ỹ]+(\s+[A-ZÀ-Ỹa-zà-ỹ]+)?)'
 
         name_counts: Dict[str, int] = {}
+        mid_sentence_counts: Dict[str, int] = {}
 
-        for seg in recap_data[:10]:
+        for seg in recap_data[:35]:
             speech = (
                 seg.get("speech", "")
                 if isinstance(seg, dict)
@@ -184,17 +191,30 @@ class StoryMemory:
 
             for i in range(len(words)):
                 w = words[i]
-                if w[0].isupper() and w not in stopwords and w not in geo_words and not w.endswith("day"):
+                if w[0].isupper() and w not in stopwords and w not in geo_words and not w.endswith("day") and len(w) >= 3:
+                    is_mid_sentence = (i > 0)
                     # Check for two-word name (e.g. Seongho Kang, Penelope Eckart)
                     if i + 1 < len(words):
                         w2 = words[i + 1]
-                        if w2[0].isupper() and w2 not in stopwords and w2 not in geo_words:
+                        if w2[0].isupper() and w2 not in stopwords and w2 not in geo_words and len(w2) >= 3:
                             full_name = f"{w} {w2}"
-                            name_counts[full_name] = name_counts.get(full_name, 0) + 4
-                    name_counts[w] = name_counts.get(w, 0) + 2
+                            name_counts[full_name] = name_counts.get(full_name, 0) + (8 if is_mid_sentence else 4)
+                            if is_mid_sentence:
+                                mid_sentence_counts[full_name] = mid_sentence_counts.get(full_name, 0) + 1
+                    
+                    name_weight = 5 if is_mid_sentence else 1
+                    name_counts[w] = name_counts.get(w, 0) + name_weight
+                    if is_mid_sentence:
+                        mid_sentence_counts[w] = mid_sentence_counts.get(w, 0) + 1
 
         if not name_counts:
             return ""
+
+        # Prioritize names that appeared mid-sentence over candidates that only ever appeared at sentence start
+        candidates_with_mid = {k: v for k, v in name_counts.items() if mid_sentence_counts.get(k, 0) > 0}
+        if candidates_with_mid:
+            sorted_candidates = sorted(candidates_with_mid.items(), key=lambda x: x[1], reverse=True)
+            return sorted_candidates[0][0]
 
         sorted_candidates = sorted(name_counts.items(), key=lambda x: x[1], reverse=True)
         return sorted_candidates[0][0]

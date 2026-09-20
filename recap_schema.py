@@ -26,231 +26,23 @@ class RecapImage(BaseModel):
         return value
 
 
-HANGING_END_WORDS = {
-    # Prepositions
-    "in", "on", "at", "to", "for", "with", "from", "by", "of", "about", "into", "through",
-    "across", "towards", "toward", "upon", "against", "along", "under", "over", "behind",
-    "between", "without", "onto", "off", "near", "above", "below",
-    # Conjunctions
-    "and", "but", "or", "so", "because", "while", "as", "that", "which", "when", "although",
-    "though", "if", "unless", "since", "after", "before", "whether", "whereas",
-    # Determiners / Articles / Possessives
-    "a", "an", "the", "their", "his", "her", "its", "my", "our", "your", "this", "that", "these", "those",
-    "every", "each", "some", "any", "no",
-    # Relative / Interrogative pronouns
-    "who", "whom", "whose", "which", "where", "why", "how",
-    # Incomplete transitive / linking / auxiliary verbs
-    "is", "was", "are", "were", "been", "be", "being", "drops", "drop", "lays", "lay",
-    "turns", "turn", "reaches", "reach", "takes", "take", "gives", "give", "makes", "make",
-    "finds", "find", "sees", "see", "holds", "hold", "starts", "start", "begins", "begin",
-    "awakens", "awaken", "seems", "seem", "looks", "look", "becomes", "become", "has", "have", "had",
-}
-
-CONTINUATION_START_WORDS = {
-    "and", "but", "or", "so", "because", "which", "while", "as", "that", "although", "whereas",
-    "lays", "shuts", "drops", "rushes", "reveals", "obliterates", "charges", "enters", "notices",
-    "watches", "steps", "takes", "draws", "fires", "unleashes", "kicks", "punches", "slams",
-    "locks", "grabs", "pulls", "opens", "decides", "realizes", "dispatches", "orders", "brings",
-    "abilities", "powers", "skills", "weapons", "supplies", "rations", "territory", "bunker",
-}
-
-
-def sanitize_recap_speech(speech: str, is_first_segment: bool = False) -> str:
-    """
-    Sanitizes narration speech text by:
-    1. Stripping unwanted manga OCR dialogue prefixes (e.g. 'Sir,', 'Ah,', 'Ugh,', 'Wait,', 'Hey,').
-    2. Stripping hallucinated double-title words like 'Sir Panic' -> 'Panic'.
-    3. Filtering leaked single-letter placeholders (e.g. 'Meanwhile, A turns...' -> 'Meanwhile, he turns...').
-    4. Sanitizing first-person slips in narration ('I had to' -> 'He had to').
-    5. Ensuring proper sentence capitalization.
-    6. Normalizing ending punctuation: replacing trailing ',' or ':' with '.'.
-    7. Ensuring the opening hook (first segment) is a complete, well-formed sentence.
-    """
-    if not speech or not isinstance(speech, str):
-        return ""
-
-    s = speech.strip()
-
-    # 1. Strip dialogue vocatives / OCR speech bubble prefixes at start
-    s = re.sub(r"^(?:Sir|Ah|Ugh|Wait|Hey|Look|Listen|Damn|Wait a minute|Um|Oh)\s*[,:\-]\s*", "", s, flags=re.IGNORECASE)
-
-    # 2. Fix known OCR text glitch: "Sir Panic" -> "Panic"
-    s = re.sub(r"\bSir\s+Panic\b", "Panic", s, flags=re.IGNORECASE)
-
-    # 3. Strip any leftover brackets or markdown artifacts
-    s = re.sub(r"[\*\_`]", "", s).strip()
-
-    if not s:
-        return ""
-
-    # 4. Filter single-letter character placeholder leaks (e.g. "Meanwhile, A turns..." -> "Meanwhile, he turns...")
-    s = re.sub(
-        r"\b((?:Meanwhile|Then|Suddenly|Next|Soon|Afterwards|However|Later|Instantly|Quickly|Quietly|Slowly),\s+)A\s+(?=(?:turns|looks|steps|draws|fires|moves|grabs|holds|strikes|attacks|runs|walks|discovers|finds|decides|realizes|is|was|has|had|orders|reaches|confronts)\b)",
-        r"\1he ",
-        s,
-    )
-    s = re.sub(
-        r"^A\s+(?=(?:turns|looks|steps|draws|fires|moves|grabs|holds|strikes|attacks|runs|walks|discovers|finds|decides|realizes|is|was|has|had|orders|reaches|confronts)\b)",
-        "He ",
-        s,
-    )
-    s = re.sub(
-        r"\bA\s+(?=(?:turns|steps|draws|fires|grabs|strikes|attacks|discovers|realizes)\b)",
-        "he ",
-        s,
-    )
-
-    # 5. Sanitize first-person POV slips in narration
-    s = re.sub(r"\bI\s+(?:can\'t|cannot)\s+afford\b", "he cannot afford", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bI\s+(?:couldn\'t|could\s+not)\s+afford\b", "he could not afford", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bI\s+(?:have|need)\s+to\b", "he has to", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bI\s+(?:had|needed)\s+to\b", "he had to", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bI\s+(?:realize|realized)\b", "he realized", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bI\s+(?:think|thought)\b", "he thought", s, flags=re.IGNORECASE)
-
-    # 6. Capitalize first character
-    s = s[0].upper() + s[1:]
-
-    # 7. Normalize trailing punctuation
-    if s.endswith(",") or s.endswith(":"):
-        s = s[:-1].strip() + "."
-    elif not any(s.endswith(p) for p in [".", "!", "?", '"', "'", "…", "..."]):
-        s = s + "."
-
-    return s
-
-
-def _extract_image_dicts(images: Any) -> list[dict[str, Any]]:
-    res = []
-    if not isinstance(images, list):
-        return res
-    for img in images:
-        if isinstance(img, dict) and "page" in img:
-            res.append({"page": int(img["page"]), "priority": float(img.get("priority", 1.0))})
-        elif hasattr(img, "page"):
-            res.append({"page": int(getattr(img, "page")), "priority": float(getattr(img, "priority", 1.0))})
-    return res
-
-
-def _get_speech_words(speech: str) -> list[str]:
-    cleaned = re.sub(r"[^\w\s]", " ", speech)
-    return [w for w in cleaned.split() if w]
-
-
-def is_fragmented_pair(s_prev: dict[str, Any], s_curr: dict[str, Any]) -> bool:
-    speech1 = str(s_prev.get("speech", "")).strip()
-    speech2 = str(s_curr.get("speech", "")).strip()
-    if not speech1 or not speech2:
-        return False
-
-    words1 = _get_speech_words(speech1)
-    words2 = _get_speech_words(speech2)
-    if not words1 or not words2:
-        return False
-
-    last_word1 = words1[-1].lower()
-    first_word2 = words2[0].lower()
-
-    # 1. Last word of previous segment is a hanging word (preposition, conjunction, article, possessive, or dangling verb)
-    if last_word1 in HANGING_END_WORDS:
-        return True
-
-    # 2. Next segment starts with a lowercase letter in raw string
-    if speech2[0].islower():
-        return True
-
-    # 3. Next segment starts with continuation conjunction or subjectless 3rd-person singular verb
-    if first_word2 in CONTINUATION_START_WORDS and (len(words1) <= 6 or not any(speech1.endswith(p) for p in [".", "!", "?", '"'])):
-        return True
-
-    return False
-
-
-def _merge_fragmented_speeches(speech1: str, speech2: str) -> str:
-    s1 = speech1.strip()
-    s2 = speech2.strip()
-    
-    # Strip trailing punctuation from s1
-    s1_clean = re.sub(r"[\.,;:!\?\-\s]+$", "", s1)
-    
-    words1 = _get_speech_words(s1_clean)
-    last_word1 = words1[-1].lower() if words1 else ""
-    
-    words2 = _get_speech_words(s2)
-    first_word2 = words2[0].lower() if words2 else ""
-    
-    if last_word1 in {"drops", "drop", "stops", "stop", "turns", "turn"} and first_word2 in CONTINUATION_START_WORDS:
-        connector = " and "
-    else:
-        connector = " "
-        
-    if s2 and s2[0].isupper() and (first_word2 in CONTINUATION_START_WORDS or last_word1 in HANGING_END_WORDS):
-        s2_clean = s2[0].lower() + s2[1:]
-    else:
-        s2_clean = s2
-
-    merged = f"{s1_clean}{connector}{s2_clean}".strip()
-    return sanitize_recap_speech(merged)
-
-
-def stitch_fragmented_recap_segments(
-    segments: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """
-    Auto-heals fragmented sentences / enjambments across recap segments by stitching
-    incomplete clauses with their continuations and merging image page specs.
-    """
-    if not isinstance(segments, list) or len(segments) < 2:
-        return segments
-
-    stitched = []
-    i = 0
-    while i < len(segments):
-        curr = dict(segments[i])
-        
-        while i + 1 < len(segments) and is_fragmented_pair(curr, segments[i + 1]):
-            nxt = segments[i + 1]
-            merged_speech = _merge_fragmented_speeches(
-                str(curr.get("speech", "")),
-                str(nxt.get("speech", ""))
-            )
-            
-            imgs_curr = _extract_image_dicts(curr.get("images", []))
-            imgs_nxt = _extract_image_dicts(nxt.get("images", []))
-            
-            seen_pages = set()
-            combined_imgs = []
-            for img in imgs_curr + imgs_nxt:
-                p = img["page"]
-                if p not in seen_pages:
-                    seen_pages.add(p)
-                    combined_imgs.append(img)
-            
-            normalized_imgs = normalize_recap_priorities(combined_imgs) if combined_imgs else imgs_curr
-            
-            curr["speech"] = merged_speech
-            curr["images"] = normalized_imgs
-            i += 1
-            
-        stitched.append(curr)
-        i += 1
-        
-    return stitched
-
-
 class RecapSegment(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    speech: str = Field(min_length=1)
+    speech: str = Field(min_length=15, description="Minimum 15 chars to prevent truncated fragments")
     images: list[RecapImage] = Field(min_length=1)
 
     @field_validator("speech")
     @classmethod
     def speech_must_not_be_blank(cls, value: str) -> str:
-        sanitized = sanitize_recap_speech(value)
-        if not sanitized:
+        stripped = value.strip()
+        if not stripped:
             raise ValueError("speech must not be blank")
-        return sanitized
+        if len(stripped) < 15:
+            raise ValueError(f"speech is too short ({len(stripped)} chars); likely a truncated fragment")
+        # Warn but do not reject if missing sentence-ending punctuation (LLM may omit sometimes)
+        return stripped
+
 
     @model_validator(mode="after")
     def validate_images(self) -> "RecapSegment":
@@ -312,17 +104,18 @@ def detect_recap_loop(segments: list[Any], *, max_page: int | None = None) -> tu
         cur_max = max(pages)
 
         # Check if story already progressed to substantial page depth
-        # and current segment abruptly plunges back to beginning (<= 3)
-        if idx >= 6 and peak_page >= min_peak and cur_min <= 3:
+        # and current segment abruptly plunges back to beginning or early pages
+        restart_threshold = max(8, int(peak_page * 0.20))
+        if idx >= 6 and peak_page >= min_peak and cur_min <= restart_threshold and (peak_page - cur_min) >= 12:
             # Confirm sequence: check subsequent segments to differentiate from a 1-shot flashback
-            subsequent_indices = range(idx, min(len(segments), idx + 3))
+            subsequent_indices = range(idx, min(len(segments), idx + 4))
             subsequent_pages = []
             for sub_idx in subsequent_indices:
                 subsequent_pages.extend(_extract_segment_pages(segments[sub_idx]))
 
             if subsequent_pages and (
-                max(subsequent_pages) <= 8
-                or (sum(subsequent_pages) / len(subsequent_pages)) <= 6.0
+                max(subsequent_pages) <= restart_threshold + 8
+                or (sum(subsequent_pages) / len(subsequent_pages)) <= (restart_threshold + 5.0)
             ):
                 return True, idx
 
@@ -337,26 +130,48 @@ def prune_recap_loops(
 ) -> tuple[list[dict[str, Any]], bool]:
     """
     Auto-heals recaps containing detected narrative loops.
-    If a loop is detected at index i:
-      - If the first portion (0 to i-1) has >= 10 segments and represents substantial progress,
-        prunes the duplicate tail and cleans any concatenated syntax at the boundary.
+    If a loop is detected at index loop_idx:
+      - Evaluates part_a (0 to loop_idx-1) and part_b (loop_idx to end).
+      - Selects the superior portion based on maximum page coverage and segment count.
+      - Sanitizes boundary syntax and bracket weights.
       - Returns (sanitized_segments, was_pruned).
     """
     has_loop, loop_idx = detect_recap_loop(segments, max_page=max_page)
     if not has_loop or loop_idx is None:
         return segments, False
 
-    primary_portion = [dict(s) for s in segments[:loop_idx]]
-    if len(primary_portion) >= 10:
-        # Sanitize trailing speech on the boundary segment if it contains leaked prompt/segment syntax
-        last_seg = primary_portion[-1]
+    part_a = [dict(s) for s in segments[:loop_idx]]
+    part_b = [dict(s) for s in segments[loop_idx:]]
+
+    def get_max_page(segs: list[dict[str, Any]]) -> int:
+        max_p = 0
+        for s in segs:
+            for p in _extract_segment_pages(s):
+                if p > max_p:
+                    max_p = p
+        return max_p
+
+    max_p_a = get_max_page(part_a)
+    max_p_b = get_max_page(part_b)
+
+    # If Part B has substantially higher page coverage or more segments, Part B is the full re-run
+    if max_p_b > max_p_a or (max_p_b == max_p_a and len(part_b) >= len(part_a)):
+        chosen = part_b
+    elif len(part_a) >= 10:
+        chosen = part_a
+    else:
+        chosen = part_b if len(part_b) > len(part_a) else part_a
+
+    # Sanitize trailing speech on the boundary segment if it contains leaked prompt/segment syntax
+    if chosen:
+        last_seg = chosen[-1]
         speech = str(last_seg.get("speech", ""))
-        cleaned_speech = re.sub(r"\s*\[\s*\d+\s*(?:,\s*\d+\s*)*\s*\]\s*[\-:].*$", "", speech).strip()
+        cleaned_speech = re.sub(r"\s*\[\s*\d+\s*(?:[:%,\d\s]*)*\s*\]\s*[\-:].*$", "", speech).strip()
+        cleaned_speech = re.sub(r'\[\s*\d+\s*(?::\s*\d+%?)?(?:\s*,\s*\d+\s*(?::\s*\d+%?)?)*\s*\]', '', cleaned_speech).strip()
         if cleaned_speech:
             last_seg["speech"] = cleaned_speech
-        return primary_portion, True
 
-    return segments, False
+    return chosen, True
 
 
 def parse_recap_data(
@@ -364,8 +179,6 @@ def parse_recap_data(
 ) -> list[RecapSegment]:
     if not isinstance(value, list) or not value:
         raise ValueError("recap must be a non-empty list")
-    if all(isinstance(item, dict) for item in value):
-        value = stitch_fragmented_recap_segments(value)
     segments = [RecapSegment.model_validate(item) for item in value]
     if max_page is not None:
         if max_page < 1:
@@ -394,26 +207,122 @@ def load_recap_dicts(path: str | Path, *, max_page: int | None = None) -> list[d
     return [segment.model_dump(mode="json") for segment in load_recap(path, max_page=max_page)]
 
 
+def auto_split_long_segments(
+    segments: list[dict[str, Any]], *, max_words: int = 20
+) -> list[dict[str, Any]]:
+    """
+    Intelligently splits long narration segments (> max_words) into concise, punchy segments
+    (8-14 words) at natural semantic boundaries (periods, em-dashes, semicolons, coordinating conjunctions).
+    Allocates multi-panel images across the split segments to preserve optimal visual pacing.
+    """
+    if not isinstance(segments, list) or not segments:
+        return segments
+
+    new_segments: list[dict[str, Any]] = []
+
+    for seg in segments:
+        speech = str(seg.get("speech", "")).strip()
+        words = speech.split()
+        if len(words) <= max_words:
+            new_segments.append(dict(seg))
+            continue
+
+        # Strategy 1: Split at explicit sentence terminators ('. ', '! ', '? ')
+        parts = re.split(r"(?<=[.!?])\s+", speech)
+        parts = [p.strip() for p in parts if p.strip()]
+
+        # Strategy 2: If it's a single compound run-on sentence, split at conjunctions / dashes / semicolons / commas
+        if len(parts) == 1:
+            split_patterns = [
+                r"\s*(?:—|–|--|―|\u2010|\u2013|\u2014)\s*",
+                r"\s*;\s*",
+                r",\s+(?:but|and|while|as|before|after|yet|where|then)\s+",
+                r",\s+(?=[A-Z])",
+                r",\s+",
+            ]
+            for pat in split_patterns:
+                sub_parts = re.split(pat, speech, maxsplit=1)
+                if len(sub_parts) == 2 and len(sub_parts[0].split()) >= 4 and len(sub_parts[1].split()) >= 4:
+                    p1 = sub_parts[0].strip()
+                    p2 = sub_parts[1].strip()
+                    if not p1.endswith((".", "!", "?", "—")):
+                        p1 += "."
+                    if p2 and p2[0].islower():
+                        p2 = p2[0].upper() + p2[1:]
+                    if not p2.endswith((".", "!", "?")):
+                        p2 += "."
+                    parts = [p1, p2]
+                    break
+
+        if len(parts) >= 2:
+            images = seg.get("images", [])
+            # Split images between parts if multiple images exist
+            if len(images) >= len(parts):
+                for idx, part in enumerate(parts):
+                    new_seg = dict(seg)
+                    new_seg["speech"] = part
+                    assigned_img = dict(images[idx])
+                    assigned_img["priority"] = 1.0
+                    new_seg["images"] = [assigned_img]
+                    new_segments.append(new_seg)
+            elif len(images) == 2 and len(parts) == 2:
+                for idx, part in enumerate(parts):
+                    new_seg = dict(seg)
+                    new_seg["speech"] = part
+                    assigned_img = dict(images[idx])
+                    assigned_img["priority"] = 1.0
+                    new_seg["images"] = [assigned_img]
+                    new_segments.append(new_seg)
+            else:
+                for part in parts:
+                    new_seg = dict(seg)
+                    new_seg["speech"] = part
+                    new_segments.append(new_seg)
+        else:
+            new_segments.append(dict(seg))
+
+    return new_segments
+
+
+def enforce_monotonic_page_order(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Enforces monotonically non-decreasing page ordering across all segments.
+    Prevents sudden backward page jumps (e.g. Page 15 -> Page 8 -> Page 16)
+    which cause camera timeline rewinds in video assembly.
+    """
+    if not isinstance(segments, list) or not segments:
+        return segments
+
+    sanitized: list[dict[str, Any]] = []
+    highest_page = 1
+
+    for seg in segments:
+        seg_copy = dict(seg)
+        images = seg_copy.get("images", [])
+        if isinstance(images, list):
+            new_images = []
+            for img in images:
+                if isinstance(img, dict) and "page" in img:
+                    p = int(img["page"])
+                    if p < highest_page:
+                        # Auto-clamp backward jump to current monotonic peak
+                        img_copy = dict(img)
+                        img_copy["page"] = highest_page
+                        new_images.append(img_copy)
+                    else:
+                        highest_page = p
+                        new_images.append(img)
+                else:
+                    new_images.append(img)
+            seg_copy["images"] = new_images
+        sanitized.append(seg_copy)
+
+    return sanitized
+
+
 def validate_recap_file(path: str | Path, *, max_page: int | None = None) -> bool:
     try:
         load_recap(path, max_page=max_page)
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False
     return True
-
-
-def normalize_recap_priorities(images: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    Normalizes a list of image dicts [{"page": p, "priority": ...}]
-    guaranteeing that priorities strictly sum to 1.0 (v1.8.0).
-    """
-    if not images:
-        return []
-    n = len(images)
-    if n == 1:
-        return [{"page": int(images[0]["page"]), "priority": 1.0}]
-    p_val = round(1.0 / n, 2)
-    res = [{"page": int(img["page"]), "priority": p_val} for img in images[:-1]]
-    res.append({"page": int(images[-1]["page"]), "priority": round(1.0 - p_val * (n - 1), 2)})
-    return res
-

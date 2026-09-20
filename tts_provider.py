@@ -490,6 +490,20 @@ async def generate_voicevox_tts(
         return False
 
 
+def _verbalize_english_numbers(text: str) -> str:
+    """Converts large and common numeric representations into natural spoken English words."""
+    import re
+    num_map = {
+        "100,000": "one hundred thousand", "100000": "one hundred thousand",
+        "200,000": "two hundred thousand", "50,000": "fifty thousand",
+        "10,000": "ten thousand", "1,000": "one thousand", "1000": "one thousand",
+        "1,000,000": "one million", "1000000": "one million",
+    }
+    for k, v in num_map.items():
+        text = re.sub(rf'\b{re.escape(k)}\b', v, text)
+    return text
+
+
 def preprocess_narration_cadence(text: str) -> str:
     """
     Normalizes punctuation and cadence for voice cloning / TTS to ensure natural
@@ -500,25 +514,32 @@ def preprocess_narration_cadence(text: str) -> str:
     import re
     cleaned = text.strip()
     
-    # 1. Normalize repeated punctuation
+    # 0. Clean any leaked bracket page/weight syntax (Defense in depth)
+    cleaned = re.sub(r'\[\s*\d+\s*(?::\s*\d+%?)?(?:\s*,\s*\d+\s*(?::\s*\d+%?)?)*\s*\]', '', cleaned)
+    
+    # 1. Normalize smart quotes and em-dashes with proper pause spacing
+    cleaned = cleaned.replace('“', '"').replace('”', '"').replace('’', "'").replace('‘', "'")
+    cleaned = re.sub(r'\s*[—–]\s*', ' — ', cleaned)
+    
+    # 2. Verbalize large numeric quantities for natural speech
+    cleaned = _verbalize_english_numbers(cleaned)
+    
+    # 3. Normalize repeated punctuation
     cleaned = re.sub(r'!+', '!', cleaned)
     cleaned = re.sub(r'\?+', '?', cleaned)
     cleaned = re.sub(r'\.{3,}', '...', cleaned)
     
-    # 2. Normalize em-dashes and long dashes with proper pause spacing
-    cleaned = re.sub(r'\s*[—–]\s*', ' — ', cleaned)
-    
-    # 3. Ensure punctuation followed by letters has space: e.g. "điều này,nhưng" -> "điều này, nhưng"
+    # 4. Ensure punctuation followed by letters has space: e.g. "word,next" -> "word, next"
     cleaned = re.sub(r'([,;:\.!?])([A-Za-zÀ-ỹ0-9])', r'\1 \2', cleaned)
     
-    # 4. Spoken connector breath pauses (English & Vietnamese)
+    # 5. Spoken connector breath pauses (English & Vietnamese)
     en_connectors = r"(?:Look|Turns out|Here\'s the thing|And guess what|Speaking of which|To be honest|Naturally|Unfortunately for them)"
-    cleaned = re.sub(rf'(?i)\b({en_connectors})\s+(?![,\.!\?—])', r'\1, ', cleaned)
+    cleaned = re.sub(rf'(?i)\b({en_connectors})\s+(?![,\.!\?])', r'\1, ', cleaned)
     
     vi_connectors = r"(?:Hóa ra|Và đoán xem|Nhìn xem|Thế nhưng|Đúng lúc này|Chưa kịp thở phào thì|Nói thật thì|Khổ nỗi)"
-    cleaned = re.sub(rf'(?i)\b({vi_connectors})\s+(?![,\.!\?—])', r'\1, ', cleaned)
+    cleaned = re.sub(rf'(?i)\b({vi_connectors})\s+(?![,\.!\?])', r'\1, ', cleaned)
     
-    # 5. Deduplicate multiple spaces or accidental duplicate commas
+    # 6. Deduplicate multiple spaces or accidental duplicate commas
     cleaned = re.sub(r',\s*,+', ',', cleaned)
     cleaned = re.sub(r'\s{2,}', ' ', cleaned)
     

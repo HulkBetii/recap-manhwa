@@ -96,7 +96,7 @@ def is_blank_or_solid_page(
     img_bgr: Any,
     bg_val: int | None = None,
     tol: int = 15,
-    ratio_threshold: float = 0.992,
+    ratio_threshold: float = 0.80,
 ) -> tuple[bool, str]:
     import cv2
     import numpy as np
@@ -104,7 +104,7 @@ def is_blank_or_solid_page(
     if img_bgr is None or (hasattr(img_bgr, "size") and img_bgr.size == 0):
         return True, "empty_image"
     h, w = img_bgr.shape[:2]
-    if h < 20 or w < 20:
+    if h < 60 or w < 60:
         return True, "dimension_too_small"
 
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
@@ -121,11 +121,11 @@ def is_blank_or_solid_page(
 
     canny = cv2.Canny(gray, 40, 120)
     edge_ratio = float(np.mean(canny > 0))
-    if edge_ratio < 0.0005:
+    if edge_ratio < 0.0010:
         return True, "low_edge_density"
 
     variance = float(np.var(gray))
-    if variance < 12.0:
+    if variance < 16.0:
         return True, "low_variance"
 
     mean_val = float(np.mean(gray))
@@ -135,13 +135,13 @@ def is_blank_or_solid_page(
     white_ratio = float(np.mean(gray > 228))
     solid_ratio = max(black_ratio, white_ratio)
 
-    if solid_ratio > 0.82 and edge_ratio < 0.020:
+    if solid_ratio > 0.78 and edge_ratio < 0.022:
         return True, "solid_void"
     if edge_ratio < 0.012:
         return True, "low_detail_or_text_card"
-    if solid_ratio > 0.75 and edge_ratio < 0.016:
+    if solid_ratio > 0.70 and edge_ratio < 0.018:
         return True, "mostly_void"
-    if (std_val < 22.0 and edge_ratio < 0.025) or (mean_val < 18.0 and edge_ratio < 0.020) or (mean_val > 238.0 and edge_ratio < 0.020):
+    if (std_val < 25.0 and edge_ratio < 0.025) or (mean_val < 22.0 and edge_ratio < 0.020) or (mean_val > 235.0 and edge_ratio < 0.020):
         return True, "low_information_filler"
 
     # 2. Center-Area Metrics (Handles images with letterboxing/padding)
@@ -157,15 +157,29 @@ def is_blank_or_solid_page(
         c_white = float(np.mean(center > 228))
         c_solid = max(c_black, c_white)
 
-        if c_solid > 0.80 and c_edge < 0.020:
+        if c_solid > 0.75 and c_edge < 0.020:
             return True, "center_solid_void"
         if c_edge < 0.012:
             return True, "center_low_detail_or_text_card"
-        if c_solid > 0.70 and c_edge < 0.015:
+        if c_solid > 0.65 and c_edge < 0.016:
             return True, "center_mostly_void"
-        if c_std < 18.0:
+        if c_std < 20.0:
             return True, "center_low_variance"
 
+    return False, "valid"
+
+
+def is_gutter_or_filler_slice(
+    img_bgr: Any,
+    bg_val: int | None = None,
+    tol: int = 15,
+) -> tuple[bool, str]:
+    """
+    Stricter check specifically tailored for webtoon horizontal slices to drop void gutters.
+    """
+    is_blank, reason = is_blank_or_solid_page(img_bgr, bg_val=bg_val, tol=tol, ratio_threshold=0.78)
+    if is_blank:
+        return True, reason
     return False, "valid"
 
 
@@ -335,14 +349,23 @@ def create_numbered_pdf(image_dir: str | Path, pdf_path: str | Path, quality: in
                 page = page.resize((700, int(page.height * (700 / page.width))), resampling)
 
             point = page_scores.get(index) if page_scores else None
+            is_meaningless = False
+            bubble_cov = 0.0
             if point is None:
                 try:
-                    point, _ = VisualSemanticScorer.calculate_score_from_pil(page)
+                    point, breakdown = VisualSemanticScorer.calculate_score_from_pil(page)
+                    is_meaningless = breakdown.get("is_meaningless", False)
+                    bubble_cov = breakdown.get("bubble_coverage_ratio", 0.0)
                 except Exception:
                     point = 70
 
+            # Guard against cover / chapter title / credit pages at the beginning of an episode
+            if index <= 2 and (is_meaningless or bubble_cov > 0.40 or (point is not None and point < 40)):
+                point = 0
+                label = f"Page: {index} - Point: 0 [FORBIDDEN_COVER_PAGE]"
+            else:
+                label = f"Page: {index} - Point: {point}"
             draw = ImageDraw.Draw(page)
-            label = f"Page: {index} - Point: {point}"
             try:
                 font = ImageFont.truetype("arial.ttf", 36)
             except Exception:

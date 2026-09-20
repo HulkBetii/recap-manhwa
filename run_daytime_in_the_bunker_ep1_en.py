@@ -69,7 +69,6 @@ async def main():
             "vlm_model": "3.8 Flash", "language": "en",
             "voice_id": config.DEFAULT_EN_VOICE_ID,
             "ref_audio_path": config.DEFAULT_EN_REF_AUDIO,
-            "bgm_genre": "drama", "enable_bgm": False,
             "enable_flash_forward_intro": False, "cleanup": False,
             "safe_mode": False, "retry_count": 3, "timeout": 300,
             "concurrency": 4, "burn_subtitles": False, "remove_text": False,

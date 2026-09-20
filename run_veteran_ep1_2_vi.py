@@ -119,8 +119,6 @@ async def main():
             "language": "vi",
             "voice_id": "clone",
             "ref_audio_path": r"C:\Users\HulkBeoti\Downloads\jessa - easygoing and effortless.mp3",
-            "bgm_genre": "apocalypse",
-            "enable_bgm": False,
             "cleanup": False,
             "safe_mode": False,
             "retry_count": 3,

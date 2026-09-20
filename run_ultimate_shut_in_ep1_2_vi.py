@@ -3,50 +3,38 @@ import sys
 import asyncio
 import json
 import time
+import urllib.parse
 import shutil
-from pathlib import Path
 
-# Ensure UTF-8 output
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
-# Ensure working directory is project root
-os.chdir(Path(__file__).resolve().parent)
+os.chdir(r"d:\VibeCoding\recap_comics-windows_version\recap_comics-windows_version")
+sys.path.insert(0, r"d:\VibeCoding\recap_comics-windows_version\recap_comics-windows_version")
 
+import config
 from workflow_base import WorkflowTask, WorkflowState, StageState
 from workflow_stages_1 import (
-    Stage0_ProjectInit,
-    Stage1_ComicParsing,
-    Stage2_AsyncImageCrawling,
-    Stage2b_IntelligentRepagination,
-    Stage3_NSFWModeration,
-    Stage4_PDFGeneration,
-    Stage5_GeminiAutomation,
-    Stage6_JSONExtraction,
+    Stage0_ProjectInit, Stage1_ComicParsing, Stage2_AsyncImageCrawling,
+    Stage2b_IntelligentRepagination, Stage3_NSFWModeration, Stage4_PDFGeneration,
+    Stage5_GeminiAutomation, Stage6_JSONExtraction,
 )
 from workflow_stages_2 import (
-    Stage7_NarrationAggregation,
-    Stage8_LocalTTS,
-    Stage9_SubtitleNormalization,
-    Stage10_EpisodeVideoRendering,
-    Stage11_FinalVideoAssembly,
-    Stage12_MetadataReports,
-    Stage13_Cleanup,
+    Stage7_NarrationAggregation, Stage8_LocalTTS, Stage9_SubtitleNormalization,
+    Stage10_EpisodeVideoRendering, Stage11_FinalVideoAssembly,
+    Stage12_MetadataReports, Stage13_Cleanup,
 )
 
 class SimpleCancelToken:
-    def is_cancelled(self) -> bool:
-        return False
+    def is_cancelled(self): return False
 
 class ConsoleContext:
-    def __init__(self, task: WorkflowTask):
+    def __init__(self, task):
         self.task = task
         self.cancel_token = SimpleCancelToken()
         self.payload = task.payload
-
-    async def log(self, message: str, level: str = "info", *args, **kwargs):
-        prefix = f"[{level.upper()}]"
-        print(f"{prefix} {message}", flush=True)
+    async def log(self, message, level="info", *a, **kw):
+        print(f"[{level.upper()}] {message}", flush=True)
         self.task.logs.append({
             "timestamp": time.strftime("%H:%M:%S"),
             "level": level,
@@ -55,25 +43,19 @@ class ConsoleContext:
             "episode": self.task.current_episode
         })
         self._sync_task_db()
-
     async def start_episode(self, ep: int):
         self.task.current_episode = ep
-        print(f"[INFO] Bắt đầu xử lý tập {ep}...", flush=True)
-
+        await self.log(f"Bắt đầu xử lý tập {ep}...", "info")
     async def complete_episode(self, ep: int):
-        print(f"[SUCCESS] Hoàn thành tập {ep}.", flush=True)
-
+        await self.log(f"Hoàn thành tập {ep}.", "success")
     async def fail_episode(self, ep: int, error: str):
-        print(f"[ERROR] Thất bại tập {ep}: {error}", flush=True)
-
+        await self.log(f"Lỗi tập {ep}: {error}", "error")
     async def update_stage_progress(self, stage_name: str, progress: float):
         print(f"[PROGRESS] {stage_name}: {progress:.1f}%", flush=True)
         self._sync_task_db()
-
     async def update_progress(self, progress: float, stage_name: str = None, episode: int = None):
         print(f"[PROGRESS] {stage_name or self.task.current_stage}: {progress:.1f}%", flush=True)
         self._sync_task_db()
-
     def _sync_task_db(self):
         try:
             db_path = "tasks_db.json"
@@ -99,30 +81,35 @@ class ConsoleContext:
             pass
 
 async def main():
-    target_url = "https://www.webtoons.com/en/action/veteran-of-the-apocalypse/list?title_no=9675"
-    print("=" * 70)
-    print("  START WORKFLOW: Veteran of the Apocalypse - Tap 1 (Tieng Viet)")
-    print("  Model VLM: Google Gemini 3.8 Flash")
-    print("  Voice TTS: OmniVoice Voice Cloning (Jessa - Mặc định Tiếng Việt)")
-    print("  Audio Engine: Pure Crisp Voiceover Narration")
-    print("=" * 70)
+    target_url = "https://www.webtoons.com/en/action/ultimate-shut-in/list?title_no=7457"
+    print("=" * 75)
+    print("  START WORKFLOW: Ultimate Shut-in - Tập 1-2 (Tiếng Việt)")
+    print(f"  URL: {target_url}")
+    print("  Model VLM: Google Gemini (Narration v2.0 - 5 Golden Rules + Few-shot)")
+    print(f"  Voice TTS: OmniVoice ({config.DEFAULT_VI_VOICE})")
+    print("  Pacing Guardrail: >= 3.5s per Hero Image")
+    print("  Auto Clean-Crop: 4-Directional Adaptive Void Trimmer")
+    print("=" * 75)
 
-    task_id = f"veteran-ep1-vi-{int(time.time())}"
+    task_id = f"ultimate-shut-in-ep1-2-vi-{int(time.time())}"
     task = WorkflowTask(
-        comic_title="Veteran of the Apocalypse",
+        comic_title="Ultimate Shut-in",
         comic_url=target_url,
         from_episode=1,
-        to_episode=1,
+        to_episode=2,
         payload={
             "vlm_model": "3.8 Flash",
             "language": "vi",
-            "voice_id": "clone",
-            "ref_audio_path": r"C:\Users\HulkBeoti\Downloads\jessa - easygoing and effortless.mp3",
+            "voice_id": config.DEFAULT_VI_VOICE_ID,
+            "ref_audio_path": config.DEFAULT_VI_REF_AUDIO,
+            "min_panel_duration": 3.5,
+            "hard_floor_duration": 3.0,
+            "enable_flash_forward_intro": False,
             "cleanup": False,
             "safe_mode": False,
-            "retry_count": 3,
-            "timeout": 300,
-            "concurrency": 4,
+            "retry_count": 5,
+            "timeout": 360,
+            "concurrency": 1,
             "burn_subtitles": False,
             "remove_text": False,
         },
@@ -155,27 +142,6 @@ async def main():
         print(f"  >>> BẮT ĐẦU: {stage.name}")
         print(f"=======================================================")
 
-        # Fast-track Image Crawling if raw images exist from previous crawl
-        if stage.name == "Stage 2 - Image Crawling":
-            download_dir = task.artifacts.get("download_dir")
-            if download_dir:
-                target_img_dir = os.path.join(download_dir, "episode_1", "images")
-                cached_img_dir = os.path.join("downloads", "veteran_of_the_apocalypse_1_30_en_e826e8f9", "episode_1", "images")
-                if os.path.exists(cached_img_dir) and len(os.listdir(cached_img_dir)) > 50:
-                    if not os.path.exists(target_img_dir) or len(os.listdir(target_img_dir)) == 0:
-                        os.makedirs(target_img_dir, exist_ok=True)
-                        print(f"[CACHE] Tự động tái sử dụng {len(os.listdir(cached_img_dir))} ảnh gốc từ đợt crawl trước để tiết kiệm thời gian...")
-                        for fname in os.listdir(cached_img_dir):
-                            src_f = os.path.join(cached_img_dir, fname)
-                            dst_f = os.path.join(target_img_dir, fname)
-                            if not os.path.exists(dst_f):
-                                shutil.copy2(src_f, dst_f)
-                        from artifact_cache import EpisodeStageCache, stage_fingerprint
-                        ep_dir = os.path.join(download_dir, "episode_1")
-                        cache = EpisodeStageCache(ep_dir)
-                        fingerprint = stage_fingerprint(task, "image_crawl", 1, extra=task.artifacts.get("chapter_slugs", []))
-                        cache.commit(stage="image_crawl", fingerprint=fingerprint, outputs=[target_img_dir])
-
         for s in task.stages:
             if s["name"] == stage.name:
                 s["status"] = StageState.RUNNING
@@ -200,18 +166,17 @@ async def main():
         print(f"[DONE] Giai đoạn {stage.name} hoàn thành 100%.")
 
     task.status = WorkflowState.SUCCESS
-    task.current_stage = "Completed"
-    task.overall_progress = 100.0
     ctx._sync_task_db()
-
-    final_video_url = task.artifacts.get("final_video_url")
-    print("\n=======================================================")
-    print("  CHÚC MỪNG: TẬP 1 TIẾNG VIỆT ĐÃ HOÀN THÀNH XUẤT SẮC!")
-    print(f"  Final Video URL: {final_video_url}")
-    print(f"  Artifacts: {task.artifacts.get('download_dir')}")
-    print("=======================================================")
+    print("\n================================================================================")
+    print("  [SUCCESS] HOÀN TẤT 100% QUY TRÌNH RECAP ULTIMATE SHUT-IN TẬP 1-2 (TIẾNG VIỆT)!")
+    download_dir = task.artifacts.get("download_dir", "")
+    print(f"  Thư mục kết quả: {download_dir}")
+    final_vids = task.artifacts.get("final_videos", {})
+    for ep_k, v_path in final_vids.items():
+        print(f"  Tập {ep_k} Video: {v_path}")
+    print("================================================================================")
     return 0
 
 if __name__ == "__main__":
-    exit_code = asyncio.run(main())
-    sys.exit(exit_code)
+    ret = asyncio.run(main())
+    sys.exit(ret)

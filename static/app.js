@@ -1040,7 +1040,6 @@ btnCrawl.addEventListener('click', async () => {
                 remove_text_radius: 3,
                 comix_group_id: document.getElementById('comix-group-id') ? document.getElementById('comix-group-id').value.trim() || null : null,
                 market_id: document.getElementById('market-preset') ? document.getElementById('market-preset').value.trim() || null : null,
-                enable_bgm: document.getElementById('enable-bgm') ? document.getElementById('enable-bgm').checked : false,
                 enable_flash_forward_intro: document.getElementById('enable-flash-forward-intro') ? document.getElementById('enable-flash-forward-intro').checked : false
             })
         });

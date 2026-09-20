@@ -120,7 +120,6 @@ async def main():
     print(f"  Voice TTS: OmniVoice Andrew ({config.DEFAULT_EN_VOICE_ID})")
     print(f"  Ref Audio: {config.DEFAULT_EN_REF_AUDIO}")
     print("  Data Policy: 100% FRESH START (Không sử dụng lại data cũ)")
-    print("  BGM: Strictly 0% (Tắt nhạc nền)")
     print("  Intro Policy: Cold Open / Direct Story Start (Bỏ Intro)")
     print("=" * 80)
 
@@ -152,8 +151,6 @@ async def main():
             "market_id": "us_apocalypse",
             "voice_id": config.DEFAULT_EN_VOICE_ID,
             "ref_audio_path": config.DEFAULT_EN_REF_AUDIO,
-            "bgm_genre": "apocalypse",
-            "enable_bgm": False,
             "enable_flash_forward_intro": False,
             "cleanup": False,
             "safe_mode": False,

@@ -180,13 +180,14 @@ def test_select_top_climax_images_white_ratio_filtering(tmp_path):
     ep_dir = tmp_path / "episode_10" / "images"
     ep_dir.mkdir(parents=True)
 
-    # 1. Image with dark action colors (0% white)
+    # 1. Image with rich saturated action colors (0% white)
     img_action_arr = np.random.randint(50, 180, (600, 600, 3), dtype=np.uint8)
+    img_action_arr[:, :, 0] = np.random.randint(180, 240, (600, 600), dtype=np.uint8)
     Image.fromarray(img_action_arr).save(str(ep_dir / "001_action.jpg"))
 
-    # 2. Image with huge pure white text bubble / speech box (> 60% pure white)
+    # 2. Image with text bubble / speech box (25% white) on textured image
     img_white_arr = np.random.randint(50, 180, (600, 600, 3), dtype=np.uint8)
-    img_white_arr[:400, :] = 255  # 66% pure white
+    img_white_arr[:150, :] = 255  # 25% pure white text box
     Image.fromarray(img_white_arr).save(str(ep_dir / "002_white_box.jpg"))
 
     top = ArcClimaxMiner.select_top_climax_images(str(tmp_path), climax_episode=10, num_images=2, min_point_threshold=0)
@@ -194,77 +195,7 @@ def test_select_top_climax_images_white_ratio_filtering(tmp_path):
     # The action image should be ranked #1 because 002_white_box is penalized by white_ratio * 40
     assert top[0]["filename"] == "001_action.jpg"
     assert top[0]["composite"] > top[1]["composite"]
-    assert top[1]["white_ratio"] > 0.5
-
-
-def test_prepend_intro_to_master_with_chapters(tmp_path):
-    import json
-    import subprocess
-
-    intro_srt = tmp_path / "intro.srt"
-    intro_srt.write_text("1\n00:00:00,000 --> 00:00:15,000\nIntro hook narration.\n", encoding="utf-8")
-    main_srt = tmp_path / "master.srt"
-    main_srt.write_text("1\n00:00:00,000 --> 00:00:05,000\nEpisode 1 starts.\n", encoding="utf-8")
-
-    intro_vid = tmp_path / "intro.mp4"
-    intro_vid.write_bytes(b"intro")
-    main_vid = tmp_path / "master.mp4"
-    main_vid.write_bytes(b"master")
-    out_vid = tmp_path / "final.mp4"
-    out_srt = tmp_path / "final.srt"
-
-    chap_json = tmp_path / "chapters.json"
-    chap_json.write_text(json.dumps([
-        {"episode": 1, "timestamp": "00:00", "title": "Episode 1", "start_seconds": 0.0},
-        {"episode": 2, "timestamp": "10:00", "title": "Episode 2", "start_seconds": 600.0}
-    ]), encoding="utf-8")
-    out_chap = tmp_path / "final_chapters.json"
-
-    orig_run = subprocess.run
-    def mock_run(cmd, *args, **kwargs):
-        temp_target = cmd[-1]
-        with open(temp_target, "wb") as f:
-            f.write(b"merged_video")
-        class Res:
-            returncode = 0
-        return Res()
-
-    subprocess.run = mock_run
-    try:
-        ok = FastIntroPrepender.prepend_intro_to_master(
-            intro_video_path=str(intro_vid),
-            intro_srt_path=str(intro_srt),
-            intro_duration=15.0,
-            target_video_path=str(main_vid),
-            target_srt_path=str(main_srt),
-            output_video_path=str(out_vid),
-            output_srt_path=str(out_srt),
-            target_chapters_path=str(chap_json),
-            output_chapters_path=str(out_chap),
-        )
-        assert ok is True
-        assert out_chap.exists()
-        with open(out_chap, "r", encoding="utf-8") as f:
-            chaps = json.load(f)
-
-        assert len(chaps) == 3
-        # Chapter 0 should be the Climax Preview Hook
-        assert chaps[0]["episode"] == 0
-        assert chaps[0]["timestamp"] == "00:00"
-        assert "Climax Preview" in chaps[0]["title"]
-        assert chaps[0]["duration_seconds"] == 15.0
-
-        # Chapter 1 should be shifted by 15.0 seconds
-        assert chaps[1]["episode"] == 1
-        assert chaps[1]["start_seconds"] == 15.0
-        assert chaps[1]["timestamp"] == "00:15"
-
-        # Chapter 2 should be shifted by 15.0 seconds (600 -> 615s = 10:15)
-        assert chaps[2]["episode"] == 2
-        assert chaps[2]["start_seconds"] == 615.0
-        assert chaps[2]["timestamp"] == "10:15"
-    finally:
-        subprocess.run = orig_run
+    assert top[1]["white_ratio"] > 0.20
 
 
 

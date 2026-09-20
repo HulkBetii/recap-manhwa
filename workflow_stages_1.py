@@ -1340,12 +1340,12 @@ class Stage5_GeminiAutomation(BaseStage):
                 pdf_path = raw_pdf_path
                 fingerprint = raw_gemini_fingerprint
 
-            if validate_recap_json(recap_json_path) or cache.is_current(
+            if cache.is_current(
                 stage="gemini",
                 fingerprint=fingerprint,
                 outputs=[raw_response_path, recap_json_path],
                 validate=lambda: validate_recap_json(recap_json_path),
-            ):
+            ) or (os.path.isfile(recap_json_path) and validate_recap_json(recap_json_path)):
                 await context.log(f"Tập {ep}: Cache Gemini hợp lệ / recap.json đã tồn tại. Bỏ qua automation.", "success")
                 try:
                     from story_memory import StoryMemory
@@ -1417,19 +1417,19 @@ class Stage5_GeminiAutomation(BaseStage):
                     if attempt_task is not None:
                         attempt_task.cancel()
 
-                hard_attempt_deadline = time.monotonic() + min(timeout, 240)
+                hard_attempt_deadline = time.monotonic() + max(timeout, 300)
                 timeout_handle = asyncio.get_running_loop().call_later(
                     max(0.0, min(attempt_deadline, hard_attempt_deadline) - time.monotonic()),
                     cancel_timed_out_attempt,
                 )
 
-                def extend_attempt_timeout(additional_seconds=60):
+                def extend_attempt_timeout(additional_seconds=120):
                     nonlocal timeout_handle
                     if timeout_handle is not None:
                         timeout_handle.cancel()
                     remaining_to_hard = max(1.0, hard_attempt_deadline - time.monotonic())
                     timeout_handle = asyncio.get_running_loop().call_later(
-                        min(max(5.0, additional_seconds), remaining_to_hard),
+                        min(max(60.0, additional_seconds), remaining_to_hard),
                         cancel_timed_out_attempt,
                     )
                 page = None
@@ -1642,8 +1642,10 @@ class Stage5_GeminiAutomation(BaseStage):
                     gen_start = time.time()
                     response_text = ""
                     error_reason = None
-                    response_deadline = min(time.monotonic() + timeout, hard_attempt_deadline)
-                    extend_attempt_timeout(min(timeout, 180))
+                    attempt_deadline = time.monotonic() + timeout
+                    hard_attempt_deadline = time.monotonic() + max(timeout, 480)
+                    response_deadline = hard_attempt_deadline
+                    extend_attempt_timeout(timeout)
                     unchanged_seconds = 0
                     no_text_seconds = 0
                     last_checked_text = ""
@@ -1730,8 +1732,8 @@ class Stage5_GeminiAutomation(BaseStage):
 
                         # As long as Gemini is thinking or generating, keep extending deadline up to hard_attempt_deadline
                         if is_generating or is_still_thinking:
-                            response_deadline = min(max(response_deadline, time.monotonic() + 45), hard_attempt_deadline)
-                            extend_attempt_timeout(45)
+                            response_deadline = min(max(response_deadline, time.monotonic() + 180), hard_attempt_deadline)
+                            extend_attempt_timeout(180)
 
                         # Get response text using response selectors
                         text_content = None
@@ -1762,8 +1764,8 @@ class Stage5_GeminiAutomation(BaseStage):
                                 unchanged_seconds = 0
                                 last_checked_text = response_text
                                 # Extend deadline and asyncio timeout handle as long as text is actively streaming
-                                response_deadline = min(max(response_deadline, time.monotonic() + 60), hard_attempt_deadline)
-                                extend_attempt_timeout(60)
+                                response_deadline = min(max(response_deadline, time.monotonic() + 180), hard_attempt_deadline)
+                                extend_attempt_timeout(180)
 
                             cleaned_response = clean_gemini_response(response_text).strip()
                             can_check_completion = False
@@ -1782,7 +1784,7 @@ class Stage5_GeminiAutomation(BaseStage):
                                 try:
                                     parsed = parse_gemini_recap_text(response_text)
                                     if parsed:
-                                        if len(parsed) >= 15:
+                                        if len(parsed) >= 10:
                                             # Complete recap script generated
                                             if has_completed_actions and unchanged_seconds >= 6:
                                                 break
@@ -1808,7 +1810,7 @@ class Stage5_GeminiAutomation(BaseStage):
                                                     valid_schema = False
                                                     break
                                             if valid_schema:
-                                                if len(parsed) >= 15:
+                                                if len(parsed) >= 10:
                                                     if has_completed_actions and unchanged_seconds >= 6:
                                                         break
                                                     if unchanged_seconds >= 24:
@@ -1851,19 +1853,22 @@ class Stage5_GeminiAutomation(BaseStage):
                         await context.log(f"[DEBUG] Phản hồi Gemini quá ngắn ({len(parsed_data)} phân đoạn): {preview}", "warning", episode=ep)
                         raise Exception(f"Kịch bản recap từ {vlm_name} quá ngắn ({len(parsed_data)} phân đoạn), yêu cầu ít nhất 10 phân đoạn.")
                     
-                    from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops
+                    from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops, auto_split_long_segments, enforce_monotonic_page_order
                     has_loop, loop_idx = detect_recap_loop(parsed_data, max_page=len(image_files))
                     if has_loop:
                         pruned_data, was_pruned = prune_recap_loops(parsed_data, max_page=len(image_files))
                         if was_pruned and len(pruned_data) >= 10:
                             await context.log(
-                                f"Tập {ep}: Anti-Loop Guardrail: Đã phát hiện và tự động cắt bỏ vòng lặp kịch bản (giữ lại {len(pruned_data)} phân cảnh đầu, loại bỏ {len(parsed_data) - len(pruned_data)} phân cảnh lặp).",
+                                f"Tập {ep}: Anti-Loop Guardrail: Đã phát hiện và tự động xử lý vòng lặp kịch bản (chọn {len(pruned_data)} phân cảnh đầy đủ nhất, loại bỏ {len(parsed_data) - len(pruned_data)} phân cảnh lặp/thừa).",
                                 "info",
                                 episode=ep,
                             )
                             parsed_data = pruned_data
                         else:
                             raise Exception(f"Kịch bản recap từ {vlm_name} bị lỗi lặp vòng cốt truyện tại phân cảnh {loop_idx} và không thể tự phục hồi an toàn.")
+
+                    parsed_data = auto_split_long_segments(parsed_data, max_words=20)
+                    parsed_data = enforce_monotonic_page_order(parsed_data)
 
                     normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
                     raw_temp_path = raw_response_path + ".tmp"
@@ -1921,6 +1926,8 @@ class Stage5_GeminiAutomation(BaseStage):
                     break
 
                 except asyncio.CancelledError:
+                    if timeout_handle is not None:
+                        timeout_handle.cancel()
                     if not attempt_timed_out:
                         raise
                     if attempt_task is not None and hasattr(attempt_task, "uncancel"):
@@ -1931,6 +1938,8 @@ class Stage5_GeminiAutomation(BaseStage):
                         episode=ep,
                     )
                 except Exception as e:
+                    if timeout_handle is not None:
+                        timeout_handle.cancel()
                     await context.log(
                         f"[{local_ctx_id}] [Page {page_id}] Lỗi xử lý tập {ep} (Thử {attempt}/{max_retries}): {e}",
                         "warning", episode=ep
@@ -2035,13 +2044,16 @@ class Stage5_GeminiAutomation(BaseStage):
                             response_text = clean_gemini_response(api_text)
                             parsed_data = parse_gemini_recap_text(response_text)
                             if parsed_data and len(parsed_data) >= 10:
-                                from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops
+                                from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops, auto_split_long_segments, enforce_monotonic_page_order
                                 has_loop, loop_idx = detect_recap_loop(parsed_data, max_page=len(image_files))
                                 if has_loop:
                                     pruned_data, was_pruned = prune_recap_loops(parsed_data, max_page=len(image_files))
                                     if was_pruned and len(pruned_data) >= 10:
                                         parsed_data = pruned_data
                                 
+                                parsed_data = auto_split_long_segments(parsed_data, max_words=20)
+                                parsed_data = enforce_monotonic_page_order(parsed_data)
+
                                 normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
                                 raw_temp_path = raw_response_path + ".tmp"
                                 recap_temp_path = recap_json_path + ".tmp"
@@ -2789,7 +2801,13 @@ class Stage2b_IntelligentRepagination(BaseStage):
                         except Exception:
                             pass
                 
-                from moderation_utils import is_junk_or_title_page, is_text_bubble_dominant
+                from moderation_utils import (
+                    is_blank_or_solid_page,
+                    is_gutter_or_filler_slice,
+                    is_junk_or_title_page,
+                    is_text_bubble_dominant,
+                )
+                from visual_scorer import VisualSemanticScorer
                 
                 def find_content_range(slice_img, pad=10):
                     h, w = slice_img.shape[:2]
@@ -2837,6 +2855,25 @@ class Stage2b_IntelligentRepagination(BaseStage):
                             y_bottom = y + 1
                             break
                             
+                    # Check for residual bottom text bubble / border gap trimming:
+                    # If there is a clear panel border / solid background gap (>= 12px) separating the main content
+                    # from a small bottom text fragment (< 140px) while the top content is already large (>= 220px)
+                    if (y_bottom - y_top) >= 300:
+                        sub_content = cleaned_content[y_top:y_bottom]
+                        sub_len = len(sub_content)
+                        gap_start = int(sub_len * 0.65)
+                        gap_len = 0
+                        best_gap_idx = -1
+                        for i in range(gap_start, sub_len - 15):
+                            if not sub_content[i]:
+                                gap_len += 1
+                                if gap_len >= 12 and best_gap_idx == -1:
+                                    best_gap_idx = i - gap_len + 1
+                            else:
+                                gap_len = 0
+                        if best_gap_idx > 0 and (sub_len - best_gap_idx) < 140:
+                            y_bottom = y_top + best_gap_idx
+
                     # Apply safety padding
                     y_top = max(0, y_top - pad)
                     y_bottom = min(h, y_bottom + pad)
@@ -2898,6 +2935,10 @@ class Stage2b_IntelligentRepagination(BaseStage):
                     slice_img = canvas[y_start:y_end, :]
                     
                     if skip_blank:
+                        is_blank_raw, _ = is_blank_or_solid_page(slice_img, bg_val=final_bg_val, tol=tolerance, ratio_threshold=0.80)
+                        if is_blank_raw:
+                            skipped_count += 1
+                            continue
                         is_junk_raw, _ = is_junk_or_title_page(slice_img, bg_val=final_bg_val, tol=tolerance)
                         if is_junk_raw:
                             skipped_count += 1
@@ -2910,7 +2951,16 @@ class Stage2b_IntelligentRepagination(BaseStage):
                     # Apply crop to image slice
                     cropped_slice = slice_img[y_top:y_bottom, x_left:x_right]
                     
+                    # Reject empty or minuscule slices after cropping
+                    if cropped_slice is None or cropped_slice.shape[0] < 80 or cropped_slice.shape[1] < 80:
+                        skipped_count += 1
+                        continue
+
                     if skip_blank:
+                        is_blank_cropped, _ = is_blank_or_solid_page(cropped_slice, bg_val=final_bg_val, tol=tolerance, ratio_threshold=0.78)
+                        if is_blank_cropped:
+                            skipped_count += 1
+                            continue
                         is_junk_cropped, _ = is_junk_or_title_page(cropped_slice, bg_val=final_bg_val, tol=tolerance)
                         if is_junk_cropped:
                             skipped_count += 1
@@ -2919,6 +2969,18 @@ class Stage2b_IntelligentRepagination(BaseStage):
                         if is_bubble_slice:
                             skipped_count += 1
                             continue
+                        
+                        # Semantic quality filter: ensure slice has actual comic visual value
+                        try:
+                            sc, bd = VisualSemanticScorer.calculate_score(cropped_slice)
+                            bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
+                            char_p = bd.get("character_presence", 0.0)
+                            is_meaningless = bd.get("is_meaningless", False)
+                            if is_meaningless or sc < 35 or (bubble_cov > 0.82 and char_p < 20.0):
+                                skipped_count += 1
+                                continue
+                        except Exception:
+                            pass
                     
                     page_counter += 1
                     new_filename = f"{page_counter:03d}.webp"

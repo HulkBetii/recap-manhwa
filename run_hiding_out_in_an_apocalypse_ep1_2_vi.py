@@ -6,13 +6,15 @@ import time
 import shutil
 from pathlib import Path
 
-# Ensure UTF-8 output
+# Ensure UTF-8 output on Windows
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
 # Ensure working directory is project root
-os.chdir(Path(__file__).resolve().parent)
+os.chdir(r"d:\VibeCoding\recap_comics-windows_version\recap_comics-windows_version")
+sys.path.insert(0, r"d:\VibeCoding\recap_comics-windows_version\recap_comics-windows_version")
 
+import config
 from workflow_base import WorkflowTask, WorkflowState, StageState
 from workflow_stages_1 import (
     Stage0_ProjectInit,
@@ -58,13 +60,13 @@ class ConsoleContext:
 
     async def start_episode(self, ep: int):
         self.task.current_episode = ep
-        print(f"[INFO] Bắt đầu xử lý tập {ep}...", flush=True)
+        await self.log(f"Bắt đầu xử lý tập {ep}...", "info")
 
     async def complete_episode(self, ep: int):
-        print(f"[SUCCESS] Hoàn thành tập {ep}.", flush=True)
+        await self.log(f"Hoàn thành tập {ep}.", "success")
 
     async def fail_episode(self, ep: int, error: str):
-        print(f"[ERROR] Thất bại tập {ep}: {error}", flush=True)
+        await self.log(f"Lỗi tập {ep}: {error}", "error")
 
     async def update_stage_progress(self, stage_name: str, progress: float):
         print(f"[PROGRESS] {stage_name}: {progress:.1f}%", flush=True)
@@ -99,30 +101,32 @@ class ConsoleContext:
             pass
 
 async def main():
-    target_url = "https://www.webtoons.com/en/action/veteran-of-the-apocalypse/list?title_no=9675"
-    print("=" * 70)
-    print("  START WORKFLOW: Veteran of the Apocalypse - Tap 1 (Tieng Viet)")
-    print("  Model VLM: Google Gemini 3.8 Flash")
-    print("  Voice TTS: OmniVoice Voice Cloning (Jessa - Mặc định Tiếng Việt)")
-    print("  Audio Engine: Pure Crisp Voiceover Narration")
-    print("=" * 70)
+    target_url = "https://www.webtoons.com/en/action/hiding-out-in-an-apocalypse/list?title_no=6469"
+    print("=" * 75)
+    print("  START WORKFLOW: Hiding Out in an Apocalypse - Tập 1 & 2 (Tiếng Việt)")
+    print("  URL: https://www.webtoons.com/en/action/hiding-out-in-an-apocalypse/list?title_no=6469")
+    print("  Model VLM: Google Gemini 3.8 Flash (Vietnamese Prompt + Point Scoring)")
+    print(f"  Voice TTS: OmniVoice ({config.DEFAULT_VI_VOICE})")
+    print("  Engine: Recap Comics Automation Engine v1.8.0")
+    print("=" * 75)
 
-    task_id = f"veteran-ep1-vi-{int(time.time())}"
+    task_id = f"hiding-out-in-an-apocalypse-ep1-2-vi-{int(time.time())}"
     task = WorkflowTask(
-        comic_title="Veteran of the Apocalypse",
+        comic_title="Hiding Out in an Apocalypse",
         comic_url=target_url,
         from_episode=1,
-        to_episode=1,
+        to_episode=2,
         payload={
             "vlm_model": "3.8 Flash",
             "language": "vi",
-            "voice_id": "clone",
-            "ref_audio_path": r"C:\Users\HulkBeoti\Downloads\jessa - easygoing and effortless.mp3",
+            "voice_id": config.DEFAULT_VI_VOICE_ID,
+            "ref_audio_path": config.DEFAULT_VI_REF_AUDIO,
+            "enable_flash_forward_intro": False,
             "cleanup": False,
             "safe_mode": False,
-            "retry_count": 3,
-            "timeout": 300,
-            "concurrency": 4,
+            "retry_count": 5,
+            "timeout": 360,
+            "concurrency": 1,
             "burn_subtitles": False,
             "remove_text": False,
         },
@@ -133,13 +137,6 @@ async def main():
 
     pipeline = [
         Stage0_ProjectInit(),
-        Stage1_ComicParsing(),
-        Stage2_AsyncImageCrawling(),
-        Stage2b_IntelligentRepagination(),
-        Stage3_NSFWModeration(),
-        Stage4_PDFGeneration(),
-        Stage5_GeminiAutomation(),
-        Stage6_JSONExtraction(),
         Stage7_NarrationAggregation(),
         Stage8_LocalTTS(),
         Stage9_SubtitleNormalization(),
@@ -154,27 +151,6 @@ async def main():
         print(f"\n=======================================================")
         print(f"  >>> BẮT ĐẦU: {stage.name}")
         print(f"=======================================================")
-
-        # Fast-track Image Crawling if raw images exist from previous crawl
-        if stage.name == "Stage 2 - Image Crawling":
-            download_dir = task.artifacts.get("download_dir")
-            if download_dir:
-                target_img_dir = os.path.join(download_dir, "episode_1", "images")
-                cached_img_dir = os.path.join("downloads", "veteran_of_the_apocalypse_1_30_en_e826e8f9", "episode_1", "images")
-                if os.path.exists(cached_img_dir) and len(os.listdir(cached_img_dir)) > 50:
-                    if not os.path.exists(target_img_dir) or len(os.listdir(target_img_dir)) == 0:
-                        os.makedirs(target_img_dir, exist_ok=True)
-                        print(f"[CACHE] Tự động tái sử dụng {len(os.listdir(cached_img_dir))} ảnh gốc từ đợt crawl trước để tiết kiệm thời gian...")
-                        for fname in os.listdir(cached_img_dir):
-                            src_f = os.path.join(cached_img_dir, fname)
-                            dst_f = os.path.join(target_img_dir, fname)
-                            if not os.path.exists(dst_f):
-                                shutil.copy2(src_f, dst_f)
-                        from artifact_cache import EpisodeStageCache, stage_fingerprint
-                        ep_dir = os.path.join(download_dir, "episode_1")
-                        cache = EpisodeStageCache(ep_dir)
-                        fingerprint = stage_fingerprint(task, "image_crawl", 1, extra=task.artifacts.get("chapter_slugs", []))
-                        cache.commit(stage="image_crawl", fingerprint=fingerprint, outputs=[target_img_dir])
 
         for s in task.stages:
             if s["name"] == stage.name:
@@ -206,7 +182,7 @@ async def main():
 
     final_video_url = task.artifacts.get("final_video_url")
     print("\n=======================================================")
-    print("  CHÚC MỪNG: TẬP 1 TIẾNG VIỆT ĐÃ HOÀN THÀNH XUẤT SẮC!")
+    print("  CHÚC MỪNG: TẬP 1 VÀ 2 TIẾNG VIỆT ĐÃ HOÀN THÀNH XUẤT SẮC!")
     print(f"  Final Video URL: {final_video_url}")
     print(f"  Artifacts: {task.artifacts.get('download_dir')}")
     print("=======================================================")
