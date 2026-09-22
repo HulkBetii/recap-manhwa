@@ -2,15 +2,10 @@ import abc
 import asyncio
 import json
 import os
-import shutil
-import threading
 import time
 import uuid
+import threading
 from typing import Dict, List, Any, Optional
-
-from security_utils import public_artifacts, redact_sensitive_text, strip_sensitive_fields
-from recap_schema import validate_recap_file
-from tts_settings import normalize_tts_voice_mode
 
 # --- CORE EVENTS & lifecycle states ---
 class WorkflowState:
@@ -44,8 +39,6 @@ class WorkflowTask:
         self.from_episode = from_episode
         self.to_episode = to_episode
         self.payload = payload
-        if "voice_id" in self.payload:
-            self.payload["voice_id"] = normalize_tts_voice_mode(self.payload.get("voice_id"))
         
         self.creation_time = payload.get("creation_time") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self.started_time: Optional[str] = payload.get("started_time")
@@ -54,23 +47,13 @@ class WorkflowTask:
         self.current_stage = payload.get("current_stage") or "Stage 0 - Project Init"
         self.current_episode: Optional[int] = payload.get("current_episode")
         
-        # Define 14 stages list
+        # Define 5 Core Modular Phases list with exact weights summing to 1.00
         self.stages = payload.get("stages") or [
-            {"name": "Stage 0 - Project Init", "status": StageState.WAITING, "progress": 0.0, "weight": 0.02},
-            {"name": "Stage 1 - Comic Parsing", "status": StageState.WAITING, "progress": 0.0, "weight": 0.03},
-            {"name": "Stage 2 - Image Crawling", "status": StageState.WAITING, "progress": 0.0, "weight": 0.12},
-            {"name": "Stage 2b - Intelligent Re-pagination", "status": StageState.WAITING, "progress": 0.0, "weight": 0.05},
-            {"name": "Stage 3 - NSFW Moderation", "status": StageState.WAITING, "progress": 0.0, "weight": 0.08},
-            {"name": "Stage 4 - PDF Generation", "status": StageState.WAITING, "progress": 0.0, "weight": 0.05},
-            {"name": "Stage 5 - Gemini Automation", "status": StageState.WAITING, "progress": 0.0, "weight": 0.15},
-            {"name": "Stage 6 - JSON Extraction", "status": StageState.WAITING, "progress": 0.0, "weight": 0.05},
-            {"name": "Stage 7 - Narration Aggregation", "status": StageState.WAITING, "progress": 0.0, "weight": 0.02},
-            {"name": "Stage 8 - Local TTS", "status": StageState.WAITING, "progress": 0.0, "weight": 0.15},
-            {"name": "Stage 9 - Subtitle Normalization", "status": StageState.WAITING, "progress": 0.0, "weight": 0.03},
-            {"name": "Stage 10 - Episode Video Rendering", "status": StageState.WAITING, "progress": 0.0, "weight": 0.15},
-            {"name": "Stage 11 - Final Video Assembly", "status": StageState.WAITING, "progress": 0.0, "weight": 0.05},
-            {"name": "Stage 12 - Metadata & Reports", "status": StageState.WAITING, "progress": 0.0, "weight": 0.03},
-            {"name": "Stage 13 - Cleanup", "status": StageState.WAITING, "progress": 0.0, "weight": 0.02},
+            {"name": "Phase 1 - Thu thập & Xử lý Hình ảnh", "status": StageState.WAITING, "progress": 0.0, "weight": 0.30},
+            {"name": "Phase 2 - Tạo Kịch bản AI VLM", "status": StageState.WAITING, "progress": 0.0, "weight": 0.25},
+            {"name": "Phase 3 - Xử lý Cấu trúc Kịch bản", "status": StageState.WAITING, "progress": 0.0, "weight": 0.10},
+            {"name": "Phase 4 - Giọng đọc TTS & Phụ đề", "status": StageState.WAITING, "progress": 0.0, "weight": 0.15},
+            {"name": "Phase 5 - Ghép Nối & Xuất Bản", "status": StageState.WAITING, "progress": 0.0, "weight": 0.20},
             {"name": "Completed", "status": StageState.WAITING, "progress": 0.0, "weight": 0.0}
         ]
         
@@ -83,10 +66,9 @@ class WorkflowTask:
         self.logs: List[Dict[str, Any]] = payload.get("logs") or []
         self.error_message: Optional[str] = payload.get("error_message")
         self.artifacts: Dict[str, Any] = payload.get("artifacts") or {}
-        self.runtime: Dict[str, Any] = payload.get("runtime") or {}
 
-    def to_storage_dict(self, include_logs: bool = True) -> Dict[str, Any]:
-        result = strip_sensitive_fields(self.payload.copy())
+    def to_dict(self, include_logs: bool = True) -> Dict[str, Any]:
+        result = self.payload.copy()
         result.update({
             "id": self.id,
             "comic_title": self.comic_title,
@@ -106,42 +88,12 @@ class WorkflowTask:
             "failed_count": self.failed_count,
             "elapsed_time": self.elapsed_time,
             "estimated_remaining_time": self.estimated_remaining_time,
-            "logs": strip_sensitive_fields(self.logs) if include_logs else [],
-            "error_message": redact_sensitive_text(self.error_message),
+            "logs": self.logs if include_logs else [],
+            "error_message": self.error_message,
             "artifacts": self.artifacts,
-            "runtime": self.runtime,
             "language": self.payload.get("language", "vi")
         })
-        return strip_sensitive_fields(result)
-
-    def to_public_dict(self, include_logs: bool = True) -> Dict[str, Any]:
-        return {
-            "id": self.id,
-            "comic_title": self.comic_title,
-            "comic_url": self.comic_url,
-            "from_episode": self.from_episode,
-            "to_episode": self.to_episode,
-            "creation_time": self.creation_time,
-            "started_time": self.started_time,
-            "finished_time": self.finished_time,
-            "status": self.status,
-            "current_stage": self.current_stage,
-            "current_episode": self.current_episode,
-            "stages": strip_sensitive_fields(self.stages),
-            "overall_progress": self.overall_progress,
-            "episode_progress": strip_sensitive_fields(self.episode_progress),
-            "completed_count": self.completed_count,
-            "failed_count": self.failed_count,
-            "elapsed_time": self.elapsed_time,
-            "estimated_remaining_time": self.estimated_remaining_time,
-            "logs": strip_sensitive_fields(self.logs) if include_logs else [],
-            "error_message": redact_sensitive_text(self.error_message),
-            "artifacts": public_artifacts(self.artifacts),
-            "language": self.payload.get("language", "vi"),
-        }
-
-    def to_dict(self, include_logs: bool = True) -> Dict[str, Any]:
-        return self.to_storage_dict(include_logs=include_logs)
+        return result
 
 # --- CANCELLATION TOKEN ---
 class CancellationToken:
@@ -192,80 +144,69 @@ class BaseWorkflowRepository(abc.ABC):
 class JSONWorkflowRepository(BaseWorkflowRepository):
     def __init__(self, file_path: str = "tasks_db.json"):
         self.file_path = file_path
+        self._lock = threading.Lock()
         self._tasks = {}
-        self._lock = threading.RLock()
         self._load_from_disk()
 
     def _load_from_disk(self):
-        if os.path.exists(self.file_path):
-            try:
-                with open(self.file_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    scrubbed = False
-                    for tid, tdata in data.items():
-                        try:
-                            payload = strip_sensitive_fields(tdata.copy())
-                            scrubbed = scrubbed or payload != tdata
-                            # Safely extract title from logs if missing
-                            comic_title = tdata.get("comic_title")
-                            if not comic_title:
-                                for log in tdata.get("logs", []):
-                                    if "Comic official title:" in log.get("message", ""):
-                                        comic_title = log["message"].split("Comic official title:")[-1].strip()
-                                        break
-                            if not comic_title:
-                                comic_title = "Unknown Comic"
+        with self._lock:
+            target_path = self.file_path
+            if (not os.path.exists(target_path) or os.path.getsize(target_path) <= 2) and os.path.exists("tasks.json") and os.path.getsize("tasks.json") > 2:
+                target_path = "tasks.json"
 
-                            task = WorkflowTask(
-                                comic_title=comic_title,
-                                comic_url=tdata.get("comic_url", ""),
-                                from_episode=tdata.get("from_episode", 1),
-                                to_episode=tdata.get("to_episode", 1),
-                                payload=payload,
-                                id=tid
-                            )
-                            scrubbed = scrubbed or task.payload != tdata
-                            self._tasks[tid] = task
-                        except Exception as item_err:
-                            print(f"Error loading individual task {tid}: {item_err}", flush=True)
-            except Exception as e:
-                print(f"Error loading tasks: {e}", flush=True)
-            else:
-                if scrubbed:
-                    self._save_to_disk()
+            if os.path.exists(target_path):
+                try:
+                    with open(target_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        for tid, tdata in data.items():
+                            try:
+                                payload = tdata.copy()
+                                if payload.get("status") in [WorkflowState.RUNNING, WorkflowState.WAITING]:
+                                    payload["status"] = WorkflowState.FAILED
+                                    payload["error_message"] = "Task was interrupted by server shutdown."
+                                    for stage in payload.get("stages", []):
+                                        if stage.get("status") in [StageState.RUNNING, StageState.WAITING]:
+                                            stage["status"] = StageState.FAILED
+                                
+                                # Safely extract title from logs if missing
+                                comic_title = tdata.get("comic_title")
+                                if not comic_title:
+                                    for log in tdata.get("logs", []):
+                                        if "Comic official title:" in log.get("message", ""):
+                                            comic_title = log["message"].split("Comic official title:")[-1].strip()
+                                            break
+                                if not comic_title:
+                                    comic_title = "Unknown Comic"
+
+                                task = WorkflowTask(
+                                    comic_title=comic_title,
+                                    comic_url=tdata.get("comic_url", ""),
+                                    from_episode=tdata.get("from_episode", 1),
+                                    to_episode=tdata.get("to_episode", 1),
+                                    payload=payload,
+                                    id=tid
+                                )
+                                self._tasks[tid] = task
+                            except Exception as item_err:
+                                print(f"Error loading individual task {tid}: {item_err}", flush=True)
+                except Exception as e:
+                    print(f"Error loading tasks: {e}", flush=True)
 
     def _save_to_disk(self):
         with self._lock:
-            try:
-                data = {tid: task.to_storage_dict() for tid, task in self._tasks.items()}
-                temp_filepath = self.file_path + ".tmp"
-                with open(temp_filepath, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
-                
-                # Robust replace on Windows (avoid WinError 5 Access is denied during rapid writes)
-                replaced = False
-                for attempt in range(10):
-                    try:
-                        os.replace(temp_filepath, self.file_path)
-                        replaced = True
-                        break
-                    except (PermissionError, OSError):
-                        time.sleep(0.08 * (attempt + 1))
-                if not replaced:
-                    for copy_attempt in range(5):
-                        try:
-                            shutil.copyfile(temp_filepath, self.file_path)
-                            replaced = True
-                            break
-                        except (PermissionError, OSError):
-                            time.sleep(0.1 * (copy_attempt + 1))
+            for attempt in range(5):
                 try:
-                    if os.path.exists(temp_filepath):
-                        os.remove(temp_filepath)
-                except Exception:
-                    pass
-            except Exception as e:
-                print(f"Error saving tasks: {e}", flush=True)
+                    data = {tid: task.to_dict() for tid, task in self._tasks.items()}
+                    temp_filepath = f"{self.file_path}.tmp_{os.getpid()}_{int(time.time()*1000)}"
+                    with open(temp_filepath, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                    os.replace(temp_filepath, self.file_path)
+                    break
+                except Exception as e:
+                    if attempt == 4:
+                        print(f"Error saving tasks after 5 attempts: {e}", flush=True)
+                    else:
+                        time.sleep(0.05 * (attempt + 1))
 
     def save(self, task: WorkflowTask):
         self._tasks[task.id] = task
@@ -296,68 +237,83 @@ class WorkflowContext:
 
     async def log(self, message: str, level: str = "info", stage_name: Optional[str] = None, episode: Optional[int] = None):
         timestamp = time.strftime("%H:%M:%S", time.localtime())
-        safe_message = redact_sensitive_text(str(message)) or ""
         log_entry = {
             "timestamp": timestamp,
-            "message": safe_message,
+            "message": message,
             "level": level,
             "stage": stage_name or self.task.current_stage,
             "episode": episode or self.task.current_episode
         }
         self.task.logs.append(log_entry)
-        try:
-            print(f"[{self.task.comic_title}] [{level.upper()}] {safe_message}", flush=True)
-        except UnicodeEncodeError:
-            try:
-                sys.stdout.buffer.write(f"[{self.task.comic_title}] [{level.upper()}] {safe_message}\n".encode("utf-8", errors="replace"))
-                sys.stdout.buffer.flush()
-            except Exception:
-                pass
+        print(f"[{self.task.comic_title}] [{level.upper()}] {message}", flush=True)
         await self.manager.save_and_broadcast("WorkflowProgressUpdated", self.task)
 
     async def update_stage_progress(self, stage_name: str, progress: float):
         for s in self.task.stages:
             if s["name"] == stage_name:
                 s["progress"] = progress
+                if progress >= 100.0:
+                    s["status"] = StageState.SUCCESS
+                elif progress > 0 and s.get("status") != StageState.SUCCESS:
+                    s["status"] = StageState.RUNNING
                 break
         await self.manager.calculate_overall_progress(self.task)
         await self.manager.save_and_broadcast("WorkflowProgressUpdated", self.task)
 
-    async def start_episode(self, episode: int):
+    async def update_episode_stage(self, episode: int, stage_name: str, status: str = StageState.RUNNING):
         self.task.current_episode = episode
         ep_key = str(episode)
         if ep_key not in self.task.episode_progress:
             self.task.episode_progress[ep_key] = {}
-        self.task.episode_progress[ep_key][self.task.current_stage] = StageState.RUNNING
+        # Mark previous running stages as SUCCESS when advancing to a new stage
+        if status == StageState.RUNNING:
+            for s_name, s_st in list(self.task.episode_progress[ep_key].items()):
+                if s_st == StageState.RUNNING and s_name != stage_name:
+                    self.task.episode_progress[ep_key][s_name] = StageState.SUCCESS
+        self.task.episode_progress[ep_key][stage_name] = status
+        await self.manager.calculate_overall_progress(self.task)
+        await self.manager.save_and_broadcast("EpisodeProgressUpdated", self.task)
+
+    async def start_episode(self, episode: int, initial_stage: str = "Stage 2 - Async Image Crawling"):
+        self.task.current_episode = episode
+        ep_key = str(episode)
+        if ep_key not in self.task.episode_progress:
+            self.task.episode_progress[ep_key] = {}
+        self.task.episode_progress[ep_key][initial_stage] = StageState.RUNNING
+        await self.manager.calculate_overall_progress(self.task)
         await self.manager.save_and_broadcast("EpisodeStarted", self.task)
 
     async def complete_episode(self, episode: int):
         ep_key = str(episode)
         if ep_key not in self.task.episode_progress:
             self.task.episode_progress[ep_key] = {}
-        self.task.episode_progress[ep_key][self.task.current_stage] = StageState.SUCCESS
+        for s_name in list(self.task.episode_progress[ep_key].keys()):
+            if self.task.episode_progress[ep_key][s_name] == StageState.RUNNING:
+                self.task.episode_progress[ep_key][s_name] = StageState.SUCCESS
+        self.task.episode_progress[ep_key]["Stage 10 - Episode Video Rendering"] = StageState.SUCCESS
         self.task.completed_count = sum(
             1 for ep_num, stages in self.task.episode_progress.items()
-            if all(status == StageState.SUCCESS for status in stages.values())
+            if any(status == StageState.SUCCESS for s_k, status in stages.items() if "10" in s_k or "Completed" in s_k)
         )
+        await self.manager.calculate_overall_progress(self.task)
         await self.manager.save_and_broadcast("EpisodeCompleted", self.task)
 
-    async def fail_episode(self, episode: int, error_msg: str):
+    async def fail_episode(self, episode: int, error_msg: str, stage_name: Optional[str] = None):
         ep_key = str(episode)
         if ep_key not in self.task.episode_progress:
             self.task.episode_progress[ep_key] = {}
-        self.task.episode_progress[ep_key][self.task.current_stage] = StageState.FAILED
+        target_stage = stage_name or self.task.current_stage
+        self.task.episode_progress[ep_key][target_stage] = StageState.FAILED
         self.task.failed_count = sum(
             1 for ep_num, stages in self.task.episode_progress.items()
             if any(status == StageState.FAILED for status in stages.values())
         )
-        await self.log(f"Episode {episode} failed: {error_msg}", "error", episode=episode)
+        await self.log(f"Tập {episode} thất bại ở {target_stage}: {error_msg}", "error", episode=episode, stage_name=target_stage)
+        await self.manager.calculate_overall_progress(self.task)
         await self.manager.save_and_broadcast("EpisodeFailed", self.task)
 
 # --- BASE STAGE INTERFACE ---
 class BaseStage(abc.ABC):
-    handles_retries = False
-
     @property
     @abc.abstractmethod
     def name(self) -> str: pass
@@ -408,18 +364,69 @@ def check_episode_completed(download_dir: Optional[str], ep: int) -> bool:
     except Exception:
         return False
         
-    image_dir = os.path.join(ep_dir, "images_blur")
-    if not os.path.isdir(image_dir):
-        image_dir = os.path.join(ep_dir, "images_pdf")
-    max_page = None
-    if os.path.isdir(image_dir):
-        max_page = sum(
-            1
-            for name in os.listdir(image_dir)
-            if os.path.isfile(os.path.join(image_dir, name))
-            and name.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
-        ) or None
-    if not validate_recap_file(recap_path, max_page=max_page):
+    # 3. Check JSON validity and schema of recap.json
+    segments_count = 0
+    try:
+        with open(recap_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if not isinstance(data, list) or len(data) == 0:
+                return False
+            for item in data:
+                if not isinstance(item, dict) or "speech" not in item or "images" not in item:
+                    return False
+            segments_count = len(data)
+    except Exception:
+        return False
+
+    # 4. Check that transcript.srt cue count matches recap.json segment count 1-to-1
+    try:
+        with open(srt_path, "r", encoding="utf-8") as sf:
+            srt_text = sf.read()
+        import re
+        cues_count = len(re.findall(r"\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}", srt_text))
+        if cues_count != segments_count:
+            return False
+    except Exception:
         return False
         
     return True
+
+
+def find_and_copy_completed_episode(downloads_parent: str, sanitized_title: str, language: str, dest_download_dir: str, ep: int) -> bool:
+    # 1. First check if it is already completed in dest_download_dir
+    dest_ep_dir = os.path.join(dest_download_dir, f"episode_{ep}")
+    if check_episode_completed(dest_download_dir, ep):
+        return True
+        
+    # 2. Iterate through all items in downloads_parent
+    if not os.path.exists(downloads_parent):
+        return False
+        
+    prefix = f"{sanitized_title}_"
+    suffix = f"_{language}"
+    
+    for item in os.listdir(downloads_parent):
+        item_path = os.path.join(downloads_parent, item)
+        if not os.path.isdir(item_path):
+            continue
+        # Check matching pattern: starts with title_ and ends with _lang
+        if item.startswith(prefix) and item.endswith(suffix):
+            # Do not copy from the destination itself
+            if os.path.abspath(item_path) == os.path.abspath(dest_download_dir):
+                continue
+            src_ep_dir = os.path.join(item_path, f"episode_{ep}")
+            if os.path.exists(src_ep_dir) and check_episode_completed(item_path, ep):
+                # We found a completed episode in a previous folder! Copy it!
+                import shutil
+                if os.path.exists(dest_ep_dir):
+                    try:
+                        shutil.rmtree(dest_ep_dir)
+                    except Exception:
+                        pass
+                try:
+                    shutil.copytree(src_ep_dir, dest_ep_dir)
+                    return True
+                except Exception:
+                    pass
+                    
+    return False

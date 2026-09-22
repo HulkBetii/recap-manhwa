@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Studio Tách & Gộp Video — Manhwa Recap</title>
+    <!-- Google Fonts: Outfit & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="video_merge.css?v=1.0">
+</head>
+<body>
+    <div class="background-glow"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <i data-lucide="git-merge"></i>
+                </div>
+                <div>
+                    <h1>Studio Tách & Gộp Video <span class="title-badge">Stream Copy</span></h1>
+                    <p class="subtitle">Tùy chọn khoảng tập bất kỳ để gộp thành video mới siêu tốc không cần render lại</p>
+                </div>
+            </div>
+            <div class="header-nav">
+                <a href="/" class="btn-nav">
+                    <i data-lucide="arrow-left"></i>
+                    <span>Về Trang chủ</span>
+                </a>
+                <a href="/test_stage" class="btn-nav">
+                    <i data-lucide="flask-conical"></i>
+                    <span>Test Stage</span>
+                </a>
+                <div class="status-indicator">
+                    <span class="status-dot idle" id="status-dot"></span>
+                    <span class="status-text" id="status-text">Sẵn sàng</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Grid Layout -->
+        <main class="studio-grid">
+            <!-- Left Column: Controls & Range Builder -->
+            <section class="glass-card left-panel">
+                <!-- 1. Comic Selector -->
+                <div class="section-block">
+                    <div class="section-title">
+                        <i data-lucide="book-open"></i>
+                        <span>1. Chọn Bộ Truyện Đã Render</span>
+                    </div>
+                    <div class="form-group">
+                        <div class="select-wrapper">
+                            <select id="select-comic" class="custom-select">
+                                <option value="">-- Đang tải danh sách bộ truyện... --</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="comic-info-badge" class="comic-info-banner" style="display: none;">
+                        <div class="info-content">
+                            <div class="comic-name-large" id="badge-comic-title">Tên Truyện</div>
+                            <div class="comic-meta-row">
+                                <span class="badge-status-green" id="badge-total-eps">Sẵn sàng 0 tập</span>
+                                <span class="meta-item" id="badge-range-eps">Tập 1 → 1</span>
+                                <span class="meta-item" id="badge-folder-name">folder</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Presets Toolbar -->
+                <div class="section-block">
+                    <div class="section-title">
+                        <i data-lucide="sparkles"></i>
+                        <span>2. Chia Khoảng Nhanh (Presets)</span>
+                    </div>
+                    <div class="presets-row">
+                        <button type="button" class="btn-preset" data-size="5">Mỗi 5 tập</button>
+                        <button type="button" class="btn-preset" data-size="10">Mỗi 10 tập</button>
+                        <button type="button" class="btn-preset" data-size="20">Mỗi 20 tập</button>
+                        <button type="button" class="btn-preset" data-size="50">Mỗi 50 tập</button>
+                        <button type="button" class="btn-preset highlight" data-size="all">Gộp tất cả</button>
+                        <button type="button" id="btn-clear-ranges" class="btn-preset danger">Xóa trắng</button>
+                    </div>
+                </div>
+
+                <!-- 3. Dynamic Range Builder -->
+                <div class="section-block">
+                    <div class="section-header-flex">
+                        <div class="section-title">
+                            <i data-lucide="layers"></i>
+                            <span>3. Các Khoảng Tập Cần Gộp</span>
+                        </div>
+                        <button type="button" id="btn-add-range" class="btn-action-sm">
+                            <i data-lucide="plus"></i>
+                            <span>Thêm khoảng</span>
+                        </button>
+                    </div>
+
+                    <div id="ranges-container" class="ranges-list">
+                        <!-- Dynamic range rows -->
+                    </div>
+                </div>
+
+                <!-- Execution Action Button -->
+                <div class="execution-footer">
+                    <div id="merge-progress-status" class="status-msg">
+                        <span>Sẵn sàng ghép nối video.</span>
+                    </div>
+                    <button type="button" id="btn-start-merge" class="btn-primary-merge">
+                        <i data-lucide="zap"></i>
+                        <span>Tiến hành gộp video (Stream Copy)</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Right Column: Outputs & Built-in Player -->
+            <section class="glass-card right-panel">
+                <!-- Merged Videos List -->
+                <div class="section-block">
+                    <div class="section-header-flex">
+                        <div class="section-title">
+                            <i data-lucide="film"></i>
+                            <span>Danh Sách Video Đã Gộp</span>
+                            <span id="merged-count-pill" class="count-pill">0 video</span>
+                        </div>
+                    </div>
+                    <div id="merged-videos-list" class="merged-list">
+                        <div class="empty-state">
+                            <i data-lucide="video-off"></i>
+                            <span>Chưa có video gộp nào cho bộ truyện này.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Embedded Video Player Preview -->
+                <div class="section-block player-block">
+                    <div class="section-title">
+                        <i data-lucide="play-circle"></i>
+                        <span id="player-title">Xem Trước Video & Phụ Đề</span>
+                    </div>
+
+                    <div class="player-container">
+                        <video id="studio-video-player" controls preload="metadata"></video>
+                        <div id="subtitle-overlay" class="subtitle-overlay" style="display: none;">
+                            <span id="subtitle-text"></span>
+                        </div>
+                    </div>
+
+                    <div class="player-meta-bar">
+                        <div class="sub-status" id="player-sub-status">
+                            <i data-lucide="file-check"></i>
+                            <span id="sub-status-text">Chưa chọn video để xem</span>
+                        </div>
+                        <div class="player-tools">
+                            <button type="button" id="btn-toggle-sub" class="btn-tool" title="Bật/Tắt phụ đề">
+                                <i data-lucide="subtitles"></i>
+                                <span id="btn-sub-label">Phụ đề: Bật</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="video_merge.js?v=1.0"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>

@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=2.3">
 </head>
 <body>
     <div class="background-glow"></div>
@@ -23,11 +23,17 @@
                     <i data-lucide="play-circle"></i>
                 </div>
                 <div>
-                    <h1>Manhwa Recap <span class="version-badge" style="font-size: 0.5em; opacity: 0.8; font-weight: 600; background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 2px 8px; border-radius: 9999px; vertical-align: middle; border: 1px solid rgba(96, 165, 250, 0.3); margin-left: 6px;">v1.6.0</span></h1>
+                    <h1>Manhwa Recap</h1>
                     <p class="subtitle">Tự động hóa sản xuất video recap truyện tranh chuyên nghiệp</p>
                 </div>
             </div>
-            <div class="status-indicator">
+            <div class="status-indicator" style="display: flex; align-items: center; gap: 0.5rem;">
+                <a href="/video_merge" class="btn-video-merge" style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.75rem; border-radius: 9999px; background: rgba(255, 174, 110, 0.12); border: 1px solid rgba(255, 174, 110, 0.5); color: #FFAE6E; text-decoration: none; font-size: 0.82rem; font-weight: 600; transition: all 0.2s;" onmouseover="this.style.background='rgba(255, 174, 110, 0.25)'; this.style.borderColor='#FFAE6E'" onmouseout="this.style.background='rgba(255, 174, 110, 0.12)'; this.style.borderColor='rgba(255, 174, 110, 0.5)'" title="Mở trang chuyên dụng Tách & Gộp Video">
+                    <span>🎬 Tách / Gộp Video</span>
+                </a>
+                <a href="/test_stage" class="btn-test-stage" style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.75rem; border-radius: 9999px; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.5); color: #38bdf8; text-decoration: none; font-size: 0.82rem; font-weight: 600; transition: all 0.2s;" onmouseover="this.style.background='rgba(56, 189, 248, 0.2)'; this.style.borderColor='#38bdf8'" onmouseout="this.style.background='rgba(56, 189, 248, 0.08)'; this.style.borderColor='rgba(56, 189, 248, 0.5)'" title="Mở màn kiểm thử độc lập Smart Paging & Gemini Automation">
+                    <span>🧪 Test Stage</span>
+                </a>
                 <span class="status-dot idle"></span>
                 <span class="status-text" id="app-status">Sẵn sàng</span>
             </div>
@@ -48,65 +54,121 @@
                         <span>Đường dẫn bộ truyện (Manhwa Link)</span>
                     </label>
                     <div class="input-wrapper">
-                        <input type="url" id="manhwa-url" placeholder="Nhập link truyện (Naver Webtoon, Webtoons, Vortex, ToonGod, Asura, Comix)..." autocomplete="off">
+                        <input type="url" id="manhwa-url" placeholder="Nhập link truyện (Webtoons, Asura, Vortex, ToonGod, Comix, Nyx, Valir, ManhuaPlus)..." autocomplete="off">
                     </div>
-                    <span class="input-help">Trang truyện này sẽ được quét để xác định số tập và thông tin chi tiết.</span>
-                    <div class="supported-hosts" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
-                        <span style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 500;">Hỗ trợ:</span>
-                        <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(0, 220, 100, 0.1); border: 1px solid rgba(0, 220, 100, 0.3); color: #00DC64; font-weight: 600;">Naver Webtoon</span>
-                        <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #10B981; font-weight: 600;">Webtoons</span>
-                        <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); color: #3B82F6; font-weight: 600;">Vortex Scans</span>
-                        <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); color: #A78BFA; font-weight: 600;">Valir Scans</span>
-                        <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); color: #F59E0B; font-weight: 600;">ToonGod</span>
-                        <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #EF4444; font-weight: 600;">Asura Scans</span>
-                        <span style="font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.2); color: #A855F7; font-weight: 600;">Comix</span>
-                    </div>
-                </div>
-                <div class="safe-mode-control">
-                    <div class="safe-mode-copy">
-                        <div class="safe-mode-title">
-                            <i data-lucide="shield-alert"></i>
-                            <span>Safe Mode</span>
-                            <span id="safe-mode-status" class="safe-mode-status off">Đang tắt</span>
+                    <span class="input-help">Trang truyện này sẽ được quét để xác định số tập và tải ảnh tự động.</span>
+                    <div class="supported-hosts-wrapper">
+                        <div class="supported-hosts-header">
+                            <span class="supported-hosts-title">
+                                <i data-lucide="globe"></i>
+                                <span>Website hỗ trợ tự động</span>
+                            </span>
+                            <span class="supported-hosts-count">8 nền tảng</span>
                         </div>
-                        <p>Chỉ kiểm duyệt các ảnh được chọn đưa vào video. Mặc định hệ thống không kiểm duyệt.</p>
+                        <div class="supported-hosts-grid">
+                            <div class="host-chip webtoons" data-url="https://www.webtoons.com" title="Mở trang chủ Webtoons trong tab mới">
+                                <i data-lucide="book-open"></i>
+                                <div class="host-info">
+                                    <span class="host-name">Webtoons</span>
+                                    <span class="host-domain">webtoons.com</span>
+                                </div>
+                            </div>
+                            <div class="host-chip asura" data-url="https://asuracomic.net" title="Mở trang chủ Asura Scans trong tab mới">
+                                <i data-lucide="flame"></i>
+                                <div class="host-info">
+                                    <span class="host-name">Asura Scans</span>
+                                    <span class="host-domain">asurascans.com</span>
+                                </div>
+                            </div>
+                            <div class="host-chip vortex" data-url="https://vortexscans.org" title="Mở trang chủ Vortex Scans trong tab mới">
+                                <i data-lucide="zap"></i>
+                                <div class="host-info">
+                                    <span class="host-name">Vortex Scans</span>
+                                    <span class="host-domain">vortexscans.org</span>
+                                </div>
+                            </div>
+                            <div class="host-chip toongod" data-url="https://www.toongod.org" title="Mở trang chủ ToonGod trong tab mới">
+                                <i data-lucide="sparkles"></i>
+                                <div class="host-info">
+                                    <span class="host-name">ToonGod</span>
+                                    <span class="host-domain">toongod.org</span>
+                                </div>
+                            </div>
+                            <div class="host-chip comix" data-url="https://comix.to" title="Mở trang chủ Comix.to trong tab mới">
+                                <i data-lucide="layers"></i>
+                                <div class="host-info">
+                                    <span class="host-name">Comix.to</span>
+                                    <span class="host-domain">comix.to</span>
+                                </div>
+                            </div>
+                            <div class="host-chip nyx" data-url="https://nyxscans.com" title="Mở trang chủ Nyx Scans trong tab mới">
+                                <i data-lucide="moon"></i>
+                                <div class="host-info">
+                                    <span class="host-name">Nyx Scans</span>
+                                    <span class="host-domain">nyxscans.com</span>
+                                </div>
+                            </div>
+                            <div class="host-chip valir" data-url="https://valirscans.org" title="Mở trang chủ Valir Scans trong tab mới">
+                                <i data-lucide="shield"></i>
+                                <div class="host-info">
+                                    <span class="host-name">Valir Scans</span>
+                                    <span class="host-domain">valirscans.org</span>
+                                </div>
+                            </div>
+                            <div class="host-chip manhuaplus" data-url="https://manhuaplus.com" title="Mở trang chủ ManhuaPlus trong tab mới">
+                                <i data-lucide="plus-circle"></i>
+                                <div class="host-info">
+                                    <span class="host-name">ManhuaPlus</span>
+                                    <span class="host-domain">manhuaplus.com</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <label class="safe-mode-switch" for="safe-mode" aria-label="Bật hoặc tắt Safe Mode">
-                        <input type="checkbox" id="safe-mode" role="switch" aria-checked="false">
-                        <span class="safe-mode-slider" aria-hidden="true"></span>
-                    </label>
                 </div>
 
-                <div class="action-buttons" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                    <button id="btn-setup" class="btn btn-primary" style="padding: 0.85rem 0.5rem; font-size: 0.9rem;">
-                        <i data-lucide="chrome"></i>
-                        <span>Setup Cookies</span>
-                    </button>
-                    <button id="btn-load-episodes" class="btn" style="background: linear-gradient(135deg, #e5904e 0%, #FFAE6E 100%); color: white; padding: 0.85rem 0.5rem; font-size: 0.9rem; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">
-                        <i data-lucide="list-video"></i>
-                        <span>Load Episode</span>
-                    </button>
-                </div>
-
-
-
-                <div class="action-buttons-danger" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.75rem;">
-                    <button id="btn-stop" class="btn" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 0.85rem 0.5rem; font-size: 0.9rem; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem; border-radius: 0.75rem;">
-                        <i data-lucide="square"></i>
-                        <span>Dừng thực thi (Stop)</span>
-                    </button>
-                    <button id="btn-clear-cache" class="btn" style="background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); color: var(--text-primary); padding: 0.85rem 0.5rem; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem; border-radius: 0.75rem;">
-                        <i data-lucide="trash-2"></i>
-                        <span>Xóa Cache (Clear)</span>
-                    </button>
-                </div>
-
-                <!-- Hidden Episode Selection Area -->
-                <div id="episode-selection-area" class="form-group" style="display: none; border: 1px solid var(--card-border-glow); padding: 1rem; border-radius: 0.75rem; background: rgba(255, 174, 110, 0.03); margin-top: 0.5rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.5rem; gap: 0.5rem;">
-                        <span style="font-weight: 600; color: var(--text-primary); font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" id="info-series-name">Truyện: Lookism</span>
-                        <span class="status-indicator" style="padding: 0.25rem 0.6rem; font-size: 0.75rem; white-space: nowrap;"><span id="info-total-eps">0</span> tập</span>
+                <!-- Presets Configuration Bar -->
+                <div class="presets-section-wrapper" id="presets-section-wrapper" style="margin-top: 0.75rem;">
+                    <div class="presets-header">
+                        <div class="presets-title-wrap">
+                            <i data-lucide="bookmark-check" style="width: 0.95rem; height: 0.95rem; color: #FFAE6E;"></i>
+                            <span class="presets-title">Cấu hình nhanh (Presets)</span>
+                        </div>
+                        <span class="presets-count-badge" id="presets-count-badge">2 presets</span>
                     </div>
+                    
+                    <div class="presets-dropdown-container" style="position: relative;">
+                        <!-- Dropdown Trigger Button -->
+                        <button type="button" id="presets-dropdown-btn" class="presets-dropdown-btn" title="Nhấn để xem danh sách preset">
+                            <div class="presets-btn-content">
+                                <i data-lucide="sliders-horizontal" class="presets-main-icon" style="width: 1rem; height: 1rem; color: #FFAE6E; flex-shrink: 0;"></i>
+                                <div class="presets-btn-info">
+                                    <span id="preset-selected-name" class="preset-name">Đang tải presets...</span>
+                                    <span id="preset-selected-summary" class="preset-summary">Đang đồng bộ...</span>
+                                </div>
+                            </div>
+                            <i data-lucide="chevron-down" id="preset-chevron" class="preset-chevron-icon" style="width: 0.95rem; height: 0.95rem; color: var(--text-secondary); transition: transform 0.2s; flex-shrink: 0;"></i>
+                        </button>
+
+                        <!-- Dropdown Menu Popover -->
+                        <div id="presets-dropdown-menu" class="presets-dropdown-menu" style="display: none;">
+                            <!-- Presets List (Scrollable) -->
+                            <div id="presets-list" class="presets-list">
+                                <!-- Rendered dynamically by JS -->
+                            </div>
+                            
+                            <!-- Bottom Action: Add New Preset -->
+                            <div class="presets-menu-footer">
+                                <button type="button" id="btn-add-preset" class="btn-add-preset">
+                                    <i data-lucide="plus-circle" style="width: 0.9rem; height: 0.9rem;"></i>
+                                    <span>Lưu cấu hình hiện tại thành Preset mới</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Control Options Panel (Always open by default) -->
+                <div id="episode-selection-area" class="form-group" style="display: flex; flex-direction: column; border: 1px solid var(--card-border-glow); padding: 1rem; border-radius: 0.75rem; background: rgba(255, 174, 110, 0.03); margin-top: 0.75rem;">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                         <div class="form-group">
                             <label for="from-episode" style="font-size: 0.8rem;">Từ tập</label>
@@ -136,146 +198,80 @@
                     </div>
                     
                     <div id="vlm-config-area" style="border-top: 1px solid var(--card-border); padding-top: 0.75rem; margin-bottom: 1rem;">
-                        <div style="font-weight: 600; color: var(--text-primary); font-size: 0.85rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem;">
-                            <i data-lucide="settings" style="color: #FFAE6E; width: 0.95rem; height: 0.95rem;"></i>
-                            <span>Cấu hình VLM & Safe Mode</span>
-                        </div>
-                        
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label for="vlm-timeout" style="font-size: 0.7rem; color: var(--text-secondary);">Timeout (giây)</label>
+                                <label for="vlm-language" style="font-size: 0.8rem; color: var(--text-secondary);">Ngôn ngữ tóm tắt</label>
                                 <div class="input-wrapper">
-                                    <input type="number" id="vlm-timeout" min="30" max="600" value="160" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box;">
-                                </div>
-                            </div>
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label for="vlm-retries" style="font-size: 0.7rem; color: var(--text-secondary);">Số lần thử lại</label>
-                                <div class="input-wrapper">
-                                    <input type="number" id="vlm-retries" min="1" max="10" value="5" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box;">
-                                </div>
-                            </div>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label for="vlm-concurrency" style="font-size: 0.7rem; color: var(--text-secondary);">Xử lý song song (ảnh/TTS/video)</label>
-                                <div class="input-wrapper">
-                                    <input type="number" id="vlm-concurrency" min="1" max="5" value="5" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box;">
-                                </div>
-                            </div>
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label for="image-quality" style="font-size: 0.7rem; color: var(--text-secondary);">Chất lượng ảnh/PDF (%)</label>
-                                <div class="input-wrapper">
-                                    <input type="number" id="image-quality" min="10" max="100" value="20" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box;">
-                                </div>
-                            </div>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label for="market-preset" style="font-size: 0.7rem; color: #FFAE6E; font-weight: 600;">🎯 Nhánh thị trường (Market Preset)</label>
-                                <div class="input-wrapper">
-                                    <select id="market-preset" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,174,110,0.4); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
-                                        <option value="" selected>Mặc định (Toàn cầu / Tuỳ chỉnh)</option>
-                                        <option value="us_apocalypse">🇺🇸 US: Apocalypse & Survival (Cold Open Hook + Badass Narration)</option>
-                                        <option value="korea_apocalypse">🇰🇷 Hàn Quốc: Sinh tồn · Tận thế (종말 · 생존 몰아보기)</option>
-                                        <option value="japan_isekai_territory">🇯🇵 Nhật Bản: 異世界転生 × 領地経営 × 成り上がり</option>
+                                    <select id="vlm-language" class="compact-select">
+                                        <option value="vi" selected>Tiếng Việt</option>
+                                        <option value="en">English</option>
+                                        <option value="ja">Japanese</option>
+                                        <option value="zh">Chinese</option>
                                     </select>
                                 </div>
                             </div>
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label for="vlm-language" style="font-size: 0.7rem; color: var(--text-secondary);">Ngôn ngữ tóm tắt</label>
+                                <label for="gemini-model" style="font-size: 0.8rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.25rem;">
+                                    <i data-lucide="cpu" style="width: 0.85rem; height: 0.85rem;"></i>
+                                    <span>Mô hình Gemini</span>
+                                </label>
                                 <div class="input-wrapper">
-                                    <select id="vlm-language" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
-                                        <option value="en" selected>English (Tiếng Anh - Mặc định)</option>
-                                        <option value="vi">Tiếng Việt (Vietnamese)</option>
-                                        <option value="ja">Japanese (Tiếng Nhật)</option>
-                                        <option value="zh">Chinese (Tiếng Trung)</option>
-                                        <option value="ko">Korean (Tiếng Hàn)</option>
+                                    <select id="gemini-model" class="compact-select">
+                                        <option value="flash-lite">3.5 Flash-Lite (Lite)</option>
+                                        <option value="flash" selected>3.8 Flash (Normal)</option>
+                                        <option value="pro">3.1 Pro (Pro)</option>
                                     </select>
                                 </div>
                             </div>
                         </div>
 
-                        <div style="display: grid; grid-template-columns: 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <div style="display: grid; grid-template-columns: 1fr; gap: 0.75rem; margin-bottom: 0.5rem;">
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label for="tts-voice-id" style="font-size: 0.7rem; color: var(--text-secondary);">Chế độ giọng đọc (TTS Mode)</label>
+                                <label for="tts-voice-id" style="font-size: 0.8rem; color: var(--text-secondary);">Chế độ giọng đọc (OmniVoice)</label>
                                 <div class="input-wrapper">
-                                    <select id="tts-voice-id" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
-                                        <optgroup label="🎙️ OmniVoice Voice Cloning (Chất lượng phòng thu)">
-                                            <option value="clone_andrew" selected>OmniVoice Clone: Andrew (Mặc định Tiếng Anh Mỹ: Smooth, Smart & Clear)</option>
-                                            <option value="clone_jessa">OmniVoice Clone: Jessa (Mặc định Tiếng Việt: Easygoing & Effortless)</option>
-                                            <option value="clone">OmniVoice Clone: Tự động theo ngôn ngữ / File tải lên</option>
-                                        </optgroup>
-                                        <optgroup label="🌐 EdgeTTS Miễn phí">
-                                            <option value="edge-tts">EdgeTTS Tiếng Anh (en-US Christopher)</option>
-                                            <option value="edge-tts_vi-VN-NamMinhNeural">EdgeTTS Tiếng Việt (Nam Minh - Nam trầm)</option>
-                                            <option value="edge-tts_vi-VN-HoaiMyNeural">EdgeTTS Tiếng Việt (Hoài My - Nữ nhẹ nhàng)</option>
-                                            <option value="edge-tts_ko-KR-InJoonNeural">EdgeTTS Hàn Quốc (ko-KR-InJoonNeural - Nam trầm kịch tính)</option>
-                                            <option value="edge-tts_ko-KR-SunHiNeural">EdgeTTS Hàn Quốc (ko-KR-SunHiNeural - Nữ chuẩn)</option>
-                                        </optgroup>
-                                        <optgroup label="⚡ Tùy chọn khác">
-                                            <option value="ai33pro">API AI33Pro (ElevenLabs / EdgeTTS Auto Fallback)</option>
-                                            <option value="voicevox">VOICEVOX Local GPU (Tiếng Nhật - Zundamon / Anime)</option>
-                                            <option value="auto">OmniVoice Auto (Tự động thiết kế giọng)</option>
-                                            <option value="design">OmniVoice Prompt Design (Thiết kế giọng bằng văn bản)</option>
-                                        </optgroup>
+                                    <select id="tts-voice-id" class="compact-select">
+                                        <option value="auto" selected>Auto Voice (Tự động chọn giọng)</option>
+                                        <option value="design">Voice Design (Thiết kế giọng bằng văn bản)</option>
+                                        <option value="clone">Voice Cloning (Sao chép giọng nói mẫu)</option>
+                                        <option value="ai33pro">API AI33Pro (Giọng ElevenLabs)</option>
                                     </select>
-                                </div>
-                                <div id="voice-preview-container" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.35rem;">
-                                    <button type="button" id="btn-preview-voice" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.7rem; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #60A5FA; border-radius: 0.35rem; cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
-                                        <span id="preview-btn-text">▶ Nghe thử giọng Andrew (EN)</span>
-                                    </button>
-                                    <audio id="audio-preview-player" style="display: none;"></audio>
                                 </div>
                             </div>
                         </div>
 
-
-                        <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap;">
-                            <label for="burn-subtitles" style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.72rem; color: var(--text-secondary); cursor: pointer;">
-                                <input type="checkbox" id="burn-subtitles">
-                                <span>Chèn phụ đề vào video (vẫn luôn xuất file SRT)</span>
-                            </label>
-                        </div>
-
-                        <!-- VOICEVOX Local GPU Configurations -->
-                        <div id="voicevox-config-area" style="display: none; margin-bottom: 0.5rem;">
+                        <!-- Auto Voice Selection Dropdown & Voice Manager -->
+                        <div id="omnivoice-auto-area" style="display: block; margin-bottom: 0.5rem; position: relative;">
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label for="voicevox-speaker-id" style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Nhân vật VOICEVOX (Voice & Style)</label>
-                                <div class="input-wrapper">
-                                    <select id="voicevox-speaker-id" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
-                                        <optgroup label="👑 Dẫn chuyện Lãnh địa & Chiến thuật (Nam trầm)">
-                                            <option value="13">青山龍星 (Aoyama Ryusei) - Normal (Khuyên dùng)</option>
-                                            <option value="81">青山龍星 (Aoyama Ryusei) - Whisper</option>
-                                            <option value="85">剣崎雌雄 (Kenzaki Mesuo) - Normal</option>
-                                        </optgroup>
-                                        <optgroup label="ずんだもん (Zundamon)">
-                                            <option value="3" selected>ずんだもん (Zundamon) - Normal</option>
-                                            <option value="7">ずんだもん (Zundamon) - Tsundere</option>
-                                            <option value="1">ずんだもん (Zundamon) - Sweet</option>
-                                            <option value="76">ずんだもん (Zundamon) - Crying (Mếu máo)</option>
-                                            <option value="22">ずんだもん (Zundamon) - Whisper</option>
-                                            <option value="5">ずんだもん (Zundamon) - Sexy</option>
-                                        </optgroup>
-                                        <optgroup label="四国めたん (Shikoku Metan)">
-                                            <option value="2">四国めたん (Shikoku Metan) - Normal</option>
-                                            <option value="6">四国めたん (Shikoku Metan) - Tsundere</option>
-                                            <option value="0">四国めたん (Shikoku Metan) - Sweet</option>
-                                            <option value="4">四国めたん (Shikoku Metan) - Sexy</option>
-                                        </optgroup>
-                                        <optgroup label="Nhân vật khác">
-                                            <option value="8">春日部つむぎ (Kasukabe Tsumugi) - Normal</option>
-                                            <option value="9">波音リツ (Namine Ritsu) - Normal</option>
-                                            <option value="10">雨晴はう (Amehare Hau) - Normal</option>
-                                            <option value="14">冥鳴ひまり (Meimei Himari) - Normal</option>
-                                            <option value="47">ナースロボ＿タイプＴ (Nurse Robot Type-T)</option>
-                                        </optgroup>
-                                    </select>
-                                </div>
-                                <div id="voicevox-status-badge" style="font-size: 0.65rem; color: #10B981; margin-top: 0.25rem; display: flex; align-items: center; gap: 0.3rem;">
-                                    <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #10B981;"></span>
-                                    <span>VOICEVOX Engine đang chạy trên GPU (port 50021)</span>
+                                <label style="font-size: 0.75rem; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                                    <span>Voice mẫu clone (Voices)</span>
+                                    <span id="auto-voice-count" style="font-size: 0.7rem; color: var(--primary);">2 voices</span>
+                                </label>
+                                <input type="hidden" id="auto-voice-selected-path" value="">
+                                
+                                <!-- Trigger Button -->
+                                <button type="button" id="auto-voice-dropdown-btn" class="auto-voice-btn" style="width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 0.45rem 0.65rem; background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 0.45rem; color: var(--text-primary); cursor: pointer; text-align: left; transition: all 0.2s;">
+                                    <div style="display: flex; align-items: center; gap: 0.45rem; overflow: hidden;">
+                                        <i data-lucide="mic" style="width: 0.95rem; height: 0.95rem; color: #FFAE6E; flex-shrink: 0;"></i>
+                                        <span id="auto-voice-selected-name" style="font-size: 0.8rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Đang tải danh sách voice...</span>
+                                    </div>
+                                    <i data-lucide="chevron-down" id="auto-voice-chevron" style="width: 0.9rem; height: 0.9rem; color: var(--text-secondary); flex-shrink: 0; transition: transform 0.2s;"></i>
+                                </button>
+                                
+                                <!-- Dropdown Menu Popover -->
+                                <div id="auto-voice-dropdown-menu" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #161822; border: 1px solid rgba(255, 174, 110, 0.3); border-radius: 0.5rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7); z-index: 1000; overflow: hidden; backdrop-filter: blur(12px);">
+                                    <!-- Voice Items List -->
+                                    <div id="auto-voice-list" style="max-height: 200px; overflow-y: auto; padding: 0.35rem;">
+                                        <!-- Rendered dynamically -->
+                                    </div>
+                                    
+                                    <!-- Add Voice Button at bottom -->
+                                    <div style="padding: 0.4rem 0.5rem; border-top: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.25);">
+                                        <input type="file" id="auto-voice-file-input" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac" style="display: none;">
+                                        <button type="button" id="btn-add-auto-voice" class="btn" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0.4rem 0.6rem; font-size: 0.78rem; background: rgba(255, 174, 110, 0.12); border: 1px dashed #FFAE6E; color: #FFAE6E; border-radius: 0.35rem; cursor: pointer; transition: all 0.2s;">
+                                            <i data-lucide="plus-circle" style="width: 0.85rem; height: 0.85rem;"></i>
+                                            <span>Thêm voice mẫu mới (+ Audio)</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -283,128 +279,92 @@
                         <!-- OmniVoice Extra Configurations -->
                         <div id="omnivoice-design-area" style="display: none; margin-bottom: 0.5rem;">
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label for="omnivoice-instruct" style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Mô tả giọng đọc (Gender, pitch, accent, style...)</label>
+                                <label for="omnivoice-instruct" style="font-size: 0.75rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Mô tả giọng đọc (Gender, pitch, accent, style...)</label>
                                 <div class="input-wrapper">
-                                    <input type="text" id="omnivoice-instruct" placeholder="e.g. female, low pitch, american accent" value="female, low pitch, american accent" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.35rem; outline: none; height: 28px; font-family: inherit;">
+                                    <input type="text" id="omnivoice-instruct" class="compact-input" placeholder="e.g. female, low pitch, american accent" value="female, low pitch, american accent">
                                 </div>
                             </div>
                         </div>
 
                         <div id="omnivoice-clone-area" style="display: none; margin-bottom: 0.5rem;">
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Reference Audio (Âm thanh mẫu)</label>
+                                <label style="font-size: 0.75rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Reference Audio (Âm thanh mẫu)</label>
                                 <div style="display: flex; gap: 0.35rem; align-items: center;">
                                     <input type="file" id="ref-audio-file" accept="audio/*" style="display: none;">
-                                    <button type="button" id="btn-choose-ref-audio" class="btn" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); color: var(--text-primary); cursor: pointer; border-radius: 0.35rem; width: 100%; text-align: center; white-space: nowrap;">
+                                    <button type="button" id="btn-choose-ref-audio" class="btn" style="padding: 0.45rem 0.75rem; font-size: 0.8rem; background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); color: var(--text-primary); cursor: pointer; border-radius: 0.45rem; width: 100%; text-align: center; white-space: nowrap;">
                                         Chọn file âm thanh
                                     </button>
                                 </div>
-                                <div id="ref-audio-file-status" style="font-size: 0.65rem; color: var(--text-secondary); margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Mặc định (Không sao chép)</div>
+                                <div id="ref-audio-file-status" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Mặc định (Không sao chép)</div>
                             </div>
                         </div>
 
                         <!-- AI33Pro API Configurations -->
                         <div id="ai33pro-api-area" style="display: none; margin-bottom: 0.5rem;">
-                            <div style="font-size: 0.65rem; color: var(--text-muted);">API key và Voice ID được đọc từ <code>XI_API_KEY</code>/<code>AI33PRO_VOICE_ID</code> trong <code>.env</code> và không được gửi qua trình duyệt.</div>
-                        </div>
-
-                        <div id="nsfw-settings" class="safe-mode-settings is-disabled">
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label for="nsfw-threshold" style="font-size: 0.7rem; color: var(--text-secondary);">Độ nhạy Safe Mode</label>
+                                <label for="ai33pro-api-key" style="font-size: 0.75rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">API Key AI33Pro</label>
                                 <div class="input-wrapper">
-                                    <input type="number" id="nsfw-threshold" min="0.1" max="0.9" step="0.05" value="0.3" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box;">
+                                    <input type="password" id="ai33pro-api-key" class="compact-input" placeholder="Bỏ trống sẽ dùng Key hệ thống">
                                 </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Logo & Overlay Configuration -->
-                    <div id="logo-overlay-config-area" style="border-top: 1px solid var(--card-border); padding-top: 0.75rem; margin-bottom: 1rem;">
-                        <div style="font-weight: 600; color: var(--text-primary); font-size: 0.85rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
-                            <i data-lucide="image" style="color: #FFAE6E; width: 0.95rem; height: 0.95rem;"></i>
-                            <span>Cấu hình Logo & Overlay</span>
-                        </div>
-                        
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Ảnh Logo (50x50)</label>
-                                <div style="display: flex; gap: 0.35rem; align-items: center;">
-                                    <input type="file" id="logo-file" accept="image/*" style="display: none;">
-                                    <button type="button" id="btn-choose-logo" class="btn" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); color: var(--text-primary); cursor: pointer; border-radius: 0.35rem; width: 100%; text-align: center; white-space: nowrap;">
-                                        Chọn Logo
-                                    </button>
-                                </div>
-                                <div id="logo-file-status" style="font-size: 0.65rem; color: var(--text-secondary); margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Mặc định</div>
-                            </div>
-                            
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Ảnh Overlay (1920x1080)</label>
-                                <div style="display: flex; gap: 0.35rem; align-items: center;">
-                                    <input type="file" id="overlay-file" accept="image/*" style="display: none;">
-                                    <button type="button" id="btn-choose-overlay" class="btn" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); color: var(--text-primary); cursor: pointer; border-radius: 0.35rem; width: 100%; text-align: center; white-space: nowrap;">
-                                        Chọn Overlay
-                                    </button>
-                                </div>
-                                <div id="overlay-file-status" style="font-size: 0.65rem; color: var(--text-secondary); margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Mặc định</div>
-                            </div>
+                        <!-- Video Anti-Copyright: Flip Horizontal / Mirror -->
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 0.65rem; padding-top: 0.5rem; border-top: 1px dashed var(--card-border);">
+                            <label for="flip-horizontal" style="font-size: 0.8rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.45rem; cursor: pointer; user-select: none;">
+                                <i data-lucide="flip-horizontal" style="width: 0.95rem; height: 0.95rem; color: #FFAE6E;"></i>
+                                <span>Lật ảnh ngang (Flip / Mirror Video)</span>
+                            </label>
+                            <input type="checkbox" id="flip-horizontal" style="width: 1.15rem; height: 1.15rem; cursor: pointer; accent-color: #FFAE6E;">
                         </div>
                     </div>
                     
-                    <div style="display: flex; gap: 0.75rem;">
+                    <div class="action-buttons" style="display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.5rem;">
                         <button id="btn-crawl" class="btn btn-primary" style="box-shadow: 0 4px 12px rgba(255, 174, 110, 0.2); background: linear-gradient(135deg, #FFAE6E 0%, #FF7A5C 100%); cursor: pointer; padding: 0.85rem 1rem; font-size: 0.95rem; width: 100%; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.5rem; border-radius: 0.75rem;">
-                            <i data-lucide="download-cloud"></i>
-                            <span>Bắt đầu Crawl & Tạo PDF</span>
+                            <i data-lucide="play-circle"></i>
+                            <span>Bắt đầu Tạo Video Recap (Start)</span>
+                        </button>
+                        <button id="btn-stop" class="btn" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 0.75rem 1rem; font-size: 0.9rem; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem; border-radius: 0.75rem; width: 100%;">
+                            <i data-lucide="square"></i>
+                            <span>Dừng thực thi (Stop)</span>
                         </button>
                     </div>
                 </div>
  
-                <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--card-border); padding-top: 1rem;">
-                    <div style="display: flex; align-items: center; justify-content: space-between;">
-                        <label for="active-profile-select" style="margin-bottom: 0;">
-                            <i data-lucide="users"></i>
-                            <span>Cấu hình Tài khoản / Chrome Profiles</span>
+                <div class="form-group" style="margin-top: 1.25rem; border-top: 1px solid var(--card-border); padding-top: 1rem;">
+                    <label for="chrome-profiles-textarea">
+                        <i data-lucide="users"></i>
+                        <span>Cấu hình Tài khoản / Chrome Profiles</span>
+                    </label>
+                    <div class="input-wrapper" style="margin-top: 0.5rem;">
+                        <textarea id="chrome-profiles-textarea" rows="4" wrap="off" placeholder="Nhập đường dẫn Chrome Profile (mỗi dòng một đường dẫn)...&#10;e.g.&#10;C:\Data\Profile 1&#10;C:\Data\Profile 2" style="width: 100%; background: rgba(0, 0, 0, 0.45); border: 1px solid var(--card-border); border-radius: 0.75rem; padding: 0.75rem 0.9rem; color: var(--text-primary); font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 0.78rem; line-height: 1.5; white-space: pre; overflow-x: auto; word-wrap: normal; overflow-wrap: normal; resize: vertical; outline: none; transition: all var(--transition-fast);"></textarea>
+                    </div>
+                    <span class="input-help">Đường dẫn các thư mục Profile Chrome để chạy xoay vòng khi bị giới hạn (Rate limit).</span>
+                    
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 0.65rem; gap: 0.75rem;">
+                        <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500; white-space: nowrap;">Tài khoản hoạt động:</span>
+                        <select id="active-profile-select" class="compact-select" style="flex: 1; max-width: 240px; color: var(--text-primary); border: 1px solid var(--card-border);"></select>
+                    </div>
+
+                    <!-- Browser Visibility Option Toggle -->
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 0.65rem; padding-top: 0.5rem; border-top: 1px dashed var(--card-border);">
+                        <label for="show-browser-toggle" style="font-size: 0.8rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.45rem; cursor: pointer; user-select: none;">
+                            <i data-lucide="eye" style="width: 0.95rem; height: 0.95rem; color: #FFAE6E;"></i>
+                            <span>Hiển thị cửa sổ Chrome (Headed Mode)</span>
                         </label>
-                        <button type="button" id="btn-create-profile" class="btn" style="padding: 0.35rem 0.65rem; font-size: 0.75rem; background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; border: none; cursor: pointer; border-radius: 0.4rem; font-weight: 600; display: flex; align-items: center; gap: 0.35rem;">
-                            <i data-lucide="user-plus" style="width: 0.8rem; height: 0.8rem;"></i>
-                            <span>+ Thêm Profile Mới</span>
+                        <input type="checkbox" id="show-browser-toggle" checked style="width: 1.15rem; height: 1.15rem; cursor: pointer; accent-color: #FFAE6E;">
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-top: 0.85rem;">
+                        <button id="btn-save-profiles" class="btn btn-primary" style="padding: 0.65rem 0.85rem; font-size: 0.82rem; display: flex; align-items: center; justify-content: center; gap: 0.45rem; cursor: pointer; border-radius: 0.6rem; font-weight: 600; border: none; box-shadow: 0 4px 12px rgba(255, 174, 110, 0.2);">
+                            <i data-lucide="save" style="width: 1rem; height: 1rem;"></i>
+                            <span>Lưu Cấu hình</span>
+                        </button>
+                        <button id="btn-setup-active-profile" class="btn" style="padding: 0.65rem 0.85rem; font-size: 0.82rem; display: flex; align-items: center; justify-content: center; gap: 0.45rem; background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); color: var(--text-primary); cursor: pointer; border-radius: 0.6rem; font-weight: 600; transition: all var(--transition-fast);">
+                            <i data-lucide="chrome" style="width: 1rem; height: 1rem;"></i>
+                            <span>Đăng nhập profile</span>
                         </button>
                     </div>
-
-                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 0.75rem; gap: 0.5rem;">
-                        <div style="flex: 1;">
-                            <span style="font-size: 0.75rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Tài khoản đang chọn:</span>
-                            <select id="active-profile-select" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: var(--text-primary); padding: 0.45rem 0.6rem; border-radius: 0.45rem; font-size: 0.8rem; outline: none;"></select>
-                        </div>
-                    </div>
-
-                    <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem;">
-                        <button id="btn-setup-active-profile" class="btn btn-primary" style="flex: 2; padding: 0.55rem 0.8rem; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; gap: 0.4rem; cursor: pointer; border-radius: 0.45rem; font-weight: 600; background: linear-gradient(135deg, #FFAE6E 0%, #FF7A5C 100%); border: none;">
-                            <i data-lucide="chrome" style="width: 0.9rem; height: 0.9rem;"></i>
-                            <span>Đăng nhập Profile này</span>
-                        </button>
-                        <button id="btn-delete-profile" class="btn" style="flex: 1; padding: 0.55rem 0.8rem; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; gap: 0.4rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #FCA5A5; cursor: pointer; border-radius: 0.45rem; font-weight: 600;">
-                            <i data-lucide="trash-2" style="width: 0.9rem; height: 0.9rem;"></i>
-                            <span>Xóa</span>
-                        </button>
-                    </div>
-
-                    <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 0.6rem; background: rgba(255, 174, 110, 0.05); padding: 0.45rem 0.65rem; border-radius: 0.4rem; border: 1px dashed rgba(255, 174, 110, 0.25); line-height: 1.4;">
-                        💡 <strong>Mẹo:</strong> Bạn có thể mở trực tiếp file <code>login_profile.bat</code> trong thư mục dự án để Chrome bật ngay trên màn hình Desktop của bạn.
-                    </div>
-
-                    <!-- Collapsible advanced custom paths -->
-                    <details style="margin-top: 0.75rem; font-size: 0.75rem; color: var(--text-secondary);">
-                        <summary style="cursor: pointer; user-select: none; margin-bottom: 0.4rem;">Tùy chỉnh đường dẫn thủ công (Nâng cao)</summary>
-                        <div class="input-wrapper" style="margin-top: 0.25rem;">
-                            <textarea id="chrome-profiles-textarea" rows="3" placeholder="Nhập đường dẫn Chrome Profile (mỗi dòng một đường dẫn)..." style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 0.5rem 0.75rem; color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; resize: vertical; outline: none;"></textarea>
-                        </div>
-                        <div style="display: flex; justify-content: flex-end; margin-top: 0.4rem;">
-                            <button id="btn-save-profiles" class="btn" style="padding: 0.35rem 0.75rem; font-size: 0.75rem; display: flex; align-items: gap: 0.35rem; cursor: pointer; border-radius: 0.35rem; background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: var(--text-primary); font-weight: 600;">
-                                <i data-lucide="save" style="width: 0.8rem; height: 0.8rem;"></i>
-                                <span>Lưu thủ công</span>
-                            </button>
-                        </div>
-                    </details>
                 </div>
             </section>
 
@@ -479,7 +439,7 @@
                         <!-- Progress Section -->
                         <div style="display: flex; flex-direction: column; gap: 0.5rem;">
                             <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
-                                <span style="color: var(--text-secondary);">Overall Progress</span>
+                                <span style="color: var(--text-secondary);">Tiến độ tổng quan</span>
                                 <span id="active-progress-percent" style="font-weight: 600; color: var(--primary);">0%</span>
                             </div>
                             <div class="progress-bar-container" style="width: 100%; height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; border: 1px solid var(--card-border);">
@@ -490,20 +450,31 @@
                         <!-- Details Grid -->
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; background: rgba(0,0,0,0.15); padding: 0.75rem; border-radius: 0.75rem; border: 1px solid var(--card-border); font-size: 0.8rem;">
                             <div>
-                                <span style="color: var(--text-secondary); display: block; margin-bottom: 0.15rem;">Current Stage</span>
+                                <span style="color: var(--text-secondary); display: block; margin-bottom: 0.15rem;">Giai đoạn hiện tại</span>
                                 <strong id="active-current-stage" style="color: var(--text-primary);">N/A</strong>
                             </div>
                             <div>
-                                <span style="color: var(--text-secondary); display: block; margin-bottom: 0.15rem;">Current Episode</span>
+                                <span style="color: var(--text-secondary); display: block; margin-bottom: 0.15rem;">Tập đang xử lý</span>
                                 <strong id="active-current-episode" style="color: var(--text-primary);">N/A</strong>
                             </div>
                             <div>
-                                <span style="color: var(--text-secondary); display: block; margin-bottom: 0.15rem;">Elapsed Time</span>
+                                <span style="color: var(--text-secondary); display: block; margin-bottom: 0.15rem;">Thời gian đã chạy</span>
                                 <strong id="active-elapsed" style="color: var(--text-primary);">0s</strong>
                             </div>
                             <div>
-                                <span style="color: var(--text-secondary); display: block; margin-bottom: 0.15rem;">Est. Remaining</span>
+                                <span style="color: var(--text-secondary); display: block; margin-bottom: 0.15rem;">Thời gian ước tính còn lại</span>
                                 <strong id="active-remaining" style="color: var(--text-primary);">N/A</strong>
+                            </div>
+                        </div>
+
+                        <!-- Live Episode Pipeline Matrix -->
+                        <div id="active-episodes-matrix" class="active-episodes-matrix" style="display: none;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.15rem;">
+                                <span style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Tiến độ song song từng tập</span>
+                                <span id="active-episodes-summary-txt" style="font-size: 0.75rem; color: var(--text-secondary);"></span>
+                            </div>
+                            <div id="active-episodes-grid" class="active-episodes-grid">
+                                <!-- Dynamically injected episode cards -->
                             </div>
                         </div>
 
@@ -525,7 +496,7 @@
                         <div style="display: flex; align-items: center; justify-content: space-between;">
                             <h3 style="font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
                                 <i data-lucide="list-todo" style="color: var(--primary); width: 1.1rem; height: 1.1rem;"></i>
-                                <span>Danh sách hàng đợi (Queue)</span>
+                                <span>Danh sách nhiệm vụ & Lịch sử</span>
                             </h3>
                             <div style="display: flex; gap: 0.5rem;">
                                 <button id="btn-retry-queue" class="btn" style="padding: 0.3rem 0.75rem; font-size: 0.75rem; background: #ea580c; border: none; color: white; border-radius: 6px; display: flex; align-items: center; gap: 0.3rem; cursor: pointer; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#c2410c'" onmouseout="this.style.background='#ea580c'">
@@ -539,7 +510,7 @@
                             </div>
                         </div>
                         <div id="workflow-queue-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
-                            <div style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 3rem 0; font-size: 0.85rem;">Không có task nào trong hàng đợi. Nhấn "Bắt đầu chạy" bên trái để tạo task.</div>
+                            <div style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 3rem 0; font-size: 0.85rem;">Chưa có nhiệm vụ nào trong danh sách. Nhấn "Bắt đầu chạy" bên trái để tạo task.</div>
                         </div>
                     </div>
                 </div>
@@ -600,38 +571,169 @@
     </div>
 
     <!-- Video Player Modal Overlay -->
-    <div id="video-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(15px); z-index: 1000; align-items: center; justify-content: center; padding: 2rem; box-sizing: border-box;">
-        <div class="modal-content glass-card" style="width: 100%; max-width: 960px; display: flex; flex-direction: column; background: rgba(15, 15, 25, 0.9); border: 1px solid var(--card-border-glow); border-radius: 1.25rem; overflow: hidden; box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6);">
-            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 1.25rem 2rem; border-bottom: 1px solid var(--card-border); background: rgba(0,0,0,0.3);">
-                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                    <i data-lucide="play" style="color: var(--primary); width: 1.5rem; height: 1.5rem;"></i>
-                    <h2 style="margin: 0; font-size: 1.25rem; font-weight: 600; background: linear-gradient(135deg, var(--text-primary) 0%, #FFAE6E 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;" id="video-modal-title">Phát Video Recap</h2>
+    <div id="video-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.88); backdrop-filter: blur(15px); z-index: 1000; align-items: center; justify-content: center; padding: 1.5rem; box-sizing: border-box;">
+        <div class="modal-content glass-card" style="width: 100%; max-width: 1200px; max-height: 92vh; display: flex; flex-direction: column; background: rgba(18, 14, 12, 0.96); border: 1px solid var(--card-border-glow); border-radius: 1.25rem; overflow: hidden; box-shadow: 0 30px 60px rgba(0, 0, 0, 0.7);">
+            <!-- Modal Header -->
+            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 0.9rem 1.5rem; border-bottom: 1px solid var(--card-border); background: rgba(0,0,0,0.4); flex-shrink: 0; gap: 1rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem; min-width: 0;">
+                    <i data-lucide="play" style="color: var(--primary); width: 1.4rem; height: 1.4rem; flex-shrink: 0;"></i>
+                    <h2 style="margin: 0; font-size: 1.15rem; font-weight: 600; background: linear-gradient(135deg, var(--text-primary) 0%, #FFAE6E 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="video-modal-title">Phát Video Recap</h2>
                 </div>
-                <button id="btn-close-video-modal" class="btn-icon" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; transition: color var(--transition-fast); display: flex; align-items: center; justify-content: center; padding: 0.5rem; border-radius: 50%;"><i data-lucide="x"></i></button>
+
+                <!-- Header Actions Toolbar -->
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; flex-wrap: wrap;">
+                    <!-- Toggle Subtitles -->
+                    <button id="btn-toggle-subtitles" class="btn" style="font-size: 0.75rem; padding: 0.35rem 0.75rem; height: 32px; background: rgba(255, 174, 110, 0.15); border: 1px solid var(--primary); color: var(--primary); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 0.35rem; font-weight: 500; transition: all 0.2s;" title="Bật/Tắt hiển thị phụ đề trên video">
+                        <i data-lucide="subtitles" style="width: 1rem; height: 1rem;"></i>
+                        <span id="subtitle-toggle-text">Phụ đề: Bật</span>
+                    </button>
+
+                    <!-- Toggle Transcript Sidebar -->
+                    <button id="btn-toggle-transcript" class="btn" style="font-size: 0.75rem; padding: 0.35rem 0.75rem; height: 32px; background: rgba(255, 174, 110, 0.12); border: 1px solid rgba(255, 174, 110, 0.4); color: var(--primary); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 0.35rem; transition: all 0.2s;" title="Ẩn/Hiện bảng danh sách câu thoại chi tiết">
+                        <i data-lucide="list" style="width: 1rem; height: 1rem;"></i>
+                        <span>Danh sách thoại</span>
+                    </button>
+
+                    <!-- Live Subtitle Translation Box -->
+                    <div id="sub-translate-group" style="display: flex; align-items: center; gap: 0.35rem; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--card-border); border-radius: 6px; padding: 0.15rem 0.4rem; height: 32px;">
+                        <i data-lucide="languages" style="width: 0.95rem; height: 0.95rem; color: var(--primary); flex-shrink: 0;"></i>
+                        <select id="select-sub-translate-lang" style="background: transparent; border: none; color: var(--text-primary); font-size: 0.75rem; outline: none; cursor: pointer; padding: 0.15rem 0.25rem;" title="Chọn ngôn ngữ đích cần dịch phụ đề">
+                            <option value="vi" selected style="background: #1a1614; color: #fff;">Tiếng Việt (VI)</option>
+                            <option value="en" style="background: #1a1614; color: #fff;">Tiếng Anh (EN)</option>
+                            <option value="ko" style="background: #1a1614; color: #fff;">Tiếng Hàn (KO)</option>
+                            <option value="zh-CN" style="background: #1a1614; color: #fff;">Tiếng Trung (ZH)</option>
+                            <option value="ja" style="background: #1a1614; color: #fff;">Tiếng Nhật (JA)</option>
+                            <option value="id" style="background: #1a1614; color: #fff;">Indonesia (ID)</option>
+                            <option value="th" style="background: #1a1614; color: #fff;">Tiếng Thái (TH)</option>
+                            <option value="es" style="background: #1a1614; color: #fff;">Tây Ban Nha (ES)</option>
+                            <option value="fr" style="background: #1a1614; color: #fff;">Tiếng Pháp (FR)</option>
+                            <option value="ru" style="background: #1a1614; color: #fff;">Tiếng Nga (RU)</option>
+                        </select>
+                        <button id="btn-translate-subtitles" class="btn" style="font-size: 0.75rem; padding: 0.2rem 0.6rem; height: 24px; background: rgba(255, 174, 110, 0.2); border: 1px solid var(--primary); color: var(--primary); border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 0.3rem; font-weight: 500; transition: all 0.2s;" title="Dịch toàn bộ phụ đề sang ngôn ngữ đã chọn">
+                            <span id="btn-translate-sub-text">Dịch Live</span>
+                        </button>
+                    </div>
+
+                    <!-- Subtitle Display Mode (Chỉ hiển thị sau khi đã dịch) -->
+                    <select id="select-sub-display-mode" style="display: none; height: 32px; font-size: 0.75rem; padding: 0.2rem 0.5rem; background: rgba(255, 174, 110, 0.15); border: 1px solid var(--primary); color: var(--primary); border-radius: 6px; outline: none; cursor: pointer;" title="Chế độ hiển thị phụ đề">
+                        <option value="translated" selected style="background: #1a1614; color: #fff;">Bản dịch</option>
+                        <option value="bilingual" style="background: #1a1614; color: #fff;">Song ngữ (Gốc + Dịch)</option>
+                        <option value="original" style="background: #1a1614; color: #fff;">Bản gốc</option>
+                    </select>
+
+                    <!-- Upload Custom SRT -->
+                    <input type="file" id="input-custom-srt" accept=".srt,.vtt" style="display: none;">
+                    <button id="btn-upload-srt" class="btn" style="font-size: 0.75rem; padding: 0.35rem 0.65rem; height: 32px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--card-border); color: var(--text-secondary); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 0.35rem; transition: all 0.2s;" title="Chọn file .srt hoặc .vtt từ máy tính">
+                        <i data-lucide="upload" style="width: 0.95rem; height: 0.95rem;"></i>
+                        <span>Nạp file SRT</span>
+                    </button>
+
+                    <!-- Download SRT -->
+                    <button id="btn-download-srt" class="btn" style="font-size: 0.75rem; padding: 0.35rem 0.65rem; height: 32px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--card-border); color: var(--text-secondary); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 0.35rem; transition: all 0.2s;" title="Tải file SRT về máy">
+                        <i data-lucide="download" style="width: 0.95rem; height: 0.95rem;"></i>
+                    </button>
+
+                    <!-- Close Button -->
+                    <button id="btn-close-video-modal" class="btn-icon" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; transition: color var(--transition-fast); display: flex; align-items: center; justify-content: center; padding: 0.5rem; border-radius: 50%; margin-left: 0.25rem;"><i data-lucide="x"></i></button>
+                </div>
             </div>
-            <div class="modal-body" style="padding: 1.5rem; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #000; gap: 1rem;">
-                <video id="modal-video-player" controls style="width: 100%; max-height: 65vh; border-radius: 0.5rem; outline: none;"></video>
-                <div style="display: flex; gap: 0.75rem; width: 100%; justify-content: flex-end;">
-                    <a id="btn-download-video" href="#" download class="btn" style="padding: 0.45rem 0.85rem; font-size: 0.8rem; background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; border-radius: 0.45rem; text-decoration: none; display: flex; align-items: center; gap: 0.35rem; font-weight: 600;">
-                        <i data-lucide="download" style="width: 0.85rem; height: 0.85rem;"></i>
-                        <span>Tải Video (MP4)</span>
-                    </a>
-                    <a id="btn-download-srt" href="#" download class="btn" style="padding: 0.45rem 0.85rem; font-size: 0.8rem; background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 0.45rem; text-decoration: none; display: flex; align-items: center; gap: 0.35rem; font-weight: 500;">
-                        <i data-lucide="file-text" style="width: 0.85rem; height: 0.85rem;"></i>
-                        <span>Tải Phụ đề (SRT)</span>
-                    </a>
+
+            <!-- Modal Body: Flexible 2-column layout -->
+            <div class="modal-body" style="padding: 1rem 1.25rem; display: flex; gap: 1rem; background: #0b0807; flex: 1; overflow: hidden; min-height: 0;">
+                <!-- Video Left Area -->
+                <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.65rem;">
+                    <!-- Video Container -->
+                    <div id="video-container" style="position: relative; width: 100%; flex: 1; min-height: 300px; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 0.75rem; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
+                        <video id="modal-video-player" controls style="width: 100%; height: 100%; max-height: calc(92vh - 165px); border-radius: 0.5rem; outline: none; object-fit: contain;"></video>
+                        
+                        <!-- Overlay Subtitles -->
+                        <div id="video-subtitle-overlay" style="position: absolute; bottom: 58px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 800px; text-align: center; pointer-events: none; z-index: 10; display: none;">
+                            <span id="video-subtitle-text" style="display: inline-block; background: rgba(0, 0, 0, 0.82); color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 500; line-height: 1.45; padding: 0.4rem 1rem; border-radius: 0.6rem; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.12); word-break: break-word; transition: all 0.1s ease;"></span>
+                        </div>
+                    </div>
+
+                    <!-- Video Subtitle Bottom Bar -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0.75rem; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 0.5rem; font-size: 0.75rem; color: var(--text-secondary); flex-shrink: 0;">
+                        <div id="subtitle-info-badge" style="display: flex; align-items: center; gap: 0.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            <i data-lucide="file-check" style="width: 0.9rem; height: 0.9rem; color: var(--primary);"></i>
+                            <span id="subtitle-status-text">Đang nạp phụ đề...</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0;">
+                            <span>Cỡ chữ:</span>
+                            <button id="btn-sub-size-down" style="padding: 0.15rem 0.45rem; background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 4px; cursor: pointer; font-size: 0.7rem;">A-</button>
+                            <button id="btn-sub-size-up" style="padding: 0.15rem 0.45rem; background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: var(--text-primary); border-radius: 4px; cursor: pointer; font-size: 0.7rem;">A+</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transcript Right Sidebar (Collapsible) -->
+                <div id="video-transcript-sidebar" style="width: 340px; flex-shrink: 0; display: flex; flex-direction: column; background: rgba(20, 16, 14, 0.8); border: 1px solid var(--card-border); border-radius: 0.75rem; overflow: hidden;">
+                    <div style="padding: 0.75rem 1rem; border-bottom: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); flex-shrink: 0;">
+                        <div style="display: flex; align-items: center; gap: 0.4rem; font-weight: 600; font-size: 0.85rem; color: var(--text-primary);">
+                            <i data-lucide="scroll-text" style="width: 1rem; height: 1rem; color: var(--primary);"></i>
+                            <span>Phụ đề SRT</span>
+                        </div>
+                        <span id="transcript-count-badge" style="font-size: 0.7rem; background: rgba(255, 174, 110, 0.12); color: var(--primary); padding: 0.15rem 0.5rem; border-radius: 12px; font-weight: 500;">0 câu</span>
+                    </div>
+
+                    <!-- Scrollable Transcript List -->
+                    <div id="video-transcript-list" style="flex: 1; overflow-y: auto; padding: 0.65rem; display: flex; flex-direction: column; gap: 0.45rem;">
+                        <div style="text-align: center; color: var(--text-muted); font-size: 0.8rem; padding: 2rem 1rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem;">
+                            <i data-lucide="file-text" style="width: 1.5rem; height: 1.5rem; opacity: 0.4;"></i>
+                            <span>Chưa chọn video để xem phụ đề.</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- New Preset Modal -->
+    <div id="new-preset-modal" class="modal-backdrop" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center;">
+        <div class="glass-card" style="width: 90%; max-width: 460px; background: rgba(22, 17, 15, 0.95); border: 1px solid var(--card-border-glow); border-radius: 1rem; padding: 1.25rem; box-shadow: 0 20px 40px rgba(0,0,0,0.8); backdrop-filter: blur(16px); display: flex; flex-direction: column; gap: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 0.75rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="bookmark-plus" style="width: 1.2rem; height: 1.2rem; color: #FFAE6E;"></i>
+                    <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0;">Lưu Preset Mới</h3>
+                </div>
+                <button type="button" id="btn-close-new-preset-modal" class="btn-icon" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center;">
+                    <i data-lucide="x" style="width: 1.1rem; height: 1.1rem;"></i>
+                </button>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <label for="new-preset-name-input" style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">
+                    Tên cấu hình Preset
+                </label>
+                <div class="input-wrapper">
+                    <input type="text" id="new-preset-name-input" placeholder="VD: Truyện Tiếng Việt (Flash + Lật ảnh)..." autocomplete="off" style="width: 100%; padding: 0.65rem 0.85rem; font-size: 0.85rem; background: transparent; border: none; color: var(--text-primary); outline: none;">
+                </div>
+                <span style="font-size: 0.72rem; color: var(--text-muted);">
+                    Preset sẽ lưu các giá trị hiện tại trên giao diện: Headless mode, Ngôn ngữ, Model Gemini, Chế độ giọng đọc, Lật ảnh ngang, Voice mẫu.
+                </span>
+            </div>
+
+            <div id="new-preset-summary-preview" style="background: rgba(0,0,0,0.35); border: 1px solid var(--card-border); border-radius: 0.5rem; padding: 0.65rem; font-size: 0.75rem; color: var(--text-secondary); display: flex; flex-direction: column; gap: 0.35rem;">
+                <!-- Summary preview lines rendered by JS -->
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 0.25rem;">
+                <button type="button" id="btn-cancel-new-preset" class="btn" style="background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); color: var(--text-secondary); padding: 0.5rem 0.9rem; font-size: 0.82rem; border-radius: 0.5rem; cursor: pointer;">
+                    Hủy bỏ
+                </button>
+                <button type="button" id="btn-confirm-save-preset" class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.82rem; border-radius: 0.5rem; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 0.4rem; background: var(--primary-gradient); border: none; color: white;">
+                    <i data-lucide="check" style="width: 0.9rem; height: 0.9rem;"></i>
+                    <span>Lưu Preset</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- JS Scripts -->
-    <script src="app.js?v=2.1"></script>
+    <script src="app.js?v=3.0"></script>
     <script>
         // Initialize Lucide icons
-        if (window.lucide) {
-            lucide.createIcons();
-        }
+        lucide.createIcons();
     </script>
 </body>
 </html>

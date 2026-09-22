@@ -49,7 +49,7 @@ echo Starting server in Development Mode (with reload)...
 if exist ".venv" (
     call .venv\Scripts\activate.bat
 )
-uvicorn app:app --host 127.0.0.1 --port 8000 --reload --reload-exclude downloads --reload-exclude static --reload-exclude tasks_db.json
+uvicorn app:app --host 127.0.0.1 --port 8000 --reload --reload-exclude downloads --reload-exclude static --reload-exclude data --reload-exclude tasks_db.json
 pause
 goto MENU
 

@@ -1,29 +1,25 @@
 import sys
 import os
-import logging
-
-# Ensure UTF-8 output on Windows consoles
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-if hasattr(sys.stderr, "reconfigure"):
-    try:
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
 # Optimize CUDA memory allocation to avoid fragmentation and OOM
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 # Enable CPU fallback for unsupported MPS operators on macOS
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+# CPU thread tuning for i5-12400F (6 P-cores)
+os.environ.setdefault("OMP_NUM_THREADS", "6")
+os.environ.setdefault("MKL_NUM_THREADS", "6")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "6")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "6")
 
 import subprocess
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*The key `labels`.*")
 import asyncio
+import random
 import threading
+
+async def human_delay(min_s: float = 0.25, max_s: float = 0.85):
+    """Delay ngẫu nhiên ngắn (tối đa 1s) trước các thao tác automation để mô phỏng người dùng thật."""
+    await asyncio.sleep(random.uniform(min_s, min(max_s, 1.0)))
 
 # --- Windows Subprocess Asyncio Patch for SelectorEventLoop ---
 _bg_loop = None
@@ -143,12 +139,36 @@ import re
 import urllib.parse
 import urllib.request
 import traceback
-from pathlib import Path
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from typing import List, Dict, Optional, Literal
+from typing import List, Dict, Optional
+import logging
 load_dotenv()
-from tts_settings import normalize_tts_voice_mode
+
+def check_critical_deps() -> Dict[str, bool]:
+    """Kiểm tra tính sẵn sàng của các thư viện phụ thuộc quan trọng khi khởi động server."""
+    import importlib
+    deps = {
+        "ultralytics": "YOLOv11 AI detection & Smart pagination",
+        "kokoro": "Kokoro neural TTS",
+        "faster_whisper": "Whisper subtitle forced-alignment",
+        "edge_tts": "EdgeTTS online speech synthesis",
+        "playwright": "Gemini automation browser",
+        "cv2": "OpenCV visual processing",
+        "torch": "PyTorch GPU compute",
+    }
+    status = {}
+    app_logger = logging.getLogger("SystemStartup")
+    for mod, desc in deps.items():
+        try:
+            importlib.import_module(mod)
+            status[mod] = True
+        except ImportError:
+            status[mod] = False
+            app_logger.warning(f"⚠️ Thiếu thư viện '{mod}' ({desc}). Chạy: pip install {mod}")
+    return status
+
+check_critical_deps()
 
 # --- Configuration Management for Chrome Profiles ---
 CONFIG_FILE = "config.json"
@@ -158,17 +178,22 @@ def load_config():
     if not os.path.exists(CONFIG_FILE):
         config = {
             "chrome_profiles": [default_profile],
-            "current_profile_index": 0
+            "current_profile_index": 0,
+            "headless": False
         }
         save_config(config)
         return config
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            cfg = json.load(f)
+            if "headless" not in cfg:
+                cfg["headless"] = False
+            return cfg
     except Exception:
         return {
             "chrome_profiles": [default_profile],
-            "current_profile_index": 0
+            "current_profile_index": 0,
+            "headless": False
         }
 
 def save_config(config):
@@ -181,26 +206,12 @@ if sys.platform == 'win32':
     # Prevent uvicorn from overriding loop policy to SelectorEventLoop on Windows
     asyncio.WindowsSelectorEventLoopPolicy = asyncio.WindowsProactorEventLoopPolicy
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-from fastapi import FastAPI, HTTPException, status, File, UploadFile, Request
-from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, status, BackgroundTasks, File, UploadFile
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 from playwright.async_api import async_playwright
 from PIL import Image
-from security_utils import (
-    PathAccessError,
-    SESSION_COOKIE_NAME,
-    SESSION_TOKEN,
-    redact_sensitive_text,
-    request_host_allowed,
-    resolve_download_path,
-    resolve_upload_path,
-    same_origin_allowed,
-    session_token_matches,
-    upload_reference,
-)
-from process_control import ProcessIdentity, identity_for_process, popen_command, process_matches
-from worker_protocol import atomic_write_json
 
 class VisionSafetyException(Exception):
     pass
@@ -217,6 +228,119 @@ def cleanup_temp_profiles():
             except Exception:
                 pass
 
+def clear_browser_cache(profile_dirs=None) -> dict:
+    """
+    Safely clears browser disk cache, shader cache, code cache, crashpad, and metrics
+    across all configured Chrome profiles without deleting user sessions, cookies, or logins.
+    """
+    import shutil
+    import glob
+
+    # 1. Clean temp profiles first
+    cleanup_temp_profiles()
+
+    target_dirs = set()
+    if profile_dirs:
+        for p in profile_dirs:
+            if p and os.path.exists(p):
+                target_dirs.add(os.path.abspath(p))
+
+    # Check config.json profiles
+    config_path = os.path.join(os.getcwd(), "config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                for p in cfg.get("chrome_profiles", []):
+                    if p and os.path.exists(p):
+                        target_dirs.add(os.path.abspath(p))
+                        parent = os.path.dirname(os.path.abspath(p))
+                        if os.path.exists(parent):
+                            target_dirs.add(parent)
+        except Exception:
+            pass
+
+    # Check local Profiles directory
+    local_profiles = os.path.join(os.getcwd(), "Profiles")
+    if os.path.exists(local_profiles):
+        for item in os.listdir(local_profiles):
+            item_path = os.path.join(local_profiles, item)
+            if os.path.isdir(item_path):
+                target_dirs.add(os.path.abspath(item_path))
+
+    # Check env var
+    env_profile = os.getenv("CHROME_PROFILE_PATH")
+    if env_profile and os.path.exists(env_profile):
+        target_dirs.add(os.path.abspath(env_profile))
+
+    # Check C:\Data\Profile 1
+    default_data = r"C:\Data\Profile 1"
+    if os.path.exists(default_data):
+        target_dirs.add(os.path.abspath(default_data))
+
+    cache_dir_names = {
+        "cache", "code cache", "dawnwebgpucache", "dawncache", "gpucache",
+        "grshadercache", "shadercache", "browsermetrics", "crashpad",
+        "optguideondevicemodel", "optimizationguidepredictionmodels",
+        "cachestorage", "scriptcache", "media cache", "blob_storage"
+    }
+
+    lock_file_names = {
+        "singletonlock", "singletoncookie", "singletonsocket"
+    }
+
+    total_cleaned_bytes = 0
+    cleaned_folders = 0
+    cleaned_locks = 0
+
+    def calc_dir_size(d):
+        total = 0
+        for r, ds, fs in os.walk(d):
+            for f in fs:
+                try:
+                    total += os.path.getsize(os.path.join(r, f))
+                except Exception:
+                    pass
+        return total
+
+    for base_p in target_dirs:
+        if not os.path.isdir(base_p):
+            continue
+
+        for root, dirs, files in os.walk(base_p, topdown=True):
+            for d in list(dirs):
+                if d.lower() in cache_dir_names:
+                    full_d = os.path.join(root, d)
+                    sz = calc_dir_size(full_d)
+                    try:
+                        shutil.rmtree(full_d, ignore_errors=True)
+                        total_cleaned_bytes += sz
+                        cleaned_folders += 1
+                    except Exception:
+                        pass
+                    dirs.remove(d)
+
+            for f in files:
+                if f.lower() in lock_file_names:
+                    full_f = os.path.join(root, f)
+                    try:
+                        os.remove(full_f)
+                        cleaned_locks += 1
+                    except Exception:
+                        pass
+
+    mb_cleaned = round(total_cleaned_bytes / (1024 * 1024), 2)
+    msg = f"Đã dọn dẹp browser cache: giải phóng {mb_cleaned} MB ({cleaned_folders} thư mục cache, {cleaned_locks} lock files)."
+    print(msg, flush=True)
+    return {
+        "status": "success",
+        "cleaned_bytes": total_cleaned_bytes,
+        "cleaned_mb": mb_cleaned,
+        "cleaned_folders": cleaned_folders,
+        "cleaned_locks": cleaned_locks,
+        "message": msg
+    }
+
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -232,23 +356,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Manhwa Recap Tool", lifespan=lifespan)
 
-
-@app.middleware("http")
-async def protect_local_api(request: Request, call_next):
-    host = request.headers.get("host", "")
-    if not request_host_allowed(host):
-        return JSONResponse(status_code=403, content={"detail": "Host is not allowed."})
-
-    if request.url.path.startswith("/api/"):
-        if not session_token_matches(request.cookies.get(SESSION_COOKIE_NAME)):
-            return JSONResponse(status_code=403, content={"detail": "Invalid local session."})
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and not same_origin_allowed(
-            request.headers.get("origin"), host
-        ):
-            return JSONResponse(status_code=403, content={"detail": "Cross-origin mutation is not allowed."})
-
-    return await call_next(request)
-
 from workflow import (
     JSONWorkflowRepository,
     EventBus,
@@ -259,14 +366,15 @@ from workflow import (
 )
 
 textbox_selectors = [
+    "rich-textarea div.ql-editor",
+    "div.ql-editor[contenteditable='true']",
+    "rich-textarea div[contenteditable='true']:not(.ql-clipboard)",
     "rich-textarea p",
-    "rich-textarea div[contenteditable='true']",
-    "div[contenteditable='true']",
-    "xpath=/html/body/chat-app-orchestrator/chat-app/main/side-navigation-v2/bard-sidenav-container/bard-sidenav-content/div/div/div/chat-window/div/input-container/fieldset/input-area-v2/div/div/div[1]/div/div/div/rich-textarea/div[1]/p[2]",
-    "xpath=/html/body/chat-app-orchestrator/chat-app/main/side-navigation-v2/bard-sidenav-container/bard-sidenav-content/div[2]/div/div/chat-window/div/input-container/fieldset/input-area-v2/div/div/div[1]/div/div/div/rich-textarea/div[1]/p",
+    "div.ProseMirror[contenteditable='true']",
+    "div[contenteditable='true']:not(.ql-clipboard)",
+    "[role='textbox']:not(.ql-clipboard)",
     "#prompt-textarea",
-    "textarea#prompt-textarea",
-    "textarea"
+    "rich-textarea"
 ]
 
 send_selectors = [
@@ -319,7 +427,7 @@ response_selectors = [
 
 # Initialize Workflow Engine
 event_bus = EventBus()
-repository = JSONWorkflowRepository(os.getenv("RECAP_TASK_DB", "tasks_db.json"))
+repository = JSONWorkflowRepository()
 workflow_manager = WorkflowManager(repository, event_bus, max_workers=1)
 
 # Ensure static directory exists
@@ -331,8 +439,8 @@ class SSELogger:
     def __init__(self):
         self.queues = []
 
-    def register(self, maxsize: int = 1000):
-        q = asyncio.Queue(maxsize=maxsize)
+    def register(self):
+        q = asyncio.Queue()
         self.queues.append(q)
         return q
 
@@ -340,29 +448,10 @@ class SSELogger:
         if q in self.queues:
             self.queues.remove(q)
 
-    def _broadcast(self, payload: dict):
-        for q in list(self.queues):
-            try:
-                q.put_nowait(payload)
-            except asyncio.QueueFull:
-                try:
-                    q.get_nowait()
-                    q.put_nowait(payload)
-                except Exception:
-                    pass
-
     async def log(self, message: str, level: str = "info", app_status: str = None, status_text: str = None, data: dict = None):
-        safe_message = redact_sensitive_text(str(message)) or ""
-        try:
-            print(f"[{level.upper()}] {safe_message}", flush=True)
-        except Exception:
-            try:
-                sys.stdout.buffer.write(f"[{level.upper()}] {safe_message}\n".encode("utf-8", errors="replace"))
-                sys.stdout.buffer.flush()
-            except Exception:
-                pass
+        print(f"[{level.upper()}] {message}", flush=True)
         payload = {
-            "message": safe_message,
+            "message": message,
             "level": level,
         }
         if app_status:
@@ -372,7 +461,8 @@ class SSELogger:
         if data:
             payload["data"] = data
 
-        self._broadcast(payload)
+        for q in self.queues:
+            await q.put(payload)
 
 sse_logger = SSELogger()
 
@@ -385,7 +475,8 @@ async def sse_event_bus_subscriber(event_name: str, task_id: str, data):
         "message": f"Workflow Event: {event_name}",
         "level": "event"
     }
-    sse_logger._broadcast(payload)
+    for q in sse_logger.queues:
+        await q.put(payload)
 
 event_bus.subscribe(sse_event_bus_subscriber)
 
@@ -445,7 +536,7 @@ class NavigationManager:
 
         self.navigation_history.append((now, url))
 
-    async def safe_goto(self, page, url: str, reason: str, caller: str):
+    async def safe_goto(self, page, url: str, reason: str, caller: str, wait_until: str = "domcontentloaded"):
         async with self.mutex:
             self.current_url = url
             self.track_navigation(url, caller)
@@ -453,7 +544,7 @@ class NavigationManager:
             # Update cookies count
             if self.context:
                 try:
-                    cookies = await self.context.cookies()
+                    cookies = await asyncio.wait_for(self.context.cookies(), timeout=2.0)
                     self.cookies_count = len(cookies)
                 except Exception:
                     pass
@@ -467,9 +558,23 @@ class NavigationManager:
             await self.log(f"Starting page.goto to: {url}", "info", reason, caller)
 
             try:
-                response = await page.goto(url, timeout=60000)
+                response = await page.goto(url, timeout=35000, wait_until=wait_until)
                 final_url = page.url
                 self.current_url = final_url
+
+                # Check if page is stuck on Cloudflare challenge
+                try:
+                    page_title = await page.title()
+                    if "just a moment" in page_title.lower() or "cloudflare" in page_title.lower():
+                        await self.log(f"Cloudflare verification detected ('{page_title}'). Waiting...", "warning", reason, caller)
+                        for _ in range(15):
+                            await asyncio.sleep(1)
+                            page_title = await page.title()
+                            if "just a moment" not in page_title.lower() and "cloudflare" not in page_title.lower():
+                                await self.log("Cloudflare challenge passed.", "success", reason, caller)
+                                break
+                except Exception:
+                    pass
 
                 # Check if final url contains captcha keywords
                 if "captcha" in final_url.lower() or "recaptcha" in final_url.lower() or "checkpoint" in final_url.lower() or "challenge" in final_url.lower():
@@ -492,145 +597,48 @@ class SetupRequest(BaseModel):
     profile_path: Optional[str] = None
 
 class SaveConfigRequest(BaseModel):
-    chrome_profiles: List[str]
-    current_profile_index: int
+    chrome_profiles: Optional[List[str]] = None
+    current_profile_index: Optional[int] = None
+    headless: Optional[bool] = None
 
 @app.get("/api/config")
 async def get_app_config():
     return load_config()
 
-
-@app.get("/api/version")
-async def get_app_version():
-    return {
-        "app": getattr(config, "APP_NAME", "Recap Comics Automation"),
-        "version": getattr(config, "APP_VERSION", "1.5.0"),
-    }
-
-
-@app.get("/api/voicevox/status")
-async def get_voicevox_status():
-    import httpx
-    url = os.getenv("VOICEVOX_URL", "http://127.0.0.1:50021").rstrip("/")
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{url}/version")
-            if resp.status_code == 200:
-                return {"available": True, "version": resp.json(), "url": url}
-    except Exception as e:
-        return {"available": False, "error": str(e), "url": url}
-    return {"available": False, "url": url}
-
-
-@app.get("/api/voicevox/speakers")
-async def get_voicevox_speakers():
-    import httpx
-    url = os.getenv("VOICEVOX_URL", "http://127.0.0.1:50021").rstrip("/")
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{url}/speakers")
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"VOICEVOX Engine not reachable: {exc}")
-    raise HTTPException(status_code=502, detail="Failed to fetch speakers from VOICEVOX Engine")
-
-
-@app.get("/api/markets")
-async def get_available_markets():
-    from markets import list_markets
-    return list_markets()
-
-
-
 @app.post("/api/config")
 async def save_app_config(payload: SaveConfigRequest):
-    config = {
-        "chrome_profiles": [p.strip() for p in payload.chrome_profiles if p.strip()],
-        "current_profile_index": payload.current_profile_index
-    }
+    config = load_config()
+    if payload.chrome_profiles is not None:
+        config["chrome_profiles"] = [p.strip() for p in payload.chrome_profiles if p.strip()]
+    if payload.current_profile_index is not None:
+        config["current_profile_index"] = payload.current_profile_index
+    if payload.headless is not None:
+        config["headless"] = bool(payload.headless)
     save_config(config)
-    if config["chrome_profiles"]:
-        idx = config["current_profile_index"]
+    if config.get("chrome_profiles"):
+        idx = config.get("current_profile_index", 0)
         if idx < len(config["chrome_profiles"]):
             os.environ["CHROME_PROFILE_PATH"] = config["chrome_profiles"][idx]
     return {"status": "success", "message": "Cập nhật cấu hình Chrome Profiles thành công.", "config": config}
 
-class CreateProfileRequest(BaseModel):
-    name: Optional[str] = None
-
-@app.post("/api/profiles/create")
-async def create_chrome_profile(payload: Optional[CreateProfileRequest] = None):
-    config = load_config()
-    profiles = config.get("chrome_profiles", [])
-    project_profiles_dir = os.path.abspath(os.path.join(os.getcwd(), "Profiles"))
-    os.makedirs(project_profiles_dir, exist_ok=True)
-
-    # Find highest existing Profile_X number
-    existing_nums = []
-    for p in profiles:
-        m = re.search(r"Profile_(\d+)", p, re.IGNORECASE)
-        if m:
-            existing_nums.append(int(m.group(1)))
-    # Check folder system as well
-    if os.path.exists(project_profiles_dir):
-        for item in os.listdir(project_profiles_dir):
-            m = re.search(r"Profile_(\d+)", item, re.IGNORECASE)
-            if m:
-                existing_nums.append(int(m.group(1)))
-
-    next_num = (max(existing_nums) + 1) if existing_nums else (len(profiles) + 1)
-    prof_folder_name = f"Profile_{next_num}"
-    new_prof_dir = os.path.join(project_profiles_dir, prof_folder_name)
-    os.makedirs(new_prof_dir, exist_ok=True)
-    new_prof_path = os.path.join(new_prof_dir, "Default")
-
-    if new_prof_path not in profiles:
-        profiles.append(new_prof_path)
-
-    config["chrome_profiles"] = profiles
-    config["current_profile_index"] = len(profiles) - 1
-    save_config(config)
-
-    await sse_logger.log(f"Đã tạo Profile mới: {prof_folder_name} ({new_prof_path})", "success")
-    return {
-        "status": "success",
-        "message": f"Đã tạo {prof_folder_name} thành công. Vui lòng bấm 'Đăng nhập profile' để đăng nhập Google.",
-        "config": config,
-        "new_profile": new_prof_path,
-        "new_index": config["current_profile_index"]
-    }
-
-class DeleteProfileRequest(BaseModel):
-    index: int
-
-@app.post("/api/profiles/delete")
-async def delete_chrome_profile(payload: DeleteProfileRequest):
-    config = load_config()
-    profiles = config.get("chrome_profiles", [])
-    idx = payload.index
-    if 0 <= idx < len(profiles):
-        deleted = profiles.pop(idx)
-        config["chrome_profiles"] = profiles
-        if config["current_profile_index"] >= len(profiles):
-            config["current_profile_index"] = max(0, len(profiles) - 1)
-        save_config(config)
-        await sse_logger.log(f"Đã xóa profile khỏi danh sách: {deleted}", "info")
-        return {"status": "success", "message": "Xóa profile thành công.", "config": config}
-    raise HTTPException(status_code=400, detail="Chỉ mục profile không hợp lệ.")
-
 # Serve HTML frontend
 @app.get("/")
 async def get_index():
-    response = FileResponse("static/index.html")
-    response.set_cookie(
-        SESSION_COOKIE_NAME,
-        SESSION_TOKEN,
-        httponly=True,
-        samesite="strict",
-        secure=False,
-    )
-    return response
+    return FileResponse("static/index.html")
+
+@app.get("/test_stage")
+async def get_test_stage():
+    return FileResponse("static/test_stage.html")
+
+@app.get("/video_merge")
+async def get_video_merge_page():
+    return FileResponse("static/video_merge.html")
+
+from test_stage_router import router as test_stage_router
+app.include_router(test_stage_router)
+
+from video_merge_router import router as video_merge_router
+app.include_router(video_merge_router)
 
 # SSE logs endpoint
 @app.get("/api/logs")
@@ -768,7 +776,7 @@ async def setup_cookies(payload: SetupRequest):
 
             try:
                 await sse_logger.log("Đang khởi chạy Chrome (headed)...", "info")
-                browser, context = await get_shared_browser_context(headless=False, start_maximized=True, custom_profile_path=target_profile)
+                browser, context = await get_shared_browser_context(headless=False, start_maximized=False, custom_profile_path=target_profile)
                 nav_manager = NavigationManager(sse_logger)
                 nav_manager.context = context
                 nav_manager.browser = browser
@@ -845,41 +853,41 @@ class AnalyzeRequest(BaseModel):
     url: str
 
 class CrawlRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     url: str
-    from_episode: int = Field(ge=1)
-    to_episode: int = Field(ge=1)
-    safe_mode: bool = False
+    from_episode: int
+    to_episode: int
+    safe_mode: bool = True
     nsfw_threshold: float = 0.3
     nsfw_mode: str = "mask"
-    timeout: int = Field(default=160, ge=30, le=600)
-    retry_count: int = Field(default=5, ge=1, le=10)
-    concurrency: int = Field(default=5, ge=1, le=5)
-    image_quality: int = Field(default=20, ge=10, le=100)
-    pdf_quality: int = Field(default=20, ge=10, le=100)
-    language: str = "en"
-    vlm_provider: Literal["gemini"] = "gemini"
-    voice_id: str = "clone_andrew"
+    gemini_model: str = "default"
+    temperature: float = 0.7
+    max_output_tokens: int = 2048
+    timeout: int = 160
+    retry_count: int = 5
+    concurrency: int = 5
+    image_quality: int = 20
+    pdf_quality: int = 20
+    max_pdf_pages: int = 20
+    language: str = "vi"
+    vlm_provider: str = "gemini"
+    voice_id: str = "auto"
     ref_audio_path: Optional[str] = None
+    ai33pro_api_key: Optional[str] = None
     logo_path: Optional[str] = None
     overlay_path: Optional[str] = None
-    burn_subtitles: bool = False
     remove_text: bool = True
     remove_text_conf: float = 0.3
     remove_text_radius: int = 3
+    vlm_email: Optional[str] = "moneyholy47@gmail.com"
+    vlm_password: Optional[str] = "Tienlcvb.2002"
     comix_group_id: Optional[str] = None
-    market_id: Optional[str] = None
-    enable_flash_forward_intro: bool = False
-    flash_forward_custom_hook: Optional[str] = None
-
-
-def _validated_asset_reference(value: str | None) -> str | None:
-    try:
-        return upload_reference(resolve_upload_path(value, must_exist=True))
-    except PathAccessError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Uploaded asset does not exist.") from exc
+    film_grain: bool = True
+    grain_strength: int = 6
+    flip_horizontal: bool = False
+    headless: Optional[bool] = None
+    video_mark_path: Optional[str] = None
+    video_mark_alpha: float = 0.01
+    enable_video_mark: bool = True
 
 
 
@@ -942,7 +950,10 @@ def sync_chrome_profile(src_profile_path: str, dest_user_data_dir: str):
             except Exception as e:
                 print(f"Warning: Could not copy {item}: {e}")
 
-async def get_browser_context(p, headless=False, start_maximized=False, temp_suffix="", custom_profile_path=None):
+async def get_browser_context(p, headless=None, start_maximized=False, temp_suffix="", custom_profile_path=None):
+    if headless is None:
+        headless = load_config().get("headless", False)
+
     if custom_profile_path:
         profile_path = custom_profile_path
     else:
@@ -954,23 +965,85 @@ async def get_browser_context(p, headless=False, start_maximized=False, temp_suf
         else:
             profile_path = os.getenv("CHROME_PROFILE_PATH") or r"C:\Data\Profile 1"
 
+    # Detect official Google Chrome executable on system
+    chrome_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe")
+    ]
+    found_chrome_exe = None
+    for cp in chrome_paths:
+        if os.path.exists(cp):
+            found_chrome_exe = cp
+            break
+
     launch_args = {
         "headless": headless,
         "args": [
+            # Anti-detection & Window setup
             "--disable-blink-features=AutomationControlled",
-            "--disable-web-security",
-            "--disable-gpu-shader-disk-cache",
-            "--disable-dev-shm-usage",
-            "--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints,IsolateOrigins,site-per-process",
             "--no-first-run",
             "--no-default-browser-check",
             "--password-store=basic",
             "--use-mock-keychain",
+            "--no-focus-on-init",
+            "--force-dark-mode",
+            "--disable-notifications",
+            "--disable-popup-blocking",
+            "--disable-print-preview",
+            "--disable-speech-api",
+            "--disable-speech-synthesis-api",
+
+            # 1. Chống Throttling & Khóa Xung Nhịp: Không bóp hiệu năng CPU/JS/GPU khi cửa sổ ẩn/che/chạy nền
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-hang-monitor",
+            "--disable-ipc-flooding-protection",
+            "--disable-features=CalculateNativeWinOcclusion,Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints,OptimizationGuideModelDownloading,OptimizationGuideOnDeviceModel,OptimizationGuidePersonalizedFetching,InterestFeedContentSuggestions,AutofillServerCommunication,IntensiveWakeUpThrottling,PageLifecycleThrottle,AudioServiceOutOfProcess",
+
+            # 2. Tối đa hóa Hardware Acceleration, Memory & Canvas Buffer (Chống Canvas Buffer Overflow & Render lag)
+            "--test-type",
+            "--disable-dev-shm-usage",
+            "--js-flags=--max-old-space-size=8192",
+            "--unlimited-storage",
+            "--ignore-gpu-blocklist",
+            "--enable-gpu-rasterization",
+            "--enable-oop-rasterization",
+            "--enable-zero-copy",
+            "--enable-native-gpu-memory-buffers",
+            "--max-active-webgl-contexts=100",
+            "--enable-accelerated-video-decode",
+            "--enable-accelerated-2d-canvas",
+            "--force-color-profile=srgb",
+            "--disable-gpu-vsync",
+            "--disable-threaded-scrolling",
+
+            # 3. Tối ưu Network I/O, Cache & Streaming kết nối SSE/gRPC liên tục (Chống Connection Timeout)
+            "--enable-features=NetworkService,NetworkServiceInProcess,CanvasOopRasterization,PdfOopif,VaapiVideoDecoder,ParallelDownloading",
+            "--disable-domain-reliability",
+            "--disable-component-update",
+            "--disable-sync",
+            "--disable-breakpad",
+            "--disable-client-side-phishing-detection",
+            "--disable-default-apps",
+            "--metrics-recording-only",
+            "--disk-cache-size=209715200",
+            "--media-cache-size=104857600",
+            "--renderer-process-limit=10",
         ],
         "ignore_default_args": ["--enable-automation", "--no-sandbox"]
     }
-    if start_maximized:
+    if found_chrome_exe:
+        launch_args["executable_path"] = found_chrome_exe
+
+    if headless:
+        launch_args["args"].append("--headless=new")
+        launch_args["args"].append("--window-size=1280,850")
+    elif start_maximized:
         launch_args["args"].append("--start-maximized")
+    else:
+        launch_args["args"].extend(["--window-size=1280,850", "--window-position=100,50"])
 
     if profile_path:
         profile_path = os.path.abspath(profile_path)
@@ -985,13 +1058,38 @@ async def get_browser_context(p, headless=False, start_maximized=False, temp_suf
             user_data_dir = profile_path
             print(f"Using persistent Chrome profile at: {user_data_dir}")
 
-        # Clean browser lock files inside profile path
+        # Clean browser lock files & heavy temp telemetry/model bloat inside profile path
         for lock_name in ["SingletonLock", "lock", "SingletonCookie", "SingletonSocket"]:
             for root, dirs, files in os.walk(user_data_dir):
                 if lock_name in files:
                     try:
                         os.remove(os.path.join(root, lock_name))
                         print(f"Cleared lock file: {os.path.join(root, lock_name)}")
+                    except Exception:
+                        pass
+
+        # Auto-clean heavy junk folders (Optimization model downloads, crashpads, metrics)
+        for junk_dir in ["OptGuideOnDeviceModel", "BrowserMetrics", "Crashpad", "GrShaderCache"]:
+            target_junk = os.path.join(user_data_dir, junk_dir)
+            if os.path.exists(target_junk):
+                try:
+                    shutil.rmtree(target_junk, ignore_errors=True)
+                except Exception:
+                    pass
+
+        if not start_maximized:
+            for p_dir in [profile_path, os.path.join(user_data_dir, "Default"), user_data_dir]:
+                if not p_dir or not os.path.exists(p_dir):
+                    continue
+                pref_file = os.path.join(p_dir, "Preferences")
+                if os.path.exists(pref_file):
+                    try:
+                        with open(pref_file, "r", encoding="utf-8") as pf:
+                            pref_data = json.load(pf)
+                        if pref_data.get("browser", {}).get("window_placement", {}).get("maximized"):
+                            pref_data["browser"]["window_placement"]["maximized"] = False
+                            with open(pref_file, "w", encoding="utf-8") as pf:
+                                json.dump(pref_data, pf)
                     except Exception:
                         pass
 
@@ -1003,18 +1101,22 @@ async def get_browser_context(p, headless=False, start_maximized=False, temp_suf
                     try:
                         context = await p.chromium.launch_persistent_context(
                             user_data_dir=user_data_dir,
-                            channel="chrome",
-                            no_viewport=True if start_maximized else None,
+                            channel="chrome" if not found_chrome_exe else None,
+                            no_viewport=True,
+                            color_scheme="dark",
                             permissions=["clipboard-read", "clipboard-write"],
                             **launch_args
                         )
                     except Exception as inner_e:
-                        # Fallback if channel="chrome" fails
+                        # Fallback if channel/executable_path fails
+                        fallback_args = dict(launch_args)
+                        fallback_args.pop("executable_path", None)
                         context = await p.chromium.launch_persistent_context(
                             user_data_dir=user_data_dir,
-                            no_viewport=True if start_maximized else None,
+                            no_viewport=True,
+                            color_scheme="dark",
                             permissions=["clipboard-read", "clipboard-write"],
-                            **launch_args
+                            **fallback_args
                         )
                     break
                 except Exception as launch_err:
@@ -1027,43 +1129,24 @@ async def get_browser_context(p, headless=False, start_maximized=False, temp_suf
                         raise launch_err
         except Exception as e:
             if "existing browser session" in str(e) or "profile is already in use" in str(e) or "locked" in str(e).lower() or "connection closed" in str(e).lower():
-                print(f"Warning: Persistent profile is locked. Attempting to bypass by copying to a temp profile directory...")
-                import time
-                temp_profile_dir = os.path.join(os.getcwd(), f"chrome_profile_temp_{int(time.time())}")
+                for lock_name in ["SingletonLock", "lock", "SingletonCookie", "SingletonSocket"]:
+                    for root, dirs, files in os.walk(user_data_dir):
+                        if lock_name in files:
+                            try:
+                                os.remove(os.path.join(root, lock_name))
+                            except Exception:
+                                pass
                 try:
-                    sync_chrome_profile(user_data_dir, temp_profile_dir)
-                    user_data_dir = temp_profile_dir
-                    _temp_profiles_to_clean.append(temp_profile_dir)
-                    
-                    # Clean browser lock files inside temp profile path
-                    for lock_name in ["SingletonLock", "lock", "SingletonCookie", "SingletonSocket"]:
-                        for root, dirs, files in os.walk(user_data_dir):
-                            if lock_name in files:
-                                try:
-                                    os.remove(os.path.join(root, lock_name))
-                                except Exception:
-                                    pass
-                    
-                    try:
-                        context = await p.chromium.launch_persistent_context(
-                            user_data_dir=user_data_dir,
-                            channel="chrome",
-                            no_viewport=True if start_maximized else None,
-                            permissions=["clipboard-read", "clipboard-write"],
-                            **launch_args
-                        )
-                    except Exception:
-                        context = await p.chromium.launch_persistent_context(
-                            user_data_dir=user_data_dir,
-                            no_viewport=True if start_maximized else None,
-                            permissions=["clipboard-read", "clipboard-write"],
-                            **launch_args
-                        )
-                except Exception as copy_err:
-                    print(f"Warning: Could not sync locked profile to temp directory: {copy_err}")
-                
-                # If we bypassed or if we are already using the temp directory but still locked
-                if not context:
+                    await asyncio.sleep(1.5)
+                    context = await p.chromium.launch_persistent_context(
+                        user_data_dir=user_data_dir,
+                        channel="chrome" if not found_chrome_exe else None,
+                        no_viewport=True,
+                        color_scheme="dark",
+                        permissions=["clipboard-read", "clipboard-write"],
+                        **launch_args
+                    )
+                except Exception:
                     friendly_err = (
                         "\n"
                         "====================================================================================\n"
@@ -1080,8 +1163,26 @@ async def get_browser_context(p, headless=False, start_maximized=False, temp_suf
             else:
                 raise e
 
-        await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); delete navigator.__proto__.webdriver;")
-        await context.route("**/*", lambda route, request: route.abort() if any(domain in request.url for domain in ["google-analytics.com", "googletagmanager.com", "analytics", "doubleclick.net", "facebook.net"]) else route.continue_())
+        blocked_patterns = [
+            "*google-analytics.com*",
+            "*googletagmanager.com*",
+            "*doubleclick.net*",
+            "*facebook.net*",
+            "*facebook.com/tr*",
+            "*hotjar.com*",
+            "*clarity.ms*",
+            "*sentry.io*",
+            "*segment.io*",
+            "*scorecardresearch.com*",
+            "*criteo.com*",
+            "*adroll.com*",
+            "*adnxs.com*"
+        ]
+        for blocked_pattern in blocked_patterns:
+            try:
+                await context.route(blocked_pattern, lambda route: route.abort())
+            except Exception:
+                pass
         return None, context
 
     try:
@@ -1090,13 +1191,18 @@ async def get_browser_context(p, headless=False, start_maximized=False, temp_suf
         browser = await p.chromium.launch(**launch_args)
 
     context_args = {
-        "no_viewport": True if start_maximized else None,
+        "no_viewport": True,
+        "color_scheme": "dark",
         "permissions": ["clipboard-read", "clipboard-write"]
     }
 
     context = await browser.new_context(**context_args)
     await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); delete navigator.__proto__.webdriver;")
-    await context.route("**/*", lambda route, request: route.abort() if any(domain in request.url for domain in ["google-analytics.com", "googletagmanager.com", "analytics", "doubleclick.net", "facebook.net"]) else route.continue_())
+    for blocked_pattern in blocked_patterns:
+        try:
+            await context.route(blocked_pattern, lambda route: route.abort())
+        except Exception:
+            pass
     return browser, context
 
 _shared_playwright = None
@@ -1143,10 +1249,13 @@ async def reset_shared_browser_context():
     except Exception:
         pass
 
-async def get_shared_browser_context(headless=False, start_maximized=False, temp_suffix="", custom_profile_path=None):
+async def get_shared_browser_context(headless=None, start_maximized=False, temp_suffix="", custom_profile_path=None):
     global _shared_playwright, _shared_context, _shared_browser, _shared_headless, _shared_context_lock, _shared_profile_path
     from playwright.async_api import async_playwright
     
+    if headless is None:
+        headless = load_config().get("headless", False)
+        
     if _shared_context_lock is None:
         _shared_context_lock = asyncio.Lock()
         
@@ -1175,7 +1284,7 @@ async def get_shared_browser_context(headless=False, start_maximized=False, temp
                     return _shared_browser, _shared_context
                 except Exception:
                     pass
-            print("Shared browser context mismatch (headless, profile) or validation failed. Resetting...")
+            print(f"Shared browser context mismatch (headless current={_shared_headless} vs target={headless}, profile) or validation failed. Resetting...")
             await reset_shared_browser_context()
                 
         if _shared_playwright is None:
@@ -1188,9 +1297,18 @@ async def get_shared_browser_context(headless=False, start_maximized=False, temp
         _shared_profile_path = target_profile_path
         return _shared_browser, _shared_context
 
-async def check_and_rotate_profiles_until_ready(context_logger=None, force_check=False, target_model="3.8 Flash"):
+def get_gemini_model_display_name(target_model: str) -> str:
+    key = (target_model or "flash").lower()
+    if "lite" in key:
+        return "3.5 Flash-Lite"
+    elif "pro" in key:
+        return "3.1 Pro"
+    else:
+        return "3.8 Flash"
+
+async def check_and_rotate_profiles_until_ready(context_logger=None, force_check=False, target_model="flash", headless=None):
     """
-    Checks if the active Chrome Profile's Gemini target model (default: 3.8 Flash) is limited.
+    Checks if the active Chrome Profile's Gemini model (Lite, Flash, or Pro) is limited.
     If it is limited, rotates to the next available profile in config.json.
     Repeats until a working profile is found or all profiles are checked.
     Returns: (browser, context) of the working profile, or raises Exception if all limited.
@@ -1205,14 +1323,27 @@ async def check_and_rotate_profiles_until_ready(context_logger=None, force_check
     start_idx = config.get("current_profile_index", 0)
     if start_idx >= len(profiles):
         start_idx = 0
+
+    if headless is None:
+        headless = config.get("headless", False)
         
+    # Optimization: if not force_check and we already have a validated context matching desired headless mode, reuse it directly
+    if not force_check and _shared_context and _shared_headless == headless:
+        if _shared_profile_path in profiles:
+            try:
+                await _shared_context.cookies()
+                return _shared_browser, _shared_context
+            except Exception:
+                pass
+                
     num_profiles = len(profiles)
+    model_name = get_gemini_model_display_name(target_model)
     
     for i in range(num_profiles):
         idx = (start_idx + i) % num_profiles
         profile_path = profiles[idx]
         
-        msg = f"Đang kiểm tra giới hạn tài khoản (Profile {idx+1}/{num_profiles}): {profile_path}..."
+        msg = f"Đang kiểm tra giới hạn tài khoản ({model_name}) (Profile {idx+1}/{num_profiles}): {profile_path}..."
         if context_logger:
             await context_logger.log(msg, "info")
         else:
@@ -1222,44 +1353,67 @@ async def check_and_rotate_profiles_until_ready(context_logger=None, force_check
         config["current_profile_index"] = idx
         save_config(config)
         
-        # Reset current context to force launch with the new profile
-        await reset_shared_browser_context()
+        # Only reset if the current shared context is using a different profile, is different headless mode, or is closed
+        if _shared_context and (_shared_profile_path != profile_path or _shared_headless != headless):
+            await reset_shared_browser_context()
         
-        # Launch headed browser to verify
-        br, ctx = await get_shared_browser_context(headless=False, start_maximized=True, custom_profile_path=profile_path)
+        # Launch browser to verify without stealing focus (reusing open browser window if same profile)
+        br, ctx = await get_shared_browser_context(headless=headless, start_maximized=False, custom_profile_path=profile_path)
         
         page = await ctx.new_page()
         try:
             await page.goto("https://gemini.google.com/app", timeout=60000)
             
-            # Check login and rate-limit status for target model
-            status = await check_gemini_login_and_limit_status(page, context_logger, target_model=target_model)
+            # Check login and rate-limit status
+            status = await check_gemini_login_and_limit_status(page, target_model=target_model, context_logger=context_logger)
             
             if status == "needs_login":
-                skip_msg = f"Profile {profile_path} chưa đăng nhập. Bỏ qua để chỉ sử dụng các profile đã đăng nhập..."
                 if context_logger:
-                    await context_logger.log(skip_msg, "warning")
+                    await context_logger.log("Chưa đăng nhập trên Gemini. Đang chờ bạn đăng nhập thủ công trên cửa sổ trình duyệt (Tối đa 180s)...", "warning")
                 else:
-                    print(skip_msg)
-                await page.close()
-                continue
+                    print("Needs login. Waiting for manual login...")
+                    
+                login_success = False
+                for _ in range(90):  # 90 * 2s = 180s
+                    await asyncio.sleep(2)
+                    new_status = await check_gemini_login_and_limit_status(page, target_model=target_model, context_logger=None)
+                    if new_status != "needs_login":
+                        login_success = True
+                        status = new_status
+                        if context_logger:
+                            await context_logger.log("Đăng nhập thành công!", "success")
+                        break
+                if not login_success:
+                    if context_logger:
+                        await context_logger.log(f"Bỏ qua profile {profile_path} do hết thời gian chờ đăng nhập.", "warning")
+                    await page.close()
+                    await reset_shared_browser_context()
+                    continue
             
             if status == "limited":
                 if context_logger:
-                    await context_logger.log(f"Tài khoản {profile_path} bị giới hạn (Rate limit) model {target_model}. Đang xoay vòng...", "warning")
+                    await context_logger.log(f"Tài khoản {profile_path} bị giới hạn (Rate limit) model {model_name}. Đang xoay vòng...", "warning")
                 else:
-                    print(f"Profile {profile_path} is limited for {target_model}. Rotating...")
+                    print(f"Profile {profile_path} is limited for model {model_name}. Rotating...")
                 await page.close()
+                await reset_shared_browser_context()
                 continue
                 
             # If status == "ok"
             if context_logger:
-                await context_logger.log(f"Tài khoản {profile_path} KHÔNG bị giới hạn ({target_model}). Tiếp tục thực thi với tài khoản này.", "success")
+                await context_logger.log(f"Tài khoản {profile_path} KHÔNG bị giới hạn (Model {model_name}). Tiếp tục thực thi với tài khoản này.", "success")
             else:
-                print(f"Profile {profile_path} is ready for {target_model}.")
+                print(f"Profile {profile_path} is ready for {model_name}.")
             
-            # Keep this profile context and close verification page
-            await page.close()
+            # Ensure strictly 1 page in context
+            try:
+                pages = ctx.pages
+                if len(pages) > 1:
+                    for extra in pages[1:]:
+                        try: await extra.close()
+                        except Exception: pass
+            except Exception:
+                pass
             return br, ctx
             
         except Exception as e:
@@ -1271,15 +1425,16 @@ async def check_and_rotate_profiles_until_ready(context_logger=None, force_check
                 await page.close()
             except Exception:
                 pass
+            await reset_shared_browser_context()
             continue
             
     # If we exited the loop, all profiles are limited
-    err_msg = f"Tất cả các tài khoản/Chrome Profiles đều đang bị giới hạn (Rate limited) model {target_model} hoặc chưa đăng nhập. Vui lòng thêm tài khoản mới trên giao diện Web UI hoặc đợi hết giới hạn."
+    err_msg = f"Tất cả các tài khoản/Chrome Profiles đều đang bị giới hạn (Rate limited) model {model_name} hoặc chưa đăng nhập. Vui lòng thêm tài khoản mới trên giao diện Web UI hoặc đợi hết giới hạn."
     if context_logger:
         await context_logger.log(err_msg, "error")
     raise Exception(err_msg)
 
-async def check_gemini_login_and_limit_status(page, context_logger=None, target_model="3.8 Flash"):
+async def check_gemini_login_and_limit_status(page, target_model="flash", context_logger=None):
     # Wait for page elements to load
     await asyncio.sleep(2)
     
@@ -1298,41 +1453,42 @@ async def check_gemini_login_and_limit_status(page, context_logger=None, target_
     if not textbox_found:
         return "needs_login"
         
-    dropdown_btn = await page.query_selector("button.input-area-switch")
+    dropdown_btn = await page.query_selector("button.input-area-switch, button[data-test-id*='model' i]")
     if not dropdown_btn:
         return "ok"
         
     try:
+        await human_delay(0.3, 0.75)
         await dropdown_btn.click()
         await page.wait_for_timeout(1000)
     except Exception:
         return "ok"
         
     check_js = """
-    ((targetModel) => {
-        const items = Array.from(document.querySelectorAll('gem-menu-item, [role="menuitem"], [role="option"], .mat-mdc-menu-item'));
+    ((targetKey) => {
+        const key = (targetKey || 'flash').toLowerCase();
+        const items = Array.from(document.querySelectorAll('gem-menu-item, [role="menuitem"], .mat-mdc-menu-item, button[role="menuitem"]'));
+        
         let targetItem = null;
-        
-        if (targetModel.includes("Pro")) {
-            targetItem = items.find(el => /3\\.1\\s*Pro/i.test(el.textContent))
-                      || items.find(el => /Pro/i.test(el.textContent) && !/Lite|Flash|Thinking/i.test(el.textContent));
+        if (key.includes('lite')) {
+            targetItem = items.find(el => {
+                const txt = el.textContent.toLowerCase();
+                return txt.includes('flash-lite') || (txt.includes('flash') && txt.includes('lite')) || txt.includes('fastest answers');
+            });
+        } else if (key.includes('pro')) {
+            targetItem = items.find(el => {
+                const txt = el.textContent.toLowerCase();
+                return (txt.includes('3.1 pro') || (txt.includes('pro') && !txt.includes('problem') && !txt.includes('prompt') && !txt.includes('extended') && !txt.includes('thinking'))) || txt.includes('advanced reasoning');
+            });
         } else {
-            targetItem = items.find(el => /3\\.8\\s*Flash/i.test(el.textContent))
-                      || items.find(el => /3\\.6\\s*Flash/i.test(el.textContent))
-                      || items.find(el => /Flash/i.test(el.textContent) && !/Lite|Pro|Thinking/i.test(el.textContent))
-                      || document.querySelector('gem-menu-item[data-mode-id="56fdd199312815e2"]');
-        }
-        
-        if (!targetItem) {
-            // General fallback
-            targetItem = items.find(el => /3\\.1\\s*Pro/i.test(el.textContent))
-                      || items.find(el => /Pro/i.test(el.textContent))
-                      || items.find(el => /3\\.8\\s*Flash/i.test(el.textContent))
-                      || items.find(el => /Flash/i.test(el.textContent));
+            targetItem = items.find(el => {
+                const txt = el.textContent.toLowerCase();
+                return (txt.includes('3.8 flash') || txt.includes('3.6 flash') || txt.includes('flash') || txt.includes('all-around help')) && !txt.includes('lite');
+            });
         }
                        
         if (!targetItem) {
-            return { error: targetModel + " model option not found in menu" };
+            return { error: `Model option ${targetKey} not found in menu` };
         }
         
         const ariaDisabled = targetItem.getAttribute('aria-disabled') === 'true';
@@ -1340,10 +1496,10 @@ async def check_gemini_login_and_limit_status(page, context_logger=None, target_
                               || targetItem.classList.contains('gmat-disabled')
                               || targetItem.querySelector('.disabled') !== null;
         
-        const sublabelEl = targetItem.querySelector('.sublabel');
+        const sublabelEl = targetItem.querySelector('.sublabel') || targetItem.querySelector('[class*="sublabel"]');
         const sublabel = sublabelEl ? sublabelEl.textContent.trim() : "";
         
-        const isLimitText = /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(sublabel) || /limit|giới hạn|reached|resets/i.test(targetItem.textContent);
+        const isLimitText = /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(sublabel) || /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(targetItem.textContent);
         const isLimited = ariaDisabled || hasDisabledClass || isLimitText;
         
         if (!isLimited) {
@@ -1353,12 +1509,13 @@ async def check_gemini_login_and_limit_status(page, context_logger=None, target_
         return {
             isLimited: isLimited,
             sublabel: sublabel,
-            clicked: !isLimited
+            clicked: !isLimited,
+            foundText: targetItem.textContent.trim().replace(/\\s+/g, ' ')
         };
     })
     """
     try:
-        result = await page.evaluate(check_js, str(target_model))
+        result = await page.evaluate(check_js, target_model)
     except Exception:
         result = None
         
@@ -1376,46 +1533,71 @@ async def check_gemini_login_and_limit_status(page, context_logger=None, target_
             
     return "ok"
 
-async def ensure_model_selected(page, context_logger=None, target_model="3.8 Flash"):
-    dropdown_btn = await page.query_selector("button.input-area-switch")
-    if not dropdown_btn:
+async def ensure_model_selected(page, target_model="flash", context_logger=None):
+    dropdown_btn = await page.query_selector("button.input-area-switch, button[data-test-id*='model' i]")
+    if not dropdown_btn or not callable(getattr(dropdown_btn, "click", None)):
         return
         
+    target_key = (target_model or "flash").lower()
+    model_disp = get_gemini_model_display_name(target_model)
+    
     try:
-        btn_text = await page.eval_on_selector("button.input-area-switch", "el => el.textContent")
-        if "Flash" in target_model and ("Flash" in btn_text and "Pro" not in btn_text):
-            return
-        elif target_model == "3.1 Pro" and ("3.1 Pro" in btn_text or ("Pro" in btn_text and "Flash" not in btn_text)):
-            # Already selected, no need to click
-            return
-        elif target_model in btn_text:
+        btn_text = ""
+        try:
+            btn_text = await page.eval_on_selector("button.input-area-switch, button[data-test-id*='model' i]", "el => el.textContent")
+        except Exception:
+            pass
+            
+        btn_text_lower = (btn_text or "").lower()
+        
+        already_selected = False
+        if "lite" in target_key:
+            if "lite" in btn_text_lower or "3.5" in btn_text_lower:
+                already_selected = True
+        elif "pro" in target_key:
+            if ("pro" in btn_text_lower or "3.1" in btn_text_lower) and "thinking" not in btn_text_lower:
+                already_selected = True
+        else:
+            if ("flash" in btn_text_lower or "3.8" in btn_text_lower or "3.6" in btn_text_lower) and "lite" not in btn_text_lower:
+                already_selected = True
+                
+        if already_selected:
             return
             
         await dropdown_btn.click()
         await page.wait_for_timeout(1000)
         
         check_js = """
-        ((targetModel) => {
-            const items = Array.from(document.querySelectorAll('gem-menu-item, [role="menuitem"], [role="option"], .mat-mdc-menu-item'));
-            let targetItem = null;
+        ((targetKey) => {
+            const key = (targetKey || 'flash').toLowerCase();
+            const items = Array.from(document.querySelectorAll('gem-menu-item, [role="menuitem"], .mat-mdc-menu-item, button[role="menuitem"]'));
             
-            if (targetModel.includes("Pro")) {
-                targetItem = items.find(el => /3\\.1\\s*Pro/i.test(el.textContent))
-                          || items.find(el => /Pro/i.test(el.textContent) && !/Lite|Flash|Thinking/i.test(el.textContent));
+            let targetItem = null;
+            if (key.includes('lite')) {
+                targetItem = items.find(el => {
+                    const txt = el.textContent.toLowerCase();
+                    return txt.includes('flash-lite') || (txt.includes('flash') && txt.includes('lite')) || txt.includes('fastest answers');
+                });
+            } else if (key.includes('pro')) {
+                targetItem = items.find(el => {
+                    const txt = el.textContent.toLowerCase();
+                    return (txt.includes('3.1 pro') || (txt.includes('pro') && !txt.includes('problem') && !txt.includes('prompt') && !txt.includes('extended') && !txt.includes('thinking'))) || txt.includes('advanced reasoning');
+                });
             } else {
-                targetItem = items.find(el => /3\\.8\\s*Flash/i.test(el.textContent))
-                          || items.find(el => /3\\.6\\s*Flash/i.test(el.textContent))
-                          || items.find(el => /Flash/i.test(el.textContent) && !/Lite|Pro|Thinking/i.test(el.textContent))
-                          || document.querySelector('gem-menu-item[data-mode-id="56fdd199312815e2"]');
+                targetItem = items.find(el => {
+                    const txt = el.textContent.toLowerCase();
+                    return (txt.includes('3.8 flash') || txt.includes('3.6 flash') || txt.includes('flash') || txt.includes('all-around help')) && !txt.includes('lite');
+                });
             }
-                            
+                           
             if (targetItem) {
                 const ariaDisabled = targetItem.getAttribute('aria-disabled') === 'true';
                 const hasDisabledClass = targetItem.classList.contains('disabled') 
-                                      || targetItem.classList.contains('gmat-disabled');
-                const sublabelEl = targetItem.querySelector('.sublabel');
+                                      || targetItem.classList.contains('gmat-disabled')
+                                      || targetItem.querySelector('.disabled') !== null;
+                const sublabelEl = targetItem.querySelector('.sublabel') || targetItem.querySelector('[class*="sublabel"]');
                 const sublabel = sublabelEl ? sublabelEl.textContent.trim() : "";
-                const isLimitText = /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(sublabel);
+                const isLimitText = /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(sublabel) || /limit|giới hạn|reached|try again|quá tải|chờ|resets/i.test(targetItem.textContent);
                 
                 if (!ariaDisabled && !hasDisabledClass && !isLimitText) {
                     targetItem.click();
@@ -1425,19 +1607,19 @@ async def ensure_model_selected(page, context_logger=None, target_model="3.8 Fla
             return { success: false };
         })
         """
-        result = await page.evaluate(check_js, str(target_model))
+        result = await page.evaluate(check_js, target_model)
         
         if not result or not isinstance(result, dict) or not result.get("success"):
             await dropdown_btn.click()
             if context_logger:
-                await context_logger.log(f"Không thể tự động chọn model {target_model} (có thể bị giới hạn hoặc lỗi giao diện).", "warning")
+                await context_logger.log(f"Không thể tự động chọn model {model_disp} (có thể bị giới hạn hoặc lỗi giao diện).", "warning")
         else:
             if context_logger:
-                await context_logger.log(f"Đã tự động chuyển đổi sang model {target_model} trên trang hiện tại.", "success")
+                await context_logger.log(f"Đã tự động chuyển đổi sang model {model_disp} trên trang hiện tại.", "success")
                 
     except Exception as e:
         if context_logger:
-            await context_logger.log(f"Lỗi khi đảm bảo chọn model {target_model}: {e}", "warning")
+            await context_logger.log(f"Lỗi khi đảm bảo chọn model {model_disp}: {e}", "warning")
 
 async def clear_gemini_activity(page, context_logger=None):
     try:
@@ -1488,16 +1670,31 @@ async def clear_gemini_activity(page, context_logger=None):
         if not delete_btn:
             raise Exception("Không tìm thấy nút 'Xóa' (Delete) trên trang hoạt động.")
 
+        await human_delay(0.3, 0.75)
         await delete_btn.click()
         await page.wait_for_timeout(1500)
 
-        # Step 2: Click "Delete all time" (Xóa từ trước đến nay)
+        # Step 2: Click "All time" (Xóa từ trước đến nay)
         all_time_btn = None
         all_time_selectors = [
-            "span:has-text('All time')",
-            "span:has-text('Từ trước đến nay')",
+            "[role='dialog'] button:has-text('All time')",
+            "[role='dialog'] [role='button']:has-text('All time')",
+            "[role='dialog'] [role='menuitem']:has-text('All time')",
+            "[role='dialog'] li:has-text('All time')",
+            "[role='dialog'] span:has-text('All time')",
+            "[role='dialog'] div:has-text('All time')",
             "[role='menuitem']:has-text('All time')",
             "[role='menuitem']:has-text('Từ trước đến nay')",
+            "button:has-text('All time')",
+            "button:has-text('Từ trước đến nay')",
+            "[role='button']:has-text('All time')",
+            "[role='button']:has-text('Từ trước đến nay')",
+            "span:has-text('All time')",
+            "span:has-text('Từ trước đến nay')",
+            "div:has-text('All time')",
+            "div:has-text('Từ trước đến nay')",
+            "text='All time'",
+            "text='Từ trước đến nay'",
             "text='Delete all time'",
             "text='Xóa từ trước đến nay'"
         ]
@@ -1510,24 +1707,60 @@ async def clear_gemini_activity(page, context_logger=None):
             except Exception:
                 pass
 
-        if not all_time_btn:
-            raise Exception("Không tìm thấy tùy chọn 'Xóa từ trước đến nay' (Delete all time) trong menu.")
+        if all_time_btn:
+            await human_delay(0.25, 0.65)
+            await all_time_btn.click()
+        else:
+            # DOM Evaluate fallback to find and click "All time"
+            click_all_time_js = """
+            (() => {
+                const candidates = Array.from(document.querySelectorAll("[role='dialog'] *, [role='menu'] *, .modal *, div, span, button, li, [role='button'], [role='menuitem']"));
+                for (const el of candidates) {
+                    const txt = (el.innerText || el.textContent || "").trim();
+                    if (/^all\\s*time$/i.test(txt) || /^từ\\s*trước\\s*đến\\s*nay$/i.test(txt) || /^all\\s*time\\b/i.test(txt) || /^từ\\s*trước\\s*đến\\s*nay\\b/i.test(txt)) {
+                        el.click();
+                        return true;
+                    }
+                }
+                return false;
+            })()
+            """
+            clicked = await page.evaluate(click_all_time_js)
+            if not clicked:
+                raise Exception("Không tìm thấy tùy chọn 'All time' (Xóa từ trước đến nay) trong menu.")
 
-        await all_time_btn.click()
+        if context_logger:
+            await context_logger.log("Đã chọn chế độ 'All time' (Từ trước đến nay).", "info")
         await page.wait_for_timeout(2000)
 
-        # Step 3: Handle confirmation dialogs (could be 1 or 2 confirmation modals)
-        for confirm_step in range(3):
+        # Step 3: Handle all confirmation dialogs (Next -> Delete -> Got it)
+        for confirm_step in range(5):
             confirm_btn = None
             confirm_selectors = [
-                "button:has-text('Delete')",
-                "button:has-text('Xóa')",
+                "[role='dialog'] button:has-text('Next')",
+                "[role='dialog'] button:has-text('Tiếp theo')",
+                "[role='dialog'] button:has-text('Delete')",
+                "[role='dialog'] button:has-text('Xóa')",
+                "[role='dialog'] button:has-text('Got it')",
+                "[role='dialog'] button:has-text('Đã hiểu')",
+                "[role='dialog'] button:has-text('OK')",
+                "[role='dialog'] button:has-text('Close')",
+                "[role='dialog'] button:has-text('Đóng')",
                 "button:has-text('Next')",
                 "button:has-text('Tiếp theo')",
+                "button:has-text('Delete')",
+                "button:has-text('Xóa')",
+                "button:has-text('Got it')",
+                "button:has-text('Đã hiểu')",
+                "button:has-text('OK')",
+                "button:has-text('Close')",
+                "button:has-text('Đóng')",
+                "span:has-text('Next')",
+                "span:has-text('Tiếp theo')",
                 "span:has-text('Delete')",
                 "span:has-text('Xóa')",
-                "span:has-text('Next')",
-                "span:has-text('Tiếp theo')"
+                "span:has-text('Got it')",
+                "span:has-text('Đã hiểu')"
             ]
             for sel in confirm_selectors:
                 try:
@@ -1544,38 +1777,23 @@ async def clear_gemini_activity(page, context_logger=None):
                     pass
             
             if confirm_btn:
-                btn_txt = await confirm_btn.text_content()
+                btn_txt = (await confirm_btn.text_content() or "").strip()
                 if context_logger:
-                    await context_logger.log(f"Đang xác nhận bước {confirm_step + 1}: click '{btn_txt.strip()}'...", "info")
+                    await context_logger.log(f"Đang xác nhận bước {confirm_step + 1}: click '{btn_txt}'...", "info")
+                await human_delay(0.3, 0.75)
                 await confirm_btn.click()
                 await page.wait_for_timeout(2500)
+
+                # Dừng ngay sau bước click 'Got it' / 'Đã hiểu' (hoàn tất xóa hoạt động)
+                btn_lower = btn_txt.lower()
+                if any(k in btn_lower for k in ["got it", "đã hiểu"]):
+                    if context_logger:
+                        await context_logger.log("Đã click 'Got it', hoàn tất quy trình xóa hoạt động.", "info")
+                    break
             else:
                 break
 
-        # Step 4: Got it button to close dialog
-        got_it_btn = None
-        got_it_selectors = [
-            "button:has-text('Got it')",
-            "button:has-text('Đã hiểu')",
-            "button:has-text('OK')",
-            "span:has-text('Got it')",
-            "span:has-text('Đã hiểu')",
-            "span:has-text('OK')"
-        ]
-        for sel in got_it_selectors:
-            try:
-                loc = page.locator(sel).first
-                if await loc.count() > 0 and await loc.is_visible():
-                    got_it_btn = loc
-                    break
-            except Exception:
-                pass
-
-        if got_it_btn:
-            await got_it_btn.click()
-            await page.wait_for_timeout(1000)
-
-        msg = "Đã dọn dẹp toàn bộ lịch sử hoạt động Gemini thành công!"
+        msg = "Đã dọn dẹp toàn bộ lịch sử hoạt động Gemini (All time) thành công!"
         if context_logger:
             await context_logger.log(msg, "success")
         else:
@@ -1610,12 +1828,14 @@ def download_image_sync(url: str, save_path: str, referer: str = None):
             referer = "https://vortexscans.org/"
         elif "toongod.org" in url or "tngcdn.com" in url:
             referer = "https://www.toongod.org/"
-        elif "asurascans.com" in url or "cdn.asurascans.com" in url:
+        elif "asurascans.com" in url:
             referer = "https://asurascans.com/"
         elif "valirscans.org" in url or "media.valirscans.org" in url:
             referer = "https://valirscans.org/"
-        elif "naver.com" in url or "pstatic.net" in url:
-            referer = "https://comic.naver.com/"
+        elif "nyxscans.com" in url or "media.nyxscans.com" in url:
+            referer = "https://nyxscans.com/"
+        elif "manhuaplus.com" in url:
+            referer = "https://manhuaplus.com/"
         else:
             referer = "https://www.webtoons.com/"
             
@@ -1623,33 +1843,46 @@ def download_image_sync(url: str, save_path: str, referer: str = None):
         url,
         headers={
             "Referer": referer,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
     )
-    
-    max_retries = 5
-    last_err = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            with urllib.request.urlopen(req, timeout=20) as response, open(save_path, "wb") as out_file:
-                out_file.write(response.read())
-            return
-        except Exception as e:
-            last_err = e
-            if attempt < max_retries:
-                import time, random
-                sleep_time = (attempt * 0.8) + (random.random() * 0.5)
-                time.sleep(sleep_time)
-            else:
-                if os.path.exists(save_path):
-                    try:
-                        os.remove(save_path)
-                    except Exception:
-                        pass
-                raise last_err
+    try:
+        with urllib.request.urlopen(req) as response:
+            content = response.read()
+            if not content or len(content) == 0:
+                raise ValueError(f"Tải ảnh thất bại ({url}): Dữ liệu nhận được rỗng (0 bytes).")
+            with open(save_path, "wb") as out_file:
+                out_file.write(content)
+    except Exception:
+        if os.path.exists(save_path) and os.path.getsize(save_path) == 0:
+            try:
+                os.remove(save_path)
+            except Exception:
+                pass
+        raise
 
-async def download_image(url: str, save_path: str, referer: str = None):
+async def download_image(url: str, save_path: str, referer: str = None, browser_context=None):
+    if browser_context:
+        try:
+            req_referer = referer or ("https://manhuaplus.com/" if "manhuaplus.com" in url else "https://www.webtoons.com/")
+            resp = await browser_context.request.get(url, headers={"Referer": req_referer})
+            if resp.status == 200:
+                body = await resp.body()
+                if body and len(body) > 0:
+                    with open(save_path, "wb") as out_file:
+                        out_file.write(body)
+                    return
+                else:
+                    raise ValueError(f"Tải ảnh thất bại ({url}): Dữ liệu nhận được rỗng (0 bytes).")
+            else:
+                raise ValueError(f"Tải ảnh thất bại ({url}): HTTP {resp.status}")
+        except Exception:
+            if os.path.exists(save_path) and os.path.getsize(save_path) == 0:
+                try:
+                    os.remove(save_path)
+                except Exception:
+                    pass
+            # Fallback to download_image_sync
     await asyncio.to_thread(download_image_sync, url, save_path, referer)
 
 def sanitize_title(title: str) -> str:
@@ -1659,6 +1892,119 @@ def sanitize_title(title: str) -> str:
     title = re.sub(r"_+", "_", title)
     return title.strip("_")
 
+def strip_gemini_citations(text: str) -> str:
+    """
+    Loại bỏ triệt để tất cả các thẻ trích dẫn / grounding / citation do AI Gemini hoặc web UI sinh ra
+    (e.g. [cite: 1], [cite: 1, 2], [source: 1], [PDF], (PDF), [1], [2]).
+    """
+    if not text:
+        return ""
+    text = re.sub(r"\[\s*cite:\s*[^\]]*\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[\s*(?:source|trích dẫn|nguồn):\s*[^\]]*\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[\s*(?:PDF|\.pdf)\s*\]|\(\s*(?:PDF|\.pdf)\s*\)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", "", text)
+    text = re.sub(r"\s+([,.:;!?])", r"\1", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
+def handle_ai_glitch_restart(text: str) -> str:
+    """
+    Phát hiện và xử lý lỗi AI Gemini bị reset / restart sinh lại kịch bản giữa chừng,
+    hoặc dính liền sau dấu '#' (e.g. "...thực thụ.#4 - Chuyện bắt đầu..."),
+    hoặc dính liền giữa câu không có '#' (e.g. "...chỉ muốn sống yên[R3] - Vào ngày..."),
+    hoặc in-line glitch lặp lại prefix trên cùng 1 dòng (e.g. "[R6] - Kẻ thù ngã g[R6] - Kẻ thù ngã quỵ..."),
+    hoặc nhảy lùi số trang đột ngột về đầu (e.g. từ trang 40 lùi về 4).
+    Khi phát hiện lỗi này, xóa toàn bộ nội dung phía trước câu restart đó,
+    và chỉ lấy kết quả từ câu restart trở đi làm kết quả cuối cùng.
+    Hỗ trợ bảo toàn hoàn toàn đoạn Intro Hook (1-5 dòng đầu) khi chuyển sang Story Recap.
+    """
+    if not text:
+        return text
+
+    # Nếu text chứa cả === INTRO HOOK === và === STORY RECAP ===, xử lý riêng phần story
+    if "=== INTRO HOOK ===" in text and "=== STORY RECAP ===" in text:
+        parts = text.split("=== STORY RECAP ===", 1)
+        intro_part = parts[0].strip()
+        story_part = parts[1].strip()
+        cleaned_story = handle_ai_glitch_restart(story_part)
+        return f"{intro_part}\n\n=== STORY RECAP ===\n{cleaned_story}"
+
+    # 1. In-line glitch cleanup: xử lý trước khi tách dòng
+    inline_glitch_pat = re.compile(
+        r"(?:\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*(\d{1,4})\s*\]|\b(?:Page|Trang|Region|Khung|Frame|R)\s*(\d{1,4}))\s*[\-:\–\—\−\~]",
+        re.IGNORECASE
+    )
+    raw_lines = text.splitlines()
+    fixed_inline = []
+    for line in raw_lines:
+        l_str = line.strip()
+        if not l_str:
+            continue
+        matches = list(inline_glitch_pat.finditer(l_str))
+        if len(matches) > 1:
+            last_m = matches[-1]
+            l_str = l_str[last_m.start():].strip()
+        fixed_inline.append(l_str)
+    text = "\n".join(fixed_inline)
+
+    # 2. Tách các dòng bị dính liền (kể cả có hoặc không có dấu '#')
+    pat_after_hash = re.compile(
+        r"#\s*(?:\[?(?:PDF|\.pdf|source|trích dẫn)\]?|\(PDF\)|\+\s*\d+|\[\d+\])*\s*(?=(?:\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*\d{1,4}\]|\b(?:Page|Trang|Region|Khung|Frame|R)\s*\d{1,4}|\d{1,4})\s*(?:[\-:\–\—\−\~]|\.(?!\d))\s*)",
+        re.IGNORECASE
+    )
+    pat_glued = re.compile(
+        r"(?<=[^\d\s\r\n\[])\s*(?:\[?(?:PDF|\.pdf|source|trích dẫn)\]?|\(PDF\)|\+\s*\d+|\[\d+\])*\s*(?=(?:\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*\d{1,4}\]|\b(?:Page|Trang|Region|Khung|Frame|R)\s*\d{1,4})\s*(?:[\-:\–\—\−\~]|\.(?!\d))\s*|\d{1,4}\s*[\-:\–\—\−\~]\s+)",
+        re.IGNORECASE
+    )
+    text = pat_after_hash.sub("#\n", text)
+    text = pat_glued.sub("\n", text)
+
+    line_page_pat = re.compile(
+        r"^\s*(?:[\*\-\•\>]+\s*)?(?:Page|Trang|Region|Khung|Frame|R)?\s*\[?\*?\*?(?:R|r|Region|Trang|Page|Khung|Frame)?\s*_?-?\s*(\d{1,4})\*?\*?\]?\s*(?:[\-:\–\—\−\~]|\.(?!\d))",
+        re.IGNORECASE
+    )
+
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if not lines:
+        return ""
+
+    parsed_lines = []
+    for idx, line in enumerate(lines):
+        m = line_page_pat.match(line)
+        if m:
+            parsed_lines.append((idx, int(m.group(1)), line))
+        else:
+            parsed_lines.append((idx, None, line))
+
+    restart_idx = None
+    max_page = 0
+    for i, (orig_idx, p_num, line_str) in enumerate(parsed_lines):
+        if p_num is None:
+            continue
+        if max_page >= 10 and p_num <= 10:
+            is_intro_transition = (i <= 5 and (len(parsed_lines) - i) >= 15)
+            if is_intro_transition:
+                max_page = p_num  # Reset max_page tracking for Story Recap
+                continue
+            else:
+                restart_idx = orig_idx
+                break
+        elif max_page >= 25 and p_num <= max_page - 15:
+            is_intro_transition = (i <= 5 and (len(parsed_lines) - i) >= 15)
+            if is_intro_transition:
+                max_page = p_num
+                continue
+            else:
+                restart_idx = orig_idx
+                break
+        if p_num > max_page:
+            max_page = p_num
+
+    if restart_idx is not None:
+        lines = lines[restart_idx:]
+
+    return "\n".join(lines).strip()
+
 def clean_gemini_response(text: str) -> str:
     if not text:
         return text
@@ -1667,19 +2013,37 @@ def clean_gemini_response(text: str) -> str:
     text = text.strip()
     while True:
         new_text = re.sub(r"<\s*/\s*[a-zA-Z_0-9\-]+\s*>\s*$", "", text)
-        new_text = re.sub(r"```\s*$", "", new_text)
+        new_text = re.sub(r"```[a-zA-Z0-9_-]*\s*$", "", new_text)
+        new_text = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", new_text)
         new_text = new_text.strip()
         if new_text == text:
             break
         text = new_text
-        
-    # 1. Split text into lines
+
+    # 1. Xử lý lỗi AI glitch restart (xóa bỏ đoạn sinh lỗi phía trước câu restart)
+    text = handle_ai_glitch_restart(text)
+
+    # 2. Normalize line breaks: separate glued lines
+    pat_after_hash = re.compile(
+        r"#\s*(?:\[?(?:PDF|\.pdf|source|trích dẫn)\]?|\(PDF\)|\+\s*\d+|\[\d+\])*\s*(?=(?:\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*\d{1,4}\]|\b(?:Page|Trang|Region|Khung|Frame|R)\s*\d{1,4}|\d{1,4})\s*(?:[\-:\–\—\−\~]|\.(?!\d))\s*)",
+        re.IGNORECASE
+    )
+    pat_glued = re.compile(
+        r"(?<=[^\d\s\r\n\[])\s*(?:\[?(?:PDF|\.pdf|source|trích dẫn)\]?|\(PDF\)|\+\s*\d+|\[\d+\])*\s*(?=(?:\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*\d{1,4}\]|\b(?:Page|Trang|Region|Khung|Frame|R)\s*\d{1,4})\s*(?:[\-:\–\—\−\~]|\.(?!\d))\s*|\d{1,4}\s*[\-:\–\—\−\~]\s+)",
+        re.IGNORECASE
+    )
+    text = pat_after_hash.sub("#\n", text)
+    text = pat_glued.sub("\n", text)
+
+    # 3. Split text into lines
     lines = text.split("\n")
-    
-    page_prefix_pat = re.compile(r"^\s*\[?[0-9\s,:%]+\]?\s*[\-:\.]")
-    
-    # Filter out conversational intro/outro lines
-    filtered_lines = []
+    page_prefix_pat = re.compile(
+        r"^\s*(?:[\*\-\•\>]+\s*)?(?:Page|Trang|Region|Khung|Frame|R)?\s*\[?\*?\*?(?:R|r|Region|Trang|Page|Khung|Frame)?\s*_?-?\s*(\d{1,4})\*?\*?\]?\s*(?:[\-:\–\—\−\~]|\.(?!\d))\s*",
+        re.IGNORECASE
+    )
+
+    has_any_hash = any("#" in l for l in lines)
+    cleaned_lines = []
     in_thinking = False
     for line in lines:
         line_str = line.strip()
@@ -1687,261 +2051,235 @@ def clean_gemini_response(text: str) -> str:
             continue
         if "<thinking>" in line_str:
             in_thinking = True
-        if in_thinking or page_prefix_pat.match(line_str):
-            filtered_lines.append(line_str)
-        if "</thinking>" in line_str:
-            in_thinking = False
-            
-    lines = filtered_lines
-    
-    # 2. Remove garbage lines from the end
-    garbage_words_pat = re.compile(r"PDF|\.pdf|\+\s*\d+|chapter", re.IGNORECASE)
-    
-    while lines:
-        last_line = lines[-1].strip()
-        if not last_line:
-            lines.pop()
+        if in_thinking:
+            cleaned_lines.append(line_str)
+            if "</thinking>" in line_str:
+                in_thinking = False
             continue
-        
-        # Check if it looks like a valid page entry line
-        if page_prefix_pat.match(last_line):
-            break
-        
-        # If it doesn't look like a page entry, check if it's garbage
-        if garbage_words_pat.search(last_line) or last_line == "#":
-            lines.pop()
-        else:
-            break
-            
-    # 3. Clean the new last line if it has trailing garbage
-    if lines:
-        last_line = lines[-1]
-        hash_idx = last_line.rfind("#")
-        
-        strict_garbage_pat = re.compile(r"(PDF\s*\+\s*\d+|\+\s*\d+|PDF\s*\+?\s*\d+)$", re.IGNORECASE)
-        
-        if hash_idx != -1:
-            trailing = last_line[hash_idx+1:].strip()
-            # If there's any alphanumeric text after #, it's trailing garbage
-            if trailing and re.search(r"[a-zA-Z0-9]", trailing):
-                lines[-1] = last_line[:hash_idx+1]
-            else:
-                # If trailing is empty, check if the content before the hash ends with strict garbage
-                last_line_content = last_line[:hash_idx].strip()
-                garbage_end_match = strict_garbage_pat.search(last_line_content)
-                if garbage_end_match:
-                    lines[-1] = last_line_content[:garbage_end_match.start()].strip() + "#"
-        else:
-            # No hash at all, but does it end with strict garbage?
-            last_line_stripped = last_line.strip()
-            match = strict_garbage_pat.search(last_line_stripped)
-            if match:
-                start_idx = match.start()
-                cleaned_line = last_line_stripped[:start_idx].strip()
-                if cleaned_line:
-                    lines[-1] = cleaned_line + "#"
-                    
-    # 4. Auto-correct missing '#' for each line
-    for i in range(len(lines)):
-        line = lines[i].strip()
-        if not line:
-            continue
-        if line.startswith("<thinking>") or line.endswith("</thinking>"):
-            continue
-        if page_prefix_pat.match(line):
-            if not line.endswith("#"):
-                lines[i] = line + "#"
-                
-    return "\n".join(lines)
 
-def verify_gemini_response_format(text: str) -> tuple[bool, str]:
+        m_pref = page_prefix_pat.match(line_str)
+        if m_pref:
+            page_num = str(int(m_pref.group(1)))
+            raw_content = line_str[m_pref.end():].strip()
+            # Strip stray watermark badge tags (e.g. "Type: TRANH (VALID) - ")
+            raw_content = re.sub(r"^(?:\[?(?:Type\s*:\s*)?[A-Za-z0-9_]+(?:\s*\([^\)]+\))?\]?\s*[\-:\–\—\−\~]\s*)+", "", raw_content, flags=re.IGNORECASE).strip()
+            raw_content = re.sub(r"[\*\_`]", "", raw_content)
+            # Clean citation badges at the end or anywhere in text
+            raw_content = strip_gemini_citations(raw_content)
+
+            # Handle '#' at the end or inside line
+            if "#" in raw_content:
+                parts = raw_content.split("#")
+                main_content = "#".join(parts[:-1]).strip()
+                main_content = strip_gemini_citations(main_content)
+                if main_content:
+                    cleaned_lines.append(f"{page_num} - {main_content}#")
+            else:
+                if not has_any_hash:
+                    if raw_content:
+                        cleaned_lines.append(f"{page_num} - {raw_content}#")
+                else:
+                    if raw_content:
+                        cleaned_lines.append(f"{page_num} - {raw_content}")
+
+    # Discard fragmented un-hashed lines from beginning if subsequent lines have '#'
+    while cleaned_lines:
+        first = cleaned_lines[0].strip()
+        if page_prefix_pat.match(first) and not first.endswith("#"):
+            if any(l.endswith("#") for l in cleaned_lines[1:]):
+                cleaned_lines.pop(0)
+                continue
+        break
+
+    # If any remaining valid lines are still missing '#', auto-append '#'
+    for i in range(len(cleaned_lines)):
+        cl = cleaned_lines[i].strip()
+        if not cl.endswith("#") and not cl.startswith("<thinking") and not cl.startswith("</thinking"):
+            cleaned_lines[i] = cl + "#"
+    garbage_words_pat = re.compile(r"^(?:PDF|\.pdf|\(PDF\)|\+\s*\d+|chapter|#|\s*)+$", re.IGNORECASE)
+    while cleaned_lines:
+        last = cleaned_lines[-1].strip()
+        if not last or garbage_words_pat.match(last) or (not page_prefix_pat.match(last) and not last.endswith("</thinking>")):
+            cleaned_lines.pop()
+        else:
+            break
+
+    return "\n".join(cleaned_lines)
+
+def count_recap_sentences(parsed_or_text) -> int:
+    """
+    Counts total speech sentences in parsed recap items or raw recap text.
+    Splits by standard punctuation [.!?]+
+    """
+    if isinstance(parsed_or_text, str):
+        try:
+            parsed = parse_gemini_recap_text(parsed_or_text)
+        except Exception:
+            parsed = []
+    else:
+        parsed = parsed_or_text
+    
+    if not parsed:
+        return 0
+        
+    total_sentences = 0
+    for item in parsed:
+        if isinstance(item, dict):
+            speech = item.get("speech", "")
+        else:
+            speech = str(item)
+        sentences = [s.strip() for s in re.split(r'[.!?]+(?:\s+|$)', speech) if s.strip()]
+        total_sentences += max(1, len(sentences)) if speech.strip() else 0
+    return total_sentences
+
+def verify_gemini_response_format(text: str, is_intro: bool = False, min_sentences: int = 1) -> tuple[bool, str]:
     if not text:
         return False, "Response is empty"
     
     text = clean_gemini_response(text)
     
     # 1. Check if this is a JSON response
-    # If it is valid JSON with speech/images, we bypass the text-format checks.
     extracted = extract_json_from_text(text)
-    if extracted and ("\"speech\"" in extracted or "'speech'" in extracted):
+    if extracted:
         try:
             parsed = json.loads(extracted)
             if isinstance(parsed, list) and len(parsed) > 0:
-                valid_json = True
                 for item in parsed:
                     if not isinstance(item, dict) or "speech" not in item or "images" not in item:
-                        valid_json = False
-                        break
-                if valid_json:
-                    return True, "Valid JSON"
+                        return False, "JSON item lacks 'speech' or 'images' key"
+                if is_intro:
+                    sentence_count = count_recap_sentences(parsed)
+                    total_count = max(len(parsed), sentence_count)
+                    if not (1 <= total_count <= 8):
+                        return False, f"Intro hook phải có từ 1 đến 5 đoạn/câu (hiện có {len(parsed)} đoạn, {sentence_count} câu)"
+                elif min_sentences > 1:
+                    sentence_count = count_recap_sentences(parsed)
+                    if len(parsed) < min_sentences and sentence_count < min_sentences:
+                        return False, f"Kịch bản recap quá ngắn ({max(len(parsed), sentence_count)} dòng/câu < {min_sentences} dòng yêu cầu)"
+                return True, "Valid JSON"
         except Exception:
             pass
 
     # 2. Clean thinking tags
     clean_text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
-    
-    # 3. Check for trailing garbage after the last '#'
-    last_hash_idx = clean_text.rfind("#")
-    if last_hash_idx == -1:
-        return False, "No hash symbol (#) found in the response."
-        
-    trailing = clean_text[last_hash_idx+1:].strip()
-    if trailing:
-        # Check if the trailing text contains typical garbage
-        if re.search(r"PDF|\.pdf|\+\d+|chapter", trailing, re.IGNORECASE):
-            return False, f"Trailing garbage detected after the last hash: '{trailing}'"
-        if re.search(r"[a-zA-Z0-9]", trailing):
-            return False, f"Extra text found after the last hash: '{trailing}'"
+    if not clean_text:
+        return False, "Response contains only thinking tags or is empty."
 
-    # 4. Check format line by line
+    # 3. Check format line by line
     lines = [line.strip() for line in clean_text.split("\n") if line.strip()]
     if not lines:
         return False, "No non-empty lines found in the response."
 
-    # Check if the last line ends with garbage before the '#'
-    last_line = lines[-1]
-    last_line_content = last_line[:-1].strip() if last_line.endswith("#") else last_line.strip()
-    if re.search(r"(PDF\s*\+\s*\d+|\+\s*\d+|PDF\s*\+?\s*\d+)$", last_line_content, re.IGNORECASE):
-        return False, f"Trailing garbage detected at the end of the last line: '{last_line_content}'"
-
+    page_pat = re.compile(
+        r"^\s*(?:[\*\-\•\>]+\s*)?(?:Page|Trang|Region|Khung|Frame|R)?\s*\[?\*?\*?(?:R|r|Region|Trang|Page|Khung|Frame)?\s*_?-?\s*(\d{1,4})\*?\*?\]?\s*(?:[\-:\–\—\−\~]|\.(?!\d))\s*(.+)$",
+        re.IGNORECASE | re.DOTALL
+    )
     for idx, line in enumerate(lines):
         if not line.endswith("#"):
-            return False, f"Line {idx+1} does not end with the hash symbol (#): '{line}'"
+            return False, f"Dòng {idx+1} chưa hoàn tất hoặc thiếu dấu kết thúc (#): '{line}'"
         
-        # Verify the line matches the format [Page(s)] - [Text]#
         line_content = line[:-1].strip()
-        match = re.match(r"^\[?([0-9\s,:%]+)\]?\s*[\-:\.]?\s*(.+)$", line_content, re.DOTALL)
+        match = page_pat.match(line_content)
         if not match:
-            return False, f"Line {idx+1} does not match the expected '[Page] - [Text]' format: '{line}'"
-            
+            return False, f"Dòng {idx+1} không khớp định dạng mong đợi '[Page] - [Text]': '{line}'"
+
+    if is_intro:
+        total_sentences = 0
+        for line in lines:
+            line_content = line[:-1].strip()
+            match = page_pat.match(line_content)
+            if match:
+                speech = match.group(2).strip()
+                speech = re.sub(r"^(?:\[?(?:Type\s*:\s*)?[A-Za-z0-9_]+(?:\s*\([^\)]+\))?\]?\s*[\-:\–\—\−\~]\s*)+", "", speech, flags=re.IGNORECASE).strip()
+                speech = strip_gemini_citations(speech)
+                s_list = [s.strip() for s in re.split(r'[.!?]+(?:\s+|$)', speech) if s.strip()]
+                total_sentences += max(1, len(s_list)) if speech.strip() else 0
+        total_intro_units = max(len(lines), total_sentences)
+        if not (1 <= total_intro_units <= 8):
+            return False, f"Intro hook phải có từ 1 đến 5 dòng/câu (hiện có {len(lines)} dòng, {total_sentences} câu)"
+        return True, "Valid"
+    elif min_sentences > 1:
+        total_sentences = 0
+        for line in lines:
+            line_content = line[:-1].strip()
+            match = page_pat.match(line_content)
+            if match:
+                speech = match.group(2).strip()
+                speech = strip_gemini_citations(speech)
+                s_list = [s.strip() for s in re.split(r'[.!?]+(?:\s+|$)', speech) if s.strip()]
+                total_sentences += max(1, len(s_list)) if speech.strip() else 0
+        if len(lines) < min_sentences and total_sentences < min_sentences:
+            return False, f"Kịch bản recap quá ngắn ({max(len(lines), total_sentences)} dòng/câu < {min_sentences} dòng yêu cầu)"
+
     return True, "Valid"
-
-
-def _parse_gemini_image_specs(spec_str: str) -> list[dict]:
-    """
-    Parses image specs from string formats like:
-    - "14" -> [{"page": 14, "priority": 1.0}]
-    - "[14, 15]" -> [{"page": 14, "priority": 0.5}, {"page": 15, "priority": 0.5}]
-    - "[14:40%, 15:60%]" -> [{"page": 14, "priority": 0.4}, {"page": 15, "priority": 0.6}]
-    - "[14:0.3, 15:0.7]" -> [{"page": 14, "priority": 0.3}, {"page": 15, "priority": 0.7}]
-    """
-    cleaned = spec_str.strip().strip("[]").strip()
-    parts = [p.strip() for p in cleaned.split(",") if p.strip()]
-    if not parts:
-        return []
-
-    parsed_images = []
-    has_custom_weights = False
-
-    for part in parts:
-        if ":" in part:
-            p_num_str, weight_str = part.split(":", 1)
-            digits = re.sub(r"\D", "", p_num_str)
-            if not digits:
-                continue
-            p_num = int(digits)
-            weight_clean = weight_str.replace("%", "").strip()
-            try:
-                weight_val = float(weight_clean)
-                if "%" in weight_str or weight_val > 1.0:
-                    weight_val = weight_val / 100.0
-            except ValueError:
-                weight_val = 1.0
-            parsed_images.append({"page": p_num, "priority": max(0.01, weight_val)})
-            has_custom_weights = True
-        else:
-            digits = re.sub(r"\D", "", part)
-            if not digits:
-                continue
-            p_num = int(digits)
-            parsed_images.append({"page": p_num, "priority": 1.0})
-
-    if not parsed_images:
-        return []
-
-    if not has_custom_weights:
-        count = len(parsed_images)
-        for img in parsed_images:
-            img["priority"] = round(1.0 / count, 4)
-    else:
-        total = sum(img["priority"] for img in parsed_images)
-        if total > 0:
-            for img in parsed_images:
-                img["priority"] = round(img["priority"] / total, 4)
-
-    # Adjust rounding discrepancy to ensure exact 1.0 sum
-    diff = round(1.0 - sum(img["priority"] for img in parsed_images), 4)
-    if diff != 0 and parsed_images:
-        parsed_images[-1]["priority"] = max(0.01, round(parsed_images[-1]["priority"] + diff, 4))
-
-    return parsed_images
-
 
 def parse_gemini_recap_text(text: str) -> list:
     if not text:
         return []
     
+    # Check if JSON directly
+    extracted = extract_json_from_text(text)
+    if extracted:
+        try:
+            parsed = json.loads(extracted)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                valid = True
+                for item in parsed:
+                    if not isinstance(item, dict) or "speech" not in item or "images" not in item:
+                        valid = False
+                        break
+                if valid:
+                    for item in parsed:
+                        item["speech"] = strip_gemini_citations(item.get("speech", ""))
+                    return parsed
+        except Exception:
+            pass
+
     text = clean_gemini_response(text)
     
+    # Verify response format and check for garbage at the end
+    is_valid, err_msg = verify_gemini_response_format(text, is_intro=False, min_sentences=1)
+    if not is_valid:
+        # Fallback check if it's a valid single-line intro hook
+        is_intro_valid, intro_err = verify_gemini_response_format(text, is_intro=True)
+        if not is_intro_valid:
+            raise ValueError(f"Kiểm tra định dạng phản hồi Gemini thất bại: {err_msg}")
+        
     # 1. Strip everything between <thinking> and </thinking>
     text_clean = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
     
-    # 2. Clean the text, split by '#'
-    segments = text_clean.split("#")
+    # 2. Split by lines and '#'
+    lines = [line.strip() for line in text_clean.split("\n") if line.strip()]
     parsed_list = []
     
-    for seg in segments:
-        seg = seg.strip()
-        if not seg:
+    page_pat = re.compile(
+        r"^\s*(?:[\*\-\•\>]+\s*)?(?:Page|Trang|Region|Khung|Frame|R)?\s*\[?\*?\*?(?:R|r|Region|Trang|Page|Khung|Frame)?\s*_?-?\s*(\d{1,4})\*?\*?\]?\s*(?:[\-:\–\—\−\~]|\.(?!\d))\s*(.*)$",
+        re.IGNORECASE | re.DOTALL
+    )
+    for line in lines:
+        line_str = line[:-1].strip() if line.endswith("#") else line.strip()
+        if not line_str:
             continue
             
-        m = re.match(r"^\[?([0-9\s,:%]+)\]?\s*[\-:\.]?\s*(.*)$", seg, re.DOTALL)
+        m = page_pat.match(line_str)
         if m:
-            page_spec = m.group(1).strip()
+            page_num = str(int(m.group(1).strip()))
             content = m.group(2).strip()
             if content:
-                content = re.sub(r"[\*\_`]", "", content).strip()
-                imgs = _parse_gemini_image_specs(page_spec)
-                if imgs and content:
-                    # Clean any trailing leaked segment headers accidentally glued into content
-                    content = re.sub(r"\s*\[\s*\d+\s*(?:[:%,\d\s]*)*\s*\]\s*[\-:].*$", "", content).strip()
-                    # Clean any bracket weight/page references leaked inside speech text
-                    content = re.sub(r'\[\s*\d+\s*(?::\s*\d+%?)?(?:\s*,\s*\d+\s*(?::\s*\d+%?)?)*\s*\]', '', content).strip()
-                    if content:
-                        # Validate: drop truncated/incomplete speech fragments
-                        if len(content) < 15:
-                            logging.getLogger(__name__).warning(
-                                "Dropped short segment (len=%d): '%s'", len(content), content[:50]
-                            )
-                            continue
-                        if not re.search(r'[.!?…。\u2026]$', content):
-                            logging.getLogger(__name__).warning(
-                                "Dropped truncated segment (no ending punctuation): '%s...'",
-                                content[:50],
-                            )
-                            continue
-                        parsed_list.append({
-                            "speech": content,
-                            "images": imgs
-                        })
-                    
-    # Fallback to JSON if plain text parsing did not yield any results
-    if not parsed_list:
-        extracted_json = extract_json_from_text(text)
-        if extracted_json:
-            try:
-                temp_data = json.loads(extracted_json)
-                if isinstance(temp_data, list) and len(temp_data) > 0:
-                    parsed_list = temp_data
-            except Exception:
-                pass
-
-    # Apply Anti-Loop Guardrail auto-healing to prune duplicate narrative loops
-    from recap_schema import prune_recap_loops, auto_split_long_segments, enforce_monotonic_page_order
-    parsed_list, _ = prune_recap_loops(parsed_list)
-    parsed_list = auto_split_long_segments(parsed_list, max_words=20)
-    parsed_list = enforce_monotonic_page_order(parsed_list)
-                
+                content = re.sub(r"^(?:\[?(?:Type\s*:\s*)?[A-Za-z0-9_]+(?:\s*\([^\)]+\))?\]?\s*[\-:\–\—\−\~]\s*)+", "", content, flags=re.IGNORECASE).strip()
+                content = re.sub(r"[\*\_`]", "", content)
+                # Clean any stray citation badges from content
+                content = strip_gemini_citations(content)
+                if content:
+                    parsed_list.append({
+                        "speech": content,
+                        "images": [
+                            {
+                                "page": str(page_num),
+                                "priority": 1.0
+                            }
+                        ]
+                    })
     # Normalize priorities for downstream components
     for item in parsed_list:
         if isinstance(item, dict) and "speech" in item and "images" in item:
@@ -1950,7 +2288,7 @@ def parse_gemini_recap_text(text: str) -> list:
                 total_p = sum(float(img.get("priority", 0)) for img in images_list)
                 if abs(total_p - 1.0) > 0.02:
                     for img in images_list:
-                        img["priority"] = round(1.0 / len(images_list), 4)
+                        img["priority"] = 1.0 / len(images_list)
                         
     return parsed_list
 
@@ -2064,6 +2402,15 @@ async def analyze(payload: AnalyzeRequest):
             url = re.sub(r"/chapter/[^/]+/?$", "", url)
             await sse_logger.log(f"Đường dẫn tập truyện phát hiện. Chuẩn hóa thành trang chính bộ truyện: {url}", "info")
             await nav_manager.safe_goto(page, url, reason="Load normalized manhwa series page for episode count analysis", caller="analyze")
+        elif "nyxscans.com" in url and ("/chapter-" in url or "/chapter/" in url):
+            url = re.sub(r"/chapter-[^/]+/?$", "", url)
+            url = re.sub(r"/chapter/[^/]+/?$", "", url)
+            await sse_logger.log(f"Đường dẫn tập truyện phát hiện. Chuẩn hóa thành trang chính bộ truyện: {url}", "info")
+            await nav_manager.safe_goto(page, url, reason="Load normalized manhwa series page for episode count analysis", caller="analyze")
+        elif "manhuaplus.com" in url and "/chapter-" in url:
+            url = re.sub(r"/chapter-[^/]+/?$", "/", url)
+            await sse_logger.log(f"Đường dẫn tập truyện phát hiện. Chuẩn hóa thành trang chính bộ truyện: {url}", "info")
+            await nav_manager.safe_goto(page, url, reason="Load normalized manhwa series page for episode count analysis", caller="analyze")
         elif "comix.to" in url:
             parsed_url = urllib.parse.urlparse(url)
             parts = parsed_url.path.strip("/").split("/")
@@ -2074,30 +2421,9 @@ async def analyze(payload: AnalyzeRequest):
                     url = urllib.parse.urlunparse(parsed_url._replace(path=new_path, query="", fragment=""))
                     await sse_logger.log(f"Đường dẫn tập truyện phát hiện. Chuẩn hóa thành trang chính bộ truyện: {url}", "info")
                     await nav_manager.safe_goto(page, url, reason="Load normalized manhwa series page for episode count analysis", caller="analyze")
-        elif "comic.naver.com" in url:
-            parsed_naver = urllib.parse.urlparse(url)
-            query = urllib.parse.parse_qs(parsed_naver.query)
-            title_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
-            if "/webtoon/detail" in parsed_naver.path and title_id:
-                url = f"https://comic.naver.com/webtoon/list?titleId={title_id}"
-                await sse_logger.log(f"Đường dẫn tập truyện Naver phát hiện. Chuẩn hóa thành trang danh sách: {url}", "info")
-                await nav_manager.safe_goto(page, url, reason="Load normalized Naver series page for episode count analysis", caller="analyze")
 
         title_text = ""
-        if "comic.naver.com" in url:
-            try:
-                og_meta = await page.locator("meta[property='og:title']").evaluate_all(
-                    "elements => elements.map(el => el.getAttribute('content'))"
-                )
-                if og_meta and og_meta[0]:
-                    title_text = og_meta[0].strip()
-                if not title_text:
-                    h2_list = await page.locator("h2").all_inner_texts()
-                    if h2_list and h2_list[0].strip():
-                        title_text = h2_list[0].strip()
-            except Exception:
-                pass
-        elif "vortexscans.org" in url:
+        if "vortexscans.org" in url:
             try:
                 await page.wait_for_selector("h1.break-words, h1.text-2xl", timeout=5000)
                 title_text = await page.locator("h1.break-words, h1.text-2xl").first.inner_text()
@@ -2127,30 +2453,29 @@ async def analyze(payload: AnalyzeRequest):
                 title_text = await page.locator("h1.mpage__title").first.inner_text()
             except Exception:
                 pass
-        if not title_text:
-            title_text = await page.title()
-        if " : 네이버" in title_text:
-            title_text = title_text.split(" : 네이버")[0].strip()
-        title_text = title_text.split("|")[0].strip()
-        title_text = title_text.split("Chapter")[0].strip()
-
-        max_ep = 0
-        if "comic.naver.com" in url:
+        elif "nyxscans.com" in url:
             try:
-                parsed_naver = urllib.parse.urlparse(url)
-                title_id = urllib.parse.parse_qs(parsed_naver.query).get("titleId", [""])[0] or urllib.parse.parse_qs(parsed_naver.query).get("title_no", [""])[0]
-                hrefs = await page.locator("a").evaluate_all(
-                    "elements => elements.map(el => el.getAttribute('href'))"
-                )
-                for href in hrefs:
-                    if href and "/webtoon/detail" in href:
-                        if not title_id or f"titleId={title_id}" in href:
-                            m = re.search(r"[?&]no=(\d+)", href)
-                            if m:
-                                max_ep = max(max_ep, int(m.group(1)))
+                h1s = await page.locator("h1").all_inner_texts()
+                if h1s:
+                    for h in reversed(h1s):
+                        if h.strip().lower() not in ['status', 'type', 'chapters', 'last update', 'genres']:
+                            title_text = h.strip()
+                            break
             except Exception:
                 pass
-        elif "comix.to" in url:
+        elif "manhuaplus.com" in url:
+            try:
+                await page.wait_for_selector(".post-title h1, h1", timeout=5000)
+                title_text = await page.locator(".post-title h1, h1").first.inner_text()
+            except Exception:
+                pass
+        if not title_text:
+            title_text = await page.title()
+            title_text = title_text.split("|")[0].strip()
+            title_text = title_text.split("Chapter")[0].strip()
+
+        max_ep = 0
+        if "comix.to" in url:
             try:
                 hrefs = await page.locator("a.mchap-row__primary").evaluate_all(
                     "elements => elements.map(el => el.getAttribute('href'))"
@@ -2181,22 +2506,22 @@ async def analyze(payload: AnalyzeRequest):
                 pass
 
         if max_ep == 0:
-            # Click "Show more" buttons if present on Vortex Scans to fall back
-            if "vortexscans.org" in url:
+            # Click "Show more" buttons if present on Vortex Scans or Nyx Scans to fall back
+            if "vortexscans.org" in url or "nyxscans.com" in url:
                 click_count = 0
                 while True:
-                    show_more_button = page.locator("button:has-text('Show more')")
+                    show_more_button = page.locator("button:has-text('Show more'), button:has-text('Show More')")
                     visible_count = await show_more_button.count()
                     found_clickable = False
                     for idx in range(visible_count):
                         btn = show_more_button.nth(idx)
                         if await btn.is_visible() and await btn.is_enabled():
                             await btn.click()
-                            await asyncio.sleep(1.0)
+                            await asyncio.sleep(0.8)
                             click_count += 1
                             found_clickable = True
                             break
-                    if not found_clickable or click_count >= 10:
+                    if not found_clickable or click_count >= 15:
                         break
 
             await page.wait_for_selector("a", timeout=10000)
@@ -2209,7 +2534,13 @@ async def analyze(payload: AnalyzeRequest):
                         m = re.search(r"episode_no=(\d+)", href)
                         if m:
                             max_ep = max(max_ep, int(m.group(1)))
-                    elif ("vortexscans.org" in url or "toongod.org" in url) and "/chapter-" in href:
+                    elif ("vortexscans.org" in url or "toongod.org" in url or "nyxscans.com" in url or "manhuaplus.com" in url) and "/chapter-" in href:
+                        if "manhuaplus.com" in url:
+                            parsed_u = urllib.parse.urlparse(url)
+                            u_parts = parsed_u.path.strip("/").split("/")
+                            m_slug = u_parts[1] if len(u_parts) >= 2 and u_parts[0] == "manga" else (u_parts[0] if u_parts else "")
+                            if m_slug and f"/{m_slug}/" not in href:
+                                continue
                         parsed_href = urllib.parse.urlparse(href)
                         parts = parsed_href.path.strip("/").split("/")
                         if parts:
@@ -2227,10 +2558,21 @@ async def analyze(payload: AnalyzeRequest):
                         if len(parts) >= 2 and parts[-2] == "chapter":
                             vortex_chapters.append(parts[-1])
 
-            if ("vortexscans.org" in url or "toongod.org" in url) and vortex_chapters:
-                vortex_chapters = list(set(vortex_chapters))
+            if ("vortexscans.org" in url or "toongod.org" in url or "nyxscans.com" in url or "manhuaplus.com" in url):
+                try:
+                    html_content = await page.content()
+                    raw_matches = re.findall(r'chapter-[a-zA-Z0-9_\.-]+', html_content)
+                    for rm in raw_matches:
+                        clean_rm = re.sub(r'["\',;\\/<>].*$', '', rm).strip()
+                        if clean_rm and clean_rm.startswith("chapter-") and len(clean_rm) <= 40:
+                            vortex_chapters.append(clean_rm)
+                except Exception:
+                    pass
+
+            if ("vortexscans.org" in url or "toongod.org" in url or "nyxscans.com" in url or "manhuaplus.com" in url) and vortex_chapters:
+                vortex_chapters = list(dict.fromkeys(vortex_chapters))
                 def extract_chap_number(slug):
-                    m = re.search(r"chapter-(\d+\.?\d*)", slug)
+                    m = re.search(r"chapter-(\d+)(?:[_\.-](\d+))?", str(slug), re.IGNORECASE)
                     if m:
                         try:
                             return float(m.group(1))
@@ -2238,7 +2580,8 @@ async def analyze(payload: AnalyzeRequest):
                             pass
                     return 0.0
                 vortex_chapters.sort(key=extract_chap_number)
-                max_ep = len(vortex_chapters)
+                highest_ch = max(extract_chap_number(s) for s in vortex_chapters)
+                max_ep = max(len(vortex_chapters), int(highest_ch))
             elif ("asura" in urllib.parse.urlparse(url).netloc.lower() or "valirscans.org" in urllib.parse.urlparse(url).netloc.lower()) and vortex_chapters:
                 vortex_chapters = list(set(vortex_chapters))
                 def extract_asura_number(slug):
@@ -2254,7 +2597,8 @@ async def analyze(payload: AnalyzeRequest):
                             pass
                     return 0.0
                 vortex_chapters.sort(key=extract_asura_number)
-                max_ep = len(vortex_chapters)
+                highest_ch = max(extract_asura_number(s) for s in vortex_chapters)
+                max_ep = max(len(vortex_chapters), int(highest_ch))
 
         if max_ep == 0:
             max_ep = 1
@@ -2314,8 +2658,8 @@ async def process_single_image(
             results_dino = dino_processor.post_process_grounded_object_detection(
                 outputs,
                 inputs.input_ids,
-                threshold=0.15,
-                text_threshold=0.15,
+                threshold=0.25,
+                text_threshold=0.25,
                 target_sizes=[image.size[::-1]]
             )[0]
 
@@ -2323,11 +2667,24 @@ async def process_single_image(
             scores = results_dino["scores"].cpu().numpy()
             labels = results_dino.get("text_labels", results_dino.get("labels", []))
 
+            # Strictly true sensitive adult nudity keywords (matching prompt: female nipple, bare buttocks, exposed genitalia, completely nude body)
             sensitive_keywords = [
-                "breast", "butt", "genitalia", "nude", "naked", "underwear", "anus", "sex",
-                "exposed chest", "bare chest", "exposed torso", "bare torso"
+                "nipple", "buttock", "genitalia", "nude"
             ]
             text_keywords = ["speech", "bubble", "text", "words", "written", "write", "dialogue", "letter", "font", "word", "talk"]
+
+            # Compute skin tone mask in YCrCb + HSV space to verify whether a detected region has bare skin
+            ycrcb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2YCrCb)
+            cr = ycrcb[:, :, 1]
+            cb = ycrcb[:, :, 2]
+            y_chan = ycrcb[:, :, 0]
+            skin_raw = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127) & (y_chan >= 40) & (y_chan <= 245)
+
+            hsv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
+            sat = hsv[:, :, 1]
+            val = hsv[:, :, 2]
+            # Real bare skin in comics is not pure white or pure dark clothing
+            skin_mask = skin_raw & (sat >= 15) & (val >= 35) & (val <= 250)
 
             censor_boxes = []
             keep_boxes = []
@@ -2343,12 +2700,40 @@ async def process_single_image(
                 if is_text:
                     keep_boxes.append(box.tolist())
                 elif is_sensitive and score >= effective_threshold:
+                    # Validate that the detected box actually contains bare skin
+                    bx1, by1 = max(0, int(box[0])), max(0, int(box[1]))
+                    bx2, by2 = min(w_img, int(box[2])), min(h_img, int(box[3]))
+                    bw, bh = bx2 - bx1, by2 - by1
+
+                    # Ignore invalid or tiny boxes
+                    if bw < 15 or bh < 15:
+                        continue
+                    # Ignore boxes that cover > 40% of the entire image (hallucination)
+                    if (bw * bh) > (w_img * h_img * 0.40):
+                        continue
+
+                    # Bare skin verification: genuine nudity must have at least 20% skin pixels in the box
+                    box_skin = skin_mask[by1:by2, bx1:bx2]
+                    skin_ratio = float(np.mean(box_skin))
+                    if skin_ratio < 0.20:
+                        # Clothed character / fabric / background, NOT bare skin!
+                        continue
+
                     censor_boxes.append(box.tolist())
 
             censor_mask = np.zeros((h_img, w_img), dtype=bool)
             keep_mask = np.zeros((h_img, w_img), dtype=bool)
 
             if len(censor_boxes) > 0:
+                # Build a bounding constraint mask to prevent SAM from expanding across the entire person
+                box_boundary_mask = np.zeros((h_img, w_img), dtype=bool)
+                for cbox in censor_boxes:
+                    cbx1, cby1 = max(0, int(cbox[0])), max(0, int(cbox[1]))
+                    cbx2, cby2 = min(w_img, int(cbox[2])), min(h_img, int(cbox[3]))
+                    pad_x = max(10, int((cbx2 - cbx1) * 0.10))
+                    pad_y = max(10, int((cby2 - cby1) * 0.10))
+                    box_boundary_mask[max(0, cby1 - pad_y):min(h_img, cby2 + pad_y), max(0, cbx1 - pad_x):min(w_img, cbx2 + pad_x)] = True
+
                 inputs_sam = sam_processor(image, input_boxes=[censor_boxes], return_tensors="pt").to(device)
                 with torch.no_grad():
                     outputs_sam = sam_model(**inputs_sam)
@@ -2359,6 +2744,11 @@ async def process_single_image(
                 )[0]
                 for i in range(len(censor_boxes)):
                     censor_mask = censor_mask | masks[i][0].numpy()
+
+                # Constrain the censor mask strictly inside the validated sensitive box boundaries
+                # and ensure it only masks skin/anatomy, never the whole character
+                skin_dilated = cv2.dilate(skin_mask.astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+                censor_mask = censor_mask & box_boundary_mask & skin_dilated
 
             if len(keep_boxes) > 0:
                 inputs_sam = sam_processor(image, input_boxes=[keep_boxes], return_tensors="pt").to(device)
@@ -2374,15 +2764,26 @@ async def process_single_image(
 
             combined_mask = censor_mask & (~keep_mask)
 
+            # Safety check: if mask covers more than 25% of the page, it is an over-segmentation false positive
+            if float(np.mean(combined_mask)) > 0.25:
+                combined_mask = np.zeros((h_img, w_img), dtype=bool)
+
             if combined_mask.any():
                 if pdf_img_path:
-                    # Do not blur or modify the main image (path)
-                    # Only black out (mask) in the PDF image (pdf_img_path)
                     img_mask = img_cv.copy()
-                    img_mask[combined_mask] = (0, 0, 0)
+                    if nsfw_mode == "blur":
+                        blurred_img = cv2.GaussianBlur(img_mask, (51, 51), 0)
+                        img_mask[combined_mask] = blurred_img[combined_mask]
+                    elif nsfw_mode == "mosaic":
+                        div = 20
+                        temp = cv2.resize(img_mask, (max(1, w_img // div), max(1, h_img // div)), interpolation=cv2.INTER_LINEAR)
+                        pixelated = cv2.resize(temp, (w_img, h_img), interpolation=cv2.INTER_NEAREST)
+                        img_mask[combined_mask] = pixelated[combined_mask]
+                    else:
+                        img_mask[combined_mask] = (0, 0, 0)
                     cv2.imwrite(pdf_img_path, img_mask)
 
-                    log_res = f"{file_name}: censored (mask in PDF only) ({len(censor_boxes)} regions)"
+                    log_res = f"{file_name}: censored in PDF ({len(censor_boxes)} regions)"
                 else:
                     if nsfw_mode == "blur":
                         blurred_img = cv2.GaussianBlur(img_cv, (51, 51), 0)
@@ -2434,18 +2835,7 @@ async def process_single_image(
                 await sse_logger.log(f"  [Safe Mode] -> {log_res_fb}", "error")
             return log_res_fb
 
-async def sanitize_episode_images(
-    ep_dir: str,
-    nsfw_threshold: float,
-    nsfw_mode: str,
-    from_page: int = None,
-    to_page: int = None,
-    sse_logger = None,
-    concurrency: int = 5,
-    pdf_dir: str = None,
-    selected_files=None,
-    strict: bool = False,
-) -> list:
+async def sanitize_episode_images(ep_dir: str, nsfw_threshold: float, nsfw_mode: str, from_page: int = None, to_page: int = None, sse_logger = None, concurrency: int = 5, pdf_dir: str = None) -> list:
     global dino_processor, dino_model, sam_processor, sam_model
 
     import os
@@ -2458,15 +2848,6 @@ async def sanitize_episode_images(
     image_files = sorted([f for f in os.listdir(ep_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
     if not image_files:
         return []
-
-    if selected_files is not None:
-        selected_set = set(selected_files)
-        missing = sorted(selected_set - set(image_files))
-        if missing:
-            raise ValueError(f"Không tìm thấy ảnh cần kiểm duyệt: {missing}")
-        image_files = [file_name for file_name in image_files if file_name in selected_set]
-        if not image_files:
-            raise ValueError("Danh sách ảnh cần kiểm duyệt đang rỗng.")
 
     if from_page is not None and to_page is not None:
         image_files = image_files[from_page - 1 : to_page]
@@ -2507,9 +2888,8 @@ async def sanitize_episode_images(
             sam_processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
             sam_model = SamModel.from_pretrained("facebook/sam-vit-base").to(device)
 
-        from moderation_utils import MODERATION_PROMPT
-        prompt = MODERATION_PROMPT
-        effective_threshold = max(0.1, nsfw_threshold)
+        prompt = "female nipple. bare buttocks. exposed genitalia. completely nude body"
+        effective_threshold = max(0.40, nsfw_threshold)
 
         # Run concurrent image processing tasks with the specified concurrency.
         # On CPU, force concurrency = 1 to prevent OpenMP thread contention and deadlocks.
@@ -2529,13 +2909,9 @@ async def sanitize_episode_images(
 
         results = await asyncio.gather(*tasks)
         sanitized_log = list(results)
-        if strict and any(": error" in result.casefold() for result in sanitized_log):
-            raise RuntimeError("Một hoặc nhiều ảnh kiểm duyệt bị lỗi.")
 
     except Exception as e:
         print(f"Lỗi chạy DINO+SAM filter: {str(e)}")
-        if strict:
-            raise
         # Ultimate fallback: keep original color files and log
         sanitized_log = []
         for file_name in image_files:
@@ -2546,16 +2922,21 @@ async def sanitize_episode_images(
 # Background Crawler Task
 async def run_crawler_task(
     url: str, from_ep: int, to_ep: int,
-    safe_mode: bool = False,
+    safe_mode: bool = True,
     nsfw_threshold: float = 0.4,
     nsfw_mode: str = "mask",
+    gemini_model: str = "default",
+    temperature: float = 0.7,
+    max_output_tokens: int = 2048,
     timeout: int = 160,
     retry_count: int = 5,
     concurrency: int = 5,
     image_quality: int = 80,
-    pdf_quality: int = 80,
-    language: str = "en",
-    voice_id: str = "clone_andrew",
+    pdf_quality: int = 20,
+    language: str = "vi",
+    voice_id: str = "elevenlabs_tnSpp4vdxKPjI9w0GnoV",
+    vlm_provider: str = "gemini",
+    ai33pro_api_key: str = None
 ):
     global crawler_running, stop_requested
     stop_requested = False
@@ -2565,7 +2946,10 @@ async def run_crawler_task(
 
     async with crawler_lock:
         crawler_running = True
-        voice_id = normalize_tts_voice_mode(voice_id)
+        # Resolve dynamic default voice_id based on language (default to elevenlabs_tnSpp4vdxKPjI9w0GnoV for both vi and en)
+        default_voice = "elevenlabs_tnSpp4vdxKPjI9w0GnoV"
+        if not voice_id or voice_id in ("elevenlabs_yj30vwTGJxSHezdAGsv9", "elevenlabs_XrExE9yKIg1WjnnlVkGX"):
+            voice_id = default_voice
 
         try:
             parsed = urllib.parse.urlparse(url)
@@ -2652,7 +3036,7 @@ async def run_crawler_task(
                         # Stitch standard version from ep_dir
                         success_stitch = stitch_images_vertically(ep_dir, stitched_path, image_quality)
                         if success_stitch:
-                            image_files = sorted([f for f in os.listdir(ep_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f not in ("chapter.pdf", "gemini_prompt.txt", "stitched.jpg", "stitched_mask.jpg")])
+                            image_files = sorted([f for f in os.listdir(ep_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f not in ("chapter.pdf", "gemini_prompt.txt", "chatgpt_prompt.txt", "stitched.jpg", "stitched_mask.jpg")])
                             prompt_content = generate_gemini_prompt(title_text, ep, len(image_files), language)
                             with open(prompt_path, "w", encoding="utf-8") as pf:
                                 pf.write(prompt_content)
@@ -2676,12 +3060,16 @@ async def run_crawler_task(
                 safe_mode=safe_mode,
                 nsfw_threshold=nsfw_threshold,
                 nsfw_mode=nsfw_mode,
+                gemini_model=gemini_model,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
                 timeout=timeout,
                 retry_count=retry_count,
                 concurrency=concurrency,
                 image_quality=image_quality,
                 pdf_quality=pdf_quality,
                 language=language,
+                vlm_provider=vlm_provider
             )
             success = True
                 
@@ -2694,24 +3082,28 @@ async def run_crawler_task(
             crawler_running = False
 
     if success:
-        await run_video_pipeline(download_folder_name, from_ep, to_ep, voice_id=voice_id)
+        await run_video_pipeline(download_folder_name, from_ep, to_ep, voice_id=voice_id, ai33pro_api_key=ai33pro_api_key)
 
 
 async def run_auto_summarization_flow(
     download_dir: str, title_text: str, from_ep: int, to_ep: int,
-    safe_mode: bool = False,
+    safe_mode: bool = True,
     nsfw_threshold: float = 0.4,
     nsfw_mode: str = "mask",
+    gemini_model: str = "default",
+    temperature: float = 0.7,
+    max_output_tokens: int = 2048,
     timeout: int = 160,
     retry_count: int = 5,
     concurrency: int = 5,
     image_quality: int = 80,
-    pdf_quality: int = 80,
-    language: str = "en",
+    pdf_quality: int = 20,
+    language: str = "vi",
+    vlm_provider: str = "gemini"
 ):
     global stop_requested
-    vlm_url = "https://gemini.google.com/app"
-    vlm_name = "Gemini"
+    vlm_url = "https://chatgpt.com/" if vlm_provider == "chatgpt" else "https://gemini.google.com/app"
+    vlm_name = "ChatGPT" if vlm_provider == "chatgpt" else "Gemini"
     await sse_logger.log(f"[VLM] Bắt đầu tự động tạo tóm tắt cho các tập đã tóm tắt/crawl bằng {vlm_name}...", "system", "active", "Đang tóm tắt...")
 
 
@@ -2750,6 +3142,7 @@ async def run_auto_summarization_flow(
             try:
                 file_input = page.locator("input[type='file']").first
                 if await file_input.count() > 0:
+                    await human_delay(0.3, 0.7)
                     await file_input.set_input_files(stitched_path)
                     await asyncio.sleep(3.0)
                     upload_success = True
@@ -2794,6 +3187,7 @@ async def run_auto_summarization_flow(
                     return true;
                 }
                 """
+                await human_delay(0.3, 0.7)
                 await page.evaluate(js_paste_img, {
                     "xpath": textbox_xpath,
                     "base64Data": img_base64,
@@ -2805,10 +3199,58 @@ async def run_auto_summarization_flow(
 
 
         await sse_logger.log(f"{step_desc}: Đang điền nội dung prompt...", "info")
-        await textbox.click(force=True)
-        await textbox.fill(prompt_content)
-        await sse_logger.log(f"{step_desc}: Đã điền prompt thành công. Đang chờ 5 giây trước khi gửi...", "success")
-        await asyncio.sleep(5)
+        await human_delay(0.3, 0.8)
+        
+        textbox = None
+        for tb_sel in [
+            "rich-textarea p",
+            "rich-textarea div[contenteditable='true']",
+            "div.ql-editor[contenteditable='true']",
+            "div[contenteditable='true']",
+            "[role='textbox']"
+        ]:
+            try:
+                loc = page.locator(tb_sel).first
+                if await loc.count() > 0 and await loc.is_visible():
+                    textbox = loc
+                    break
+            except Exception:
+                pass
+
+        pasted = False
+        if textbox:
+            try:
+                await textbox.click(force=True)
+                await asyncio.sleep(0.3)
+                await textbox.fill(prompt_content)
+                pasted = True
+            except Exception:
+                pass
+
+        if not pasted:
+            try:
+                p_el = page.locator("rich-textarea div.ql-editor p, div.ql-editor p, rich-textarea p").first
+                if await p_el.count() > 0:
+                    await p_el.click(force=True)
+                elif textbox:
+                    await textbox.click(force=True)
+                await page.keyboard.insert_text(prompt_content)
+                pasted = True
+            except Exception:
+                pass
+
+        try:
+            if textbox:
+                await textbox.press_sequentially(" ")
+                await textbox.press("Backspace")
+            else:
+                await page.keyboard.press("Space")
+                await page.keyboard.press("Backspace")
+        except Exception:
+            pass
+
+        await asyncio.sleep(1.0)
+        await sse_logger.log(f"{step_desc}: Đã điền prompt thành công.", "success")
     
 
         send_button = None
@@ -2829,9 +3271,11 @@ async def run_auto_summarization_flow(
 
 
         if send_button:
+            await human_delay(0.4, 0.9)
             await send_button.click(force=True)
             await sse_logger.log(f"{step_desc}: Đã click nút Gửi.", "success")
         else:
+            await human_delay(0.3, 0.75)
             await textbox.press("Enter")
             await sse_logger.log(f"{step_desc}: Đã gửi bằng Enter.", "success")
         
@@ -2839,150 +3283,459 @@ async def run_auto_summarization_flow(
         await sse_logger.log(f"{step_desc}: Đang theo dõi kết quả trả về...", "info")
         raw_json_text = None
         parsed_json = None
-        last_logged_len = 0
-        last_thinking_text = ""
-        unchanged_seconds = 0
-        last_checked_text = ""
-    
 
-        for _ in range(timeout):
+        def is_valid_recap_response(text: str) -> bool:
+            if not text or len(text.strip()) < 15:
+                return False
+            # 1. JSON check
+            extracted = extract_json_from_text(text)
+            if extracted:
+                try:
+                    parsed = json.loads(extracted)
+                    if isinstance(parsed, list) and len(parsed) > 0:
+                        if all(isinstance(item, dict) and "speech" in item and "images" in item for item in parsed):
+                            if count_recap_sentences(parsed) < 10:
+                                return False
+                            return True
+                except Exception:
+                    pass
+            # 2. # format check
+            try:
+                is_valid, _ = verify_gemini_response_format(text, is_intro=False, min_sentences=10)
+                if is_valid:
+                    return True
+            except Exception:
+                pass
+            # 3. Direct parse
+            try:
+                parsed = parse_gemini_recap_text(text)
+                if parsed and len(parsed) > 0:
+                    if count_recap_sentences(parsed) < 10:
+                        return False
+                    return True
+            except Exception:
+                pass
+            return False
+
+        js_check_completion = """() => {
+            const isVis = (el) => {
+                if (!el) return false;
+                try {
+                    const style = window.getComputedStyle(el);
+                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 || rect.height > 0 || el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0;
+                } catch (e) {
+                    return el.offsetParent !== null;
+                }
+            };
+
+            // 1. Is stop button visible?
+            const stopSelectors = [
+                "button[aria-label*='Stop' i]",
+                "button[aria-label*='Dừng' i]",
+                "button[aria-label*='Cancel' i]",
+                "button[aria-label*='Hủy' i]",
+                "button[data-testid*='stop' i]",
+                "[data-testid*='stop' i]",
+                "gem-icon-button[aria-label*='Stop' i]",
+                "gem-icon-button[aria-label*='Dừng' i]",
+                ".stop-button",
+                ".stop-icon",
+                "button.stop-generating-button"
+            ];
+            for (const sel of stopSelectors) {
+                const el = document.querySelector(sel);
+                if (el && isVis(el)) return false;
+            }
+
+            // 2. Are streaming / typing indicators active?
+            const streamSelectors = [
+                "[class*='streaming']",
+                "[class*='generating']",
+                "[class*='typing']",
+                ".blinking-cursor",
+                ".cursor",
+                "gem-streaming-indicator",
+                "sparkle-icon.animate-spin",
+                "[data-is-generating='true']",
+                "[data-is-streaming='true']",
+                "input-area-v2 [role='progressbar']",
+                "form [role='progressbar']"
+            ];
+            for (const sel of streamSelectors) {
+                const el = document.querySelector(sel);
+                if (el && isVis(el)) return false;
+            }
+
+            // 3. Is thinking spinner actively running?
+            const thinkEl = document.querySelector(".thinking-container, [data-testid='thinking-indicator'], thinking-bubble");
+            if (thinkEl && isVis(thinkEl)) {
+                const spinner = thinkEl.querySelector("mat-spinner, [role='progressbar'], svg.animate-spin");
+                if (spinner && isVis(spinner)) return false;
+            }
+
+            // 4. Check for error alerts
+            const errorSelectors = ["div.alert", "div[data-test-id='error-message']", ".error-message", "div[role='alert']"];
+            for (const sel of errorSelectors) {
+                const el = document.querySelector(sel);
+                if (el && isVis(el) && (el.textContent || "").trim().length > 0) return true;
+            }
+
+            // 5. Must have response content element
+            const modelResponses = document.querySelectorAll("model-response, [data-test-id='model-response'], .model-response, response-container");
+            let lastModel = null;
+            if (modelResponses.length > 0) {
+                lastModel = modelResponses[modelResponses.length - 1];
+            }
+
+            if (!lastModel) {
+                const contentEls = document.querySelectorAll(".response-content-markdown, message-content, div.markdown, div.prose");
+                for (let i = contentEls.length - 1; i >= 0; i--) {
+                    const el = contentEls[i];
+                    if (!el.closest("user-query, user-message, [data-test-id='user-query'], .user-query-container, .query-text")) {
+                        lastModel = el;
+                        break;
+                    }
+                }
+            }
+
+            if (!lastModel) return false;
+
+            const respText = (lastModel.innerText || lastModel.textContent || "").trim();
+            if (!respText || respText.length < 5) return false;
+
+            // 6. If response ends with '#' or contains '#' (recap/intro standard) and is not streaming, it is ready!
+            if (respText.includes("#") || respText.endsWith("```")) {
+                return true;
+            }
+
+            // 7. Action bar (Copy/Share/Modify/Redo) must have appeared
+            const actionSelectors = [
+                "message-actions",
+                ".message-actions",
+                "[data-testid='message-actions']",
+                "response-container .response-bottom-actions",
+                "button[aria-label*='Copy' i]",
+                "button[aria-label*='Sao chép' i]",
+                "button[aria-label*='Good response' i]",
+                "button[aria-label*='Phản hồi tốt' i]",
+                "button[aria-label*='Share' i]",
+                "button[aria-label*='Chia sẻ' i]",
+                "button[aria-label*='Modify' i]",
+                "button[aria-label*='Chỉnh sửa' i]",
+                "button[aria-label*='Redo' i]",
+                "button[aria-label*='Retry' i]",
+                "button[aria-label*='Thử lại' i]"
+            ];
+            for (const sel of actionSelectors) {
+                const els = document.querySelectorAll(sel);
+                if (els.length > 0) {
+                    const last = els[els.length - 1];
+                    if (last && (isVis(last) || last.querySelector("button, gem-icon-button, svg"))) return true;
+                }
+            }
+
+            if (respText.length >= 20) {
+                return true;
+            }
+
+            return false;
+        }"""
+
+        js_extract_response = """() => {
+            const getCleanText = (el) => {
+                if (!el) return "";
+                const clone = el.cloneNode(true);
+                clone.querySelectorAll("sources-carousel, citation-tag, source-chip, grounding-citation, grounding-tag, grounding-popover, .grounding-container, a.citation-chip, span.citation, [class*='citation'], [class*='grounding'], [class*='source-chip'], [data-test-id*='citation'], [data-test-id*='grounding'], message-actions, .message-actions, button, [role='button']").forEach(c => c.remove());
+                clone.querySelectorAll("br").forEach(br => br.replaceWith("\\n"));
+                
+                const blocks = clone.querySelectorAll("p, li, tr, h1, h2, h3, h4, h5, h6");
+                if (blocks.length > 0) {
+                    const lines = [];
+                    blocks.forEach(b => {
+                        const t = (b.innerText || b.textContent || "").trim();
+                        if (t) lines.push(t);
+                    });
+                    if (lines.length > 0) return lines.join("\\n");
+                }
+                return (clone.innerText || clone.textContent || "").trim();
+            };
+
+            const modelResponses = document.querySelectorAll("model-response, [data-test-id='model-response'], .model-response, response-container");
+            let targetEl = null;
+            if (modelResponses.length > 0) {
+                targetEl = modelResponses[modelResponses.length - 1];
+            }
+
+            if (!targetEl) {
+                const respSelectors = [
+                    ".response-content-markdown",
+                    "message-content",
+                    "structured-content-container",
+                    "div.markdown",
+                    "div.prose"
+                ];
+                for (const sel of respSelectors) {
+                    const els = document.querySelectorAll(sel);
+                    for (let i = els.length - 1; i >= 0; i--) {
+                        const el = els[i];
+                        if (!el.closest("user-query, user-message, [data-test-id='user-query'], .user-query-container, .query-text")) {
+                            targetEl = el;
+                            break;
+                        }
+                    }
+                    if (targetEl) break;
+                }
+            }
+
+            let text = "";
+            if (targetEl) {
+                try {
+                    const markdownEl = targetEl.querySelector(".response-content-markdown, message-content, div.markdown, div.prose");
+                    text = getCleanText(markdownEl || targetEl);
+                } catch (e) {
+                    text = (targetEl.innerText || targetEl.textContent || "").trim();
+                }
+            }
+
+            let detectedError = null;
+            const errorSelectors = ["div.alert", "div[data-test-id='error-message']", ".error-message", "div[role='alert']"];
+            for (const sel of errorSelectors) {
+                const el = document.querySelector(sel);
+                if (el && (el.offsetWidth > 0 || el.offsetHeight > 0 || el.offsetParent !== null)) {
+                    const errTxt = (el.textContent || "").trim();
+                    if (errTxt) {
+                        detectedError = errTxt;
+                        break;
+                    }
+                }
+            }
+
+            return { text: text, detected_error: detectedError };
+        }"""
+
+        in_page_retry_count = 0
+        max_in_page_retries = 3
+        text_content = ""
+
+        while in_page_retry_count <= max_in_page_retries:
             if stop_requested:
                 raise Exception("Tiến trình bị dừng bởi người dùng.")
-            await asyncio.sleep(1)
-            text_content = ""
-            for sel in response_selectors:
-                try:
-                    loc = page.locator(sel).last
-                    if await loc.count() > 0:
-                        txt = await loc.inner_text()
-                        if txt.strip():
-                            if "you are an elite" in txt.lower():
-                                continue
-                            text_content = txt
-                            break
-                except Exception:
-                    pass
-            
 
-            if "can't help with that image" in text_content.lower() or "safety" in text_content.lower() or "không thể giúp" in text_content.lower():
-                raise VisionSafetyException("Gemini Vision Safety filter triggered.")
+            await sse_logger.log(f"{step_desc}: Đang theo dõi trạng thái hoàn tất phản hồi trên web...", "info")
+            try:
+                await page.wait_for_function(js_check_completion, timeout=timeout * 1000)
+            except Exception as wait_err:
+                await sse_logger.log(f"{step_desc}: Trạng thái web chờ phản hồi đạt timeout ({timeout}s): {wait_err}", "warning")
+
+            res_data = await page.evaluate(js_extract_response)
+            text_content = res_data.get("text", "")
+            detected_error_txt = res_data.get("detected_error")
+
             if text_content:
-                if text_content == last_checked_text:
-                    unchanged_seconds += 1
-                else:
-                    unchanged_seconds = 0
-                    last_checked_text = text_content
-
-                if len(text_content) > last_logged_len:
-                    last_logged_len = len(text_content)
-                    # Write debug response
-                    try:
-                        with open(os.path.join(os.path.dirname(stitched_path), "raw_gemini_response.txt"), "w", encoding="utf-8") as rdf:
-                            rdf.write(text_content)
-                    except Exception:
-                        pass
-                
-
-            if not text_content:
                 try:
-                    thinking_indicator = page.locator("[data-testid='thinking-indicator'], .thinking-container button, .thinking-container").first
-                    if await thinking_indicator.count() > 0 and await thinking_indicator.is_visible():
-                        thinking_txt = await thinking_indicator.inner_text()
-                        thinking_txt = thinking_txt.strip().replace("\n", " ")
-                        if thinking_txt and thinking_txt != last_thinking_text:
-                            last_thinking_text = thinking_txt
-                            await sse_logger.log(f"{step_desc}: Gemini đang suy nghĩ ({thinking_txt})...", "info")
+                    with open(os.path.join(os.path.dirname(stitched_path), "raw_gemini_response.txt"), "w", encoding="utf-8") as rdf:
+                        rdf.write(clean_gemini_response(text_content))
                 except Exception:
                     pass
 
-            if text_content:
-                # Check thinking container state
-                has_thinking = False
-                is_still_thinking = False
-                has_finished_thinking = False
-                
-                thinking_container = page.locator(".thinking-container, [data-testid='thinking-indicator']").first
-                if await thinking_container.count() > 0 and await thinking_container.is_visible():
-                    has_thinking = True
-                    chevron_down = page.locator(".thinking-container svg.lucide-chevron-down, [data-testid='thinking-indicator'] svg.lucide-chevron-down").first
-                    if await chevron_down.count() > 0 and await chevron_down.is_visible():
-                        is_still_thinking = True
-                    
-                    panel_left_open = page.locator(".thinking-container svg.lucide-panel-left-open, [data-testid='thinking-indicator'] svg.lucide-panel-left-open").first
-                    if await panel_left_open.count() > 0 and await panel_left_open.is_visible():
-                        has_finished_thinking = True
-
-                # Check if still generating by looking for stop button/icon
-                is_generating = False
-                stop_button_selectors = [
-                    "button[aria-label='Stop generating']",
-                    "button[aria-label*='Stop']",
-                    "button[aria-label*='stop']",
-                    "button[aria-label*='Dừng']",
-                    "button[aria-label*='dừng']",
-                    "button[data-testid='stop-button']",
-                    "[data-testid='stop-button']",
-                    "[aria-label='Stop generating']",
-                    "[aria-label='Stop']",
-                    "[aria-label='stop']",
-                    "mat-icon:has-text('stop')",
-                    "mat-icon[fonticon='stop']",
-                    "gem-icon-button[aria-label*='Stop']",
-                    "gem-icon-button[aria-label*='stop']",
-                    "gem-icon-button[aria-label*='Dừng']",
-                    "gem-icon-button[aria-label*='dừng']"
-                ]
-                for stop_sel in stop_button_selectors:
-                    try:
-                        loc = page.locator(stop_sel).first
-                        if await loc.count() > 0 and await loc.is_visible():
-                            is_generating = True
-                            break
-                    except Exception:
-                        pass
-
-                cleaned_content = clean_gemini_response(text_content).strip() if text_content else ""
-                can_check_completion = True
-                if is_generating:
-                    can_check_completion = False
-
-                if has_thinking:
-                    if is_still_thinking or not has_finished_thinking:
-                        if not cleaned_content.endswith("#"):
-                            can_check_completion = False
-
-                # Safety backup check: if response has not changed for at least 8 seconds, we can treat it as done.
-                if not can_check_completion and unchanged_seconds >= 8:
-                    can_check_completion = True
-
-                if can_check_completion:
-                    if cleaned_content.endswith("#"):
-                        try:
-                            parsed_text = parse_gemini_recap_text(text_content)
-                            if parsed_text:
-                                parsed_json = parsed_text
-                                break
-                        except Exception:
-                            pass
-                        
+            if not detected_error_txt and is_valid_recap_response(text_content):
+                try:
+                    parsed_text = parse_gemini_recap_text(text_content)
+                    if parsed_text and count_recap_sentences(parsed_text) >= 10:
+                        parsed_json = parsed_text
+                        break
+                except Exception:
+                    pass
                 extracted = extract_json_from_text(text_content)
                 if extracted:
                     try:
-                        parsed_json = json.loads(extracted)
-                        raw_json_text = extracted
-                        break
+                        parsed = json.loads(extracted)
+                        if isinstance(parsed, list) and len(parsed) > 0:
+                            if count_recap_sentences(parsed) >= 10:
+                                parsed_json = parsed
+                                raw_json_text = extracted
+                                break
                     except Exception:
                         pass
+                if parsed_json:
+                    break
+
+            # Determine exact validation / cut-off issue if any
+            if not detected_error_txt:
+                is_v, fmt_err = verify_gemini_response_format(text_content, is_intro=False, min_sentences=10)
+                if not is_v:
+                    detected_error_txt = fmt_err
+                else:
+                    parsed_check = parse_gemini_recap_text(text_content)
+                    if parsed_check and count_recap_sentences(parsed_check) < 10:
+                        sc = count_recap_sentences(parsed_check)
+                        detected_error_txt = f"Kịch bản recap quá ngắn ({sc} câu < 10 câu)"
+                    else:
+                        detected_error_txt = "Phản hồi không đúng cấu trúc kịch bản recap hoặc bị ngắt quãng"
+
+            if in_page_retry_count < max_in_page_retries:
+                in_page_retry_count += 1
+                await sse_logger.log(
+                    f"{step_desc}: Phát hiện phản hồi lỗi/chưa hoàn tất ('{detected_error_txt[:60]}...'). Đang click icon Redo -> chọn 'Try again' trên web (Lần {in_page_retry_count}/{max_in_page_retries})...",
+                    "warning"
+                )
+
+                retry_btn = None
+                retry_selectors = [
+                    "button[aria-label*='Modify response']",
+                    "button[aria-label*='Modify']",
+                    "button[aria-label*='Chỉnh sửa phản hồi']",
+                    "button[aria-label*='Chỉnh sửa câu trả lời']",
+                    "button[aria-label*='Chỉnh sửa']",
+                    "button[aria-label*='Redo']",
+                    "button[aria-label*='Retry']",
+                    "button[aria-label*='retry']",
+                    "button[aria-label*='Thử lại']",
+                    "button[aria-label*='thử lại']",
+                    "button[aria-label*='Regenerate']",
+                    "button[aria-label*='regenerate']",
+                    "button[aria-label*='Tạo lại']",
+                    "button[aria-label*='tạo lại']",
+                    "button[aria-label*='Try again']",
+                    "button[aria-label*='try again']",
+                    "button[aria-label*='Update response']",
+                    "button[aria-label*='Cập nhật phản hồi']",
+                    "button[data-test-id='regenerate-button']",
+                    "button[data-testid='regenerate-button']",
+                    "button[data-testid='retry-button']",
+                    "button[mattooltip*='Modify']",
+                    "button[mattooltip*='Chỉnh sửa']",
+                    "button[mattooltip*='Redo']",
+                    "button[mattooltip*='Retry']",
+                    "button[mattooltip*='Thử lại']",
+                    "gem-icon-button[aria-label*='Modify']",
+                    "gem-icon-button[aria-label*='Chỉnh sửa']",
+                    "button:has(mat-icon:has-text('tune'))",
+                    "button:has(mat-icon:has-text('refresh'))",
+                    "button:has(mat-icon:has-text('replay'))",
+                    "button:has(mat-icon:has-text('redo'))",
+                    "button:has(mat-icon:has-text('autorenew'))",
+                    "button:has(mat-icon:has-text('sync'))",
+                    "button:has(mat-icon[fonticon='tune'])",
+                    "button:has(mat-icon[fonticon='refresh'])",
+                    "button:has(mat-icon[fonticon='replay'])",
+                    "button:has(mat-icon[fonticon='autorenew'])",
+                    "button:has(mat-icon[fonticon='redo'])",
+                    "button:has(svg.lucide-rotate-cw)",
+                    "button:has(svg.lucide-refresh-cw)",
+                    "button:has(svg[data-icon='refresh'])",
+                    "message-actions button:has(mat-icon:has-text('tune'))",
+                    "message-actions button:has(mat-icon:has-text('refresh'))",
+                    "message-actions button:has(mat-icon:has-text('replay'))",
+                    "message-actions button:has(mat-icon:has-text('redo'))",
+                    "response-container button[aria-label*='Modify']",
+                    "response-container button[aria-label*='Regenerate']",
+                    "response-container button[aria-label*='Retry']",
+                    "response-container button[aria-label*='Thử lại']",
+                    "button:has-text('Try again')",
+                    "button:has-text('Thử lại')",
+                    "button:has-text('Retry')"
+                ]
+                for r_sel in retry_selectors:
+                    try:
+                        r_loc = page.locator(r_sel).last
+                        if await r_loc.count() > 0 and await r_loc.is_visible():
+                            retry_btn = r_loc
+                            break
+                    except Exception:
+                        pass
+
+                if not retry_btn:
+                    try:
+                        for bar_sel in ["message-actions", ".message-actions", "response-container .response-bottom-actions", "[data-testid='message-actions']", "div.message-actions"]:
+                            bar = page.locator(bar_sel).last
+                            if await bar.count() > 0 and await bar.is_visible():
+                                btns = bar.locator("button, gem-icon-button")
+                                b_count = await btns.count()
+                                for b_i in range(b_count):
+                                    btn_cand = btns.nth(b_i)
+                                    btn_html = (await btn_cand.inner_html()).lower()
+                                    aria_l = (await btn_cand.get_attribute("aria-label") or "").lower()
+                                    tooltip = (await btn_cand.get_attribute("mattooltip") or "").lower()
+                                    if any(k in btn_html or k in aria_l or k in tooltip for k in ["modify", "chỉnh sửa", "tune", "refresh", "replay", "redo", "rotate", "arrow", "sync", "autorenew", "retry", "tạo lại", "thử lại"]):
+                                        retry_btn = btn_cand
+                                        break
+                                if not retry_btn and b_count >= 3:
+                                    retry_btn = btns.nth(2)
+                            if retry_btn:
+                                break
+                    except Exception:
+                        pass
+
+                if retry_btn:
+                    try:
+                        await human_delay(0.3, 0.8)
+                        await retry_btn.click()
+                        await asyncio.sleep(0.6)
+                        menu_selectors = [
+                            "[role='menuitem']:has-text('Try again')",
+                            "[role='menuitem']:has-text('Thử lại')",
+                            "[role='menuitem']:has-text('Thử làm lại')",
+                            "button[role='menuitem']:has-text('Try again')",
+                            "button[role='menuitem']:has-text('Thử lại')",
+                            ".mat-mdc-menu-item:has-text('Try again')",
+                            ".mat-mdc-menu-item:has-text('Thử lại')",
+                            "[role='menu'] button:has-text('Try again')",
+                            "[role='menu'] button:has-text('Thử lại')",
+                            "[role='menu'] [role='menuitem']:has-text('Try again')",
+                            "[role='menu'] [role='menuitem']:has-text('Thử lại')",
+                            ".cdk-overlay-pane [role='menuitem']:has-text('Try again')",
+                            ".cdk-overlay-pane [role='menuitem']:has-text('Thử lại')",
+                            ".cdk-overlay-pane button:has-text('Try again')",
+                            ".cdk-overlay-pane button:has-text('Thử lại')",
+                            "[role='menuitem']:has-text('Retry')",
+                            "[role='menuitem']:has-text('Regenerate')",
+                            "[role='menuitem']:has-text('Tạo lại')",
+                            "button:has-text('Try again')",
+                            "button:has-text('Thử lại')"
+                        ]
+                        menu_clicked = False
+                        for _ in range(6):
+                            for m_sel in menu_selectors:
+                                try:
+                                    m_loc = page.locator(m_sel).first
+                                    if await m_loc.count() > 0 and await m_loc.is_visible():
+                                        await human_delay(0.25, 0.6)
+                                        await m_loc.click()
+                                        menu_clicked = True
+                                        break
+                                except Exception:
+                                    pass
+                            if menu_clicked:
+                                break
+                            await asyncio.sleep(0.5)
+
+                        await sse_logger.log(f"{step_desc}: Đã click icon Redo -> chọn 'Try again' thành công. Đang chờ Gemini tạo lại...", "info")
+                        await asyncio.sleep(2.0)
+                        continue
+                    except Exception as click_err:
+                        await sse_logger.log(f"{step_desc}: Không thể click nút Redo/Try again trên web ({click_err}). Chuyển sang thử lại cấp tool.", "warning")
+                        break
+                else:
+                    await sse_logger.log(f"{step_desc}: Không tìm thấy icon Redo trên web. Chuyển sang thử lại cấp tool.", "warning")
+                    break
+            else:
+                break
+
         
 
         if not parsed_json and text_content:
             try:
                 parsed_json = parse_gemini_recap_text(text_content)
+                if parsed_json and count_recap_sentences(parsed_json) < 10:
+                    parsed_json = None
             except Exception:
                 pass
 
         if not parsed_json:
-            raise Exception("Không nhận được kịch bản recap hợp lệ từ Gemini.")
+            raise Exception("Không nhận được kịch bản recap hợp lệ từ Grok.")
 
         return parsed_json
 
@@ -3232,29 +3985,27 @@ async def run_auto_summarization_flow(
 # Start Crawling Route
 @app.post("/api/crawl")
 async def crawl(payload: CrawlRequest):
-    if payload.to_episode < payload.from_episode:
-        raise HTTPException(status_code=422, detail="to_episode must be greater than or equal to from_episode")
-    url = payload.url.strip()
+    raw_url = (payload.url or "").strip()
+    if not raw_url or not (raw_url.startswith("http://") or raw_url.startswith("https://")):
+        raise HTTPException(
+            status_code=400,
+            detail="URL truyện không hợp lệ hoặc đang để trống. Vui lòng nhập link truyện hợp lệ (bắt đầu bằng http:// hoặc https://)."
+        )
+
+    url = raw_url
     parsed_url = urllib.parse.urlparse(url)
     if "asura" in parsed_url.netloc.lower() and parsed_url.netloc.lower() != "asurascans.com":
         url = urllib.parse.urlunparse(parsed_url._replace(netloc="asurascans.com"))
         payload.url = url
         await sse_logger.log(f"Chuẩn hóa tên miền Asura Scans thành: {url}", "info")
-    elif "comic.naver.com" in parsed_url.netloc.lower():
-        query = urllib.parse.parse_qs(parsed_url.query)
-        title_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
-        if "/webtoon/detail" in parsed_url.path and title_id:
-            url = f"https://comic.naver.com/webtoon/list?titleId={title_id}"
-            payload.url = url
-            await sse_logger.log(f"Chuẩn hóa URL Naver Webtoon thành trang danh sách: {url}", "info")
+    elif "manhuaplus.com" in parsed_url.netloc.lower() and "/chapter-" in url:
+        url = re.sub(r"/chapter-[^/]+/?$", "/", url)
+        payload.url = url
+        await sse_logger.log(f"Chuẩn hóa URL ManhuaPlus thành trang chính: {url}", "info")
     
     parsed = urllib.parse.urlparse(payload.url)
     comic_title = "Comic"
-    if "comic.naver.com" in parsed.netloc.lower():
-        query = urllib.parse.parse_qs(parsed.query)
-        t_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
-        comic_title = f"Naver_{t_id}" if t_id else "Naver_Webtoon"
-    elif parsed.path:
+    if parsed.path:
         parts = [p for p in parsed.path.strip("/").split("/") if p]
         if parts:
             slug = parts[-1]
@@ -3266,76 +4017,44 @@ async def crawl(payload: CrawlRequest):
                 slug = parts[-2]
             comic_title = slug.replace("-", " ").title()
 
-    market_id = payload.market_id
-    if not market_id and "comic.naver.com" in parsed.netloc.lower():
-        market_id = "korea_apocalypse"
-        await sse_logger.log("Tự động kích hoạt Market Profile Hàn Quốc: korea_apocalypse cho Naver Webtoon", "info")
-
-    lang = payload.language
-    v_id = normalize_tts_voice_mode(payload.voice_id)
-    if market_id == "korea_apocalypse":
-        if lang == "en":
-            lang = "ko"
-        from markets.korea_apocalypse.tts import DEFAULT_KR_VOICE_ID
-        if not payload.voice_id or payload.voice_id in ("clone_andrew", "ai33pro", "auto", "default"):
-            v_id = DEFAULT_KR_VOICE_ID
-        else:
-            v_id = normalize_tts_voice_mode(payload.voice_id)
-    elif lang in ("en", "english"):
-        import config as app_cfg
-        default_en = getattr(app_cfg, "DEFAULT_EN_VOICE_ID", "clone_andrew")
-        if not payload.voice_id or payload.voice_id in ("auto", "default", "ai33pro"):
-            v_id = default_en
-        else:
-            v_id = normalize_tts_voice_mode(payload.voice_id)
-    elif lang in ("vi", "vietnamese"):
-        import config as app_cfg
-        default_vi = getattr(app_cfg, "DEFAULT_VI_VOICE_ID", "clone")
-        if not payload.voice_id or payload.voice_id in ("clone_andrew", "ai33pro", "auto", "default"):
-            v_id = default_vi
-        else:
-            v_id = normalize_tts_voice_mode(payload.voice_id)
-    else:
-        v_id = normalize_tts_voice_mode(payload.voice_id)
-
-    resolved_ref_audio = _validated_asset_reference(payload.ref_audio_path)
-    if not resolved_ref_audio and v_id in ("clone", "clone_andrew", "clone_jessa", "auto", "omnivoice", "default"):
-        import config as app_cfg
-        if v_id in ("clone_andrew", "andrew") or (lang in ("en", "english") and v_id in ("clone", "auto", "default")):
-            default_ref = getattr(app_cfg, "DEFAULT_EN_REF_AUDIO", getattr(app_cfg, "DEFAULT_REF_AUDIO_PATH", None))
-        elif lang in ("vi", "vietnamese"):
-            default_ref = getattr(app_cfg, "DEFAULT_VI_REF_AUDIO", getattr(app_cfg, "DEFAULT_REF_AUDIO_PATH", None))
-        else:
-            default_ref = getattr(app_cfg, "DEFAULT_EN_REF_AUDIO", getattr(app_cfg, "DEFAULT_REF_AUDIO_PATH", None))
-        if default_ref:
-            try:
-                resolved_ref_audio = _validated_asset_reference(default_ref)
-            except Exception:
-                resolved_ref_audio = default_ref
-
+    v_id = payload.voice_id
+    default_voice = "auto"
+    if not v_id or v_id in ("elevenlabs_yj30vwTGJxSHezdAGsv9", "elevenlabs_XrExE9yKIg1WjnnlVkGX"):
+        v_id = default_voice
+        
     config = {
         "safe_mode": payload.safe_mode,
         "nsfw_threshold": payload.nsfw_threshold,
         "nsfw_mode": payload.nsfw_mode,
+        "gemini_model": payload.gemini_model,
+        "temperature": payload.temperature,
+        "max_output_tokens": payload.max_output_tokens,
         "timeout": payload.timeout,
         "retry_count": payload.retry_count,
         "concurrency": payload.concurrency,
         "image_quality": payload.image_quality,
         "pdf_quality": payload.pdf_quality,
-        "language": lang,
+        "max_pdf_pages": getattr(payload, "max_pdf_pages", 20),
+        "language": payload.language,
         "vlm_provider": payload.vlm_provider,
         "voice_id": v_id,
-        "ref_audio_path": resolved_ref_audio,
-        "logo_path": _validated_asset_reference(payload.logo_path),
-        "overlay_path": _validated_asset_reference(payload.overlay_path),
-        "burn_subtitles": payload.burn_subtitles,
+        "ref_audio_path": payload.ref_audio_path,
+        "ai33pro_api_key": payload.ai33pro_api_key,
+        "logo_path": payload.logo_path,
+        "overlay_path": payload.overlay_path,
         "remove_text": payload.remove_text,
         "remove_text_conf": payload.remove_text_conf,
         "remove_text_radius": payload.remove_text_radius,
+        "vlm_email": payload.vlm_email,
+        "vlm_password": payload.vlm_password,
         "comix_group_id": payload.comix_group_id,
-        "market_id": market_id,
-        "enable_flash_forward_intro": payload.enable_flash_forward_intro,
-        "flash_forward_custom_hook": payload.flash_forward_custom_hook,
+        "film_grain": payload.film_grain,
+        "grain_strength": payload.grain_strength,
+        "flip_horizontal": payload.flip_horizontal,
+        "headless": payload.headless if payload.headless is not None else load_config().get("headless", False),
+        "video_mark_path": payload.video_mark_path,
+        "video_mark_alpha": getattr(payload, "video_mark_alpha", 0.01),
+        "enable_video_mark": getattr(payload, "enable_video_mark", True)
     }
 
     task_id = await workflow_manager.queue_task(
@@ -3352,7 +4071,60 @@ async def crawl(payload: CrawlRequest):
 @app.get("/api/workflows")
 async def get_workflows():
     tasks = workflow_manager.repository.load_all()
-    return [t.to_public_dict(include_logs=False) for t in tasks]
+    results = []
+    for t in tasks:
+        d = t.to_dict(include_logs=False)
+        artifacts = d.get("artifacts") or {}
+        dl_dir = artifacts.get("download_dir")
+        folder = artifacts.get("download_folder_name") or (os.path.basename(dl_dir) if dl_dir else None)
+        if folder and folder.lower() != "none":
+            artifacts["download_folder_name"] = folder
+            fv = artifacts.get("final_videos")
+            if isinstance(fv, dict):
+                for k, v in list(fv.items()):
+                    if v and "/downloads/None/" in v:
+                        fv[k] = v.replace("/downloads/None/", f"/downloads/{folder}/")
+            fvu = artifacts.get("final_video_url")
+            if fvu and "/downloads/None/" in fvu:
+                artifacts["final_video_url"] = fvu.replace("/downloads/None/", f"/downloads/{folder}/")
+            fsu = artifacts.get("final_subtitle_url")
+            if fsu and "/downloads/None/" in fsu:
+                artifacts["final_subtitle_url"] = fsu.replace("/downloads/None/", f"/downloads/{folder}/")
+            if not artifacts.get("final_subtitle_url"):
+                out_dir = os.path.join("downloads", folder, "output")
+                if os.path.isdir(out_dir):
+                    f_srt = os.path.join(out_dir, f"{folder}.srt")
+                    if os.path.isfile(f_srt):
+                        artifacts["final_subtitle_url"] = f"/downloads/{folder}/output/{folder}.srt"
+                    else:
+                        for sf in os.listdir(out_dir):
+                            if sf.endswith(".srt"):
+                                artifacts["final_subtitle_url"] = f"/downloads/{folder}/output/{sf}"
+                                break
+            fs = artifacts.get("final_subtitles")
+            if not isinstance(fs, dict):
+                fs = {}
+            if isinstance(fv, dict):
+                for ep_k in fv.keys():
+                    if ep_k not in fs or (fs.get(ep_k) and "/downloads/None/" in fs[ep_k]):
+                        fs[ep_k] = f"/downloads/{folder}/episode_{ep_k}/transcript.srt"
+            artifacts["final_subtitles"] = fs
+
+            mv = artifacts.get("merged_videos")
+            if isinstance(mv, list):
+                for item in mv:
+                    if isinstance(item, dict):
+                        vu = item.get("video_url")
+                        if vu and "/downloads/None/" in vu:
+                            item["video_url"] = vu.replace("/downloads/None/", f"/downloads/{folder}/")
+                        su = item.get("subtitle_url")
+                        if su and "/downloads/None/" in su:
+                            item["subtitle_url"] = su.replace("/downloads/None/", f"/downloads/{folder}/")
+            artifacts["merged_videos"] = mv or []
+
+            d["artifacts"] = artifacts
+        results.append(d)
+    return results
 
 
 # Cancel active workflow task
@@ -3397,11 +4169,73 @@ async def retry_workflow(task_id: str):
     return {"status": "success", "message": "Đã xếp lại lịch chạy tiếp tục cho tác vụ."}
 
 
+class MergeRangeItem(BaseModel):
+    from_ep: int
+    to_ep: int
+    custom_name: Optional[str] = ""
+
+class MergeEpisodesRequest(BaseModel):
+    ranges: List[MergeRangeItem]
+
+
+# Query available rendered episodes & previously merged videos for a task
+@app.get("/api/workflows/{task_id}/merge-info")
+async def get_workflow_merge_info(task_id: str):
+    from workflow_merger import get_task_available_episodes
+    task = workflow_manager.repository.load(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Không tìm thấy nhiệm vụ.")
+    
+    info = get_task_available_episodes(task)
+    return info
+
+
+# Execute splitting/merging of rendered episodes without re-rendering
+@app.post("/api/workflows/{task_id}/merge-episodes")
+async def merge_workflow_episodes(task_id: str, payload: MergeEpisodesRequest):
+    from workflow_merger import merge_episode_ranges_for_task
+    task = workflow_manager.repository.load(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Không tìm thấy nhiệm vụ.")
+
+    if not payload.ranges:
+        raise HTTPException(status_code=400, detail="Vui lòng cung cấp ít nhất một khoảng tập để gộp.")
+
+    ranges_data = [r.model_dump() if hasattr(r, 'model_dump') else r.dict() for r in payload.ranges]
+    res = await merge_episode_ranges_for_task(task, ranges_data)
+    
+    # Persist and broadcast task updates
+    await workflow_manager.save_and_broadcast("WorkflowUpdated", task)
+
+    if res.get("status") == "error" and not res.get("merged_videos"):
+        error_details = "; ".join(res.get("errors", []))
+        raise HTTPException(status_code=400, detail=f"Không thể gộp video: {error_details}")
+
+    return res
+
+
+# Delete a previously merged video file
+@app.delete("/api/workflows/{task_id}/merged-videos/{file_name}")
+async def delete_merged_video(task_id: str, file_name: str):
+    from workflow_merger import delete_merged_video_file
+    task = workflow_manager.repository.load(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Không tìm thấy nhiệm vụ.")
+
+    success = delete_merged_video_file(task, file_name)
+    if success:
+        await workflow_manager.save_and_broadcast("WorkflowUpdated", task)
+        return {"status": "success", "message": f"Đã xóa video gộp '{file_name}' thành công."}
+    else:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy video gộp '{file_name}'.")
+
+
+
 
 
 def get_unique_sorted_images(ep_dir: str) -> list:
     files = sorted([f for f in os.listdir(ep_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
-    files = [f for f in files if f not in ("chapter.pdf", "gemini_prompt.txt", "stitched.jpg")]
+    files = [f for f in files if f not in ("chapter.pdf", "chatgpt_prompt.txt", "gemini_prompt.txt", "stitched.jpg")]
     if not files:
         return []
     
@@ -3505,744 +4339,239 @@ def stitch_images_vertically(ep_dir: str, output_path: str, image_quality: int =
             except Exception:
                 pass
 
-import json
-import os
+
+LANGUAGE_MAP = {
+    "vi": "Vietnamese",
+    "en": "English",
+    "ko": "Korean",
+    "zh": "Chinese",
+    "ja": "Japanese",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "ru": "Russian",
+    "th": "Thai",
+    "id": "Indonesian",
+}
+
+
+LANGUAGE_MAP = {
+    "vi": "Vietnamese",
+    "en": "English",
+    "ko": "Korean",
+    "zh": "Chinese",
+    "ja": "Japanese",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "ru": "Russian",
+    "th": "Thai",
+    "id": "Indonesian",
+}
 
 
 def generate_gemini_prompt(
-    comic_title: str,
-    ep: int,
-    total_pages: int,
-    target_language: str = "en",
-    glossary: str = None,
-    market_id: str = None,
-    point_score_threshold: int = 65,
-    previous_context: dict = None,
-) -> str:
-    comic_title = re.sub(r'[\r\n\t"\\]', ' ', str(comic_title or "")).strip()[:150]
-    if market_id:
-        from markets import get_market
-        market = get_market(market_id)
-        if market:
-            return market.get_gemini_prompt(comic_title, ep, total_pages, glossary, previous_context=previous_context)
-
-    language_map = {
-        "vi": "Vietnamese",
-        "vietnamese": "Vietnamese",
-        "en": "English",
-        "english": "English",
-        "ja": "Japanese",
-        "japanese": "Japanese",
-        "ko": "Korean",
-        "korean": "Korean",
-        "zh": "Chinese",
-        "chinese": "Chinese",
-        "th": "Thai",
-        "thai": "Thai",
-        "id": "Indonesian",
-        "indonesian": "Indonesian",
-        "es": "Spanish",
-        "spanish": "Spanish",
-    }
-
-    lang_key = target_language.strip().lower()
-    lang_name = language_map.get(lang_key, target_language.title())
-
-    # ---------------------------------------------------------
-    # Glossary
-    # ---------------------------------------------------------
-    if not glossary:
-        try:
-            glossary_path = os.path.join(os.getcwd(), "glossary.json")
-
-            with open(
-                glossary_path,
-                "r",
-                encoding="utf-8",
-            ) as f:
-                data = json.load(f)
-
-            if isinstance(data, dict):
-                glossary = ", ".join(
-                    f'"{k}" -> "{v}"'
-                    for k, v in data.items()
-                )
-            else:
-                glossary = str(data)
-
-        except Exception:
-            glossary = "No glossary provided."
-
-    # ---------------------------------------------------------
-    # Episode 1 hook or Continuation
-    # ---------------------------------------------------------
-    if ep == 1:
-        intro_rule = f"""
-EPISODE 1 HIGH-RETENTION HOOK (0–5s GOLDEN RULE):
-
-The very first output line MUST be an intense, high-retention opening hook that instantly grips the viewer's curiosity and prevents drop-off in the first 5 seconds.
-
-- PROTAGONIST NAME IDENTIFICATION & ANCHORING (CRITICAL):
-  * Identify the protagonist's actual name from the comic pages (e.g. dialogue, character status window, subtitles, or title, such as 'Paran', 'Jinwoo', etc.).
-  * The opening hook (Segment 1 or 2, 0-15s) MUST explicitly introduce the protagonist by their actual name so the audience immediately knows who the central character is.
-  * NEVER leave the audience guessing who the protagonist is.
-
-Hook Formula:
-[Shocking Paradox / Dire Crisis] + [Protagonist Name] + [Mysterious Twist / Hidden Power / High Stakes Teaser]
-
-Examples of Top US Recap Hooks:
-- "Branded the weakest hunter on Earth and left for dead in a double dungeon, Jinwoo is about to wake up with a power that defies the gods."
-- "Betrayed by the very guild he built from scratch, Arthur was executed in silence—only to open his eyes ten years in the past."
-- "Everyone called Paran's survival bunker completely insane, until the apocalypse arrived and made him the sole ruler of the wasteland."
-
-Requirements:
-- Write in punchy, natural {lang_name} (< 18 words, 2.5s–4.0s spoken).
-- Maximum curiosity gap: make it impossible for the viewer to click away.
-- Zero throat-clearing (NEVER start with "Welcome", "Today we", or generic introductions).
-- Assign this hook to the most visually striking opening page showing the protagonist or the inciting incident.
-- No comedy or sarcasm in this opening line—keep it tense, cinematic, and high-stakes.
-"""
-
-    elif previous_context:
-        prev_cliffhanger = previous_context.get("closing_cliffhanger", "")
-        prev_summary = previous_context.get("summary", "")
-        macro_ctx = previous_context.get("macro_context", "")
-        protagonist_name = previous_context.get("protagonist_name", "")
-        protagonist_gender = previous_context.get("protagonist_gender", "auto")
-
-        context_blocks = []
-        if protagonist_name:
-            context_blocks.append(f'- Protagonist Name Anchor: "{protagonist_name}" (Giữ tên nhân vật chính này xuyên suốt các tập / Maintain this protagonist name consistently!)')
-        if protagonist_gender == "female":
-            context_blocks.append('- Protagonist Gender: FEMALE (Bắt buộc dùng bộ đại từ Nữ: "she/her", "our girl", "cô/nàng/cô ấy". CẤM gọi là anh chàng/our boy!)')
-        elif protagonist_gender == "male":
-            context_blocks.append('- Protagonist Gender: MALE (Dùng bộ đại từ Nam: "he/him", "our boy", "cậu/anh", "anh chàng nhà ta".)')
-        if prev_cliffhanger:
-            context_blocks.append(f'- Previous Chapter Cliffhanger / Final Scene: "{prev_cliffhanger}"')
-        if prev_summary:
-            context_blocks.append(f'- Recent Events Leading To This Chapter: "{prev_summary}"')
-        if macro_ctx:
-            context_blocks.append(f'- Overall Story Arc Context: "{macro_ctx}"')
-
-        formatted_context = "\n".join(context_blocks)
-
-        intro_rule = f"""
-EPISODE CONTINUATION & BINGE-WATCHING NARRATIVE CONTINUITY:
-
-This is not Episode 1. Start directly in media res with the immediate action or cliffhanger resolution.
-Do NOT include any greetings, episode announcements, recaps of past episodes, or generic welcoming statements.
-
-PREVIOUS CHAPTER CONTEXT (ROLLING STORY MEMORY):
-{formatted_context}
-
-BINGE TRANSITION RULE FOR LINE 1:
-- Your very first narration line of this episode MUST directly address, resolve, or seamlessly react to the previous chapter's ending cliffhanger.
-- Maintain uninterrupted narrative velocity so that when all episodes are watched together in one long video, the audience experiences one smooth, cohesive movie without disconnect or repetition.
-"""
-
-    else:
-        intro_rule = """
-EPISODE CONTINUATION:
-
-This is not Episode 1. Start directly in media res with the immediate action or cliffhanger resolution.
-Do NOT include any greetings, episode announcements, recaps of past episodes, or generic welcoming statements.
-"""
-
-    # ---------------------------------------------------------
-    # Language-specific rules
-    # ---------------------------------------------------------
-    if lang_key in {"vi", "vietnamese"}:
-        language_rules = """
-LANGUAGE & VIETNAMESE CONVERSATIONAL STORYTELLING RULES:
-- Viết TOÀN BỘ bằng tiếng Việt văn nói tự nhiên (giọng kể chuyện như người thật đang nói trực tiếp với bạn bè).
-- Phong cách "Sarcastic Bro-Commentary": 80% kịch tính sinh tồn + 20% châm biếm sâu cay, hóm hỉnh.
-
-5 QUY TẮC VÀNG CHO GIỌNG KỂ TIẾNG VIỆT:
-
-1. CÓ GÓC NHÌN, CÓ Ý KIẾN (Narrator Có Personality):
-   Mỗi câu phải chứa PHẢN ỨNG, NHẬN XÉT hoặc ĐÁNH GIÁ. Không bao giờ chỉ mô tả sự kiện khô khan.
-   Từ nối văn nói tự nhiên: 'Hóa ra', 'Và đoán xem', 'Nhìn xem', 'Thế nhưng', 'Đúng lúc này', 'Mà khoan đã'.
-   Dùng động từ mạnh: 'tiêu diệt', 'hạ gục', 'xử đẹp', 'quét sạch', 'cho đo ván', 'tiễn lên đường'.
-   CẤM cấu trúc bị động rườm rà: 'đã được nhìn thấy đang...', 'bị làm cho bất ngờ'. Thay bằng câu chủ động.
-
-2. BIẾN TẤU NHỊP CÂU (Rhythm Variation):
-   Xen kẽ nhịp câu tạo sức hút:
-   - Cứ 2-3 câu dài (15-25 từ) → XÉN 1 câu siêu ngắn (3-7 từ).
-   - Câu siêu ngắn = phản ứng, kết luận, hoặc twist: 'Xong.', 'Không có cửa.', 'Sai lầm chết người.'
-   - CẤM 3+ câu liên tiếp bắt đầu bằng cùng một cấu trúc ngữ pháp.
-
-3. ĐỐI LẬP TƯƠNG PHẢN (Contrast Juxtaposition — Dopamine Trigger #1):
-   Với mọi cảnh hầm trú ẩn/tích trữ/sinh tồn, BẮT BUỘC dùng cấu trúc:
-   "Bên ngoài, [cảnh khốn khổ/hỗn loạn]. Bên trong? [MC tận hưởng tiện nghi/an toàn]."
-
-4. MÔ TẢ CỤ THỂ, KHÔNG GIẢI THÍCH (Show Don't Tell):
-   CẤM dùng: 'cho thấy', 'chứng tỏ rằng', 'thể hiện sự'.
-   Thay bằng: mô tả CHI TIẾT CỤ THỂ (vết sẹo, ánh mắt, hành vi, vật thể) để khán giả TỰ CẢM NHẬN.
-
-5. GIỮ CHÂN KHÁN GIẢ (Audience Pulse Check):
-   Cứ mỗi 4-6 segment, BẮT BUỘC chèn 1 trong:
-   (a) Câu hỏi tu từ: "Đoán xem?" / "Bạn nghĩ sao?"
-   (b) Xưng hô trực tiếp: "Và thay vì X, anh làm gì?"
-   (c) Hook dự báo: "Nhưng cái điên rồ nhất còn ở phía sau."
-   Tối thiểu 2 lần / tập, tối đa 1 lần / 45 giây.
-
-PHONG CÁCH THAM CHIẾU — TRƯỚC VÀ SAU (HỌC THEO PHONG CÁCH "SAU"):
-
-❌ TRƯỚC (nhạt, vô hồn):
-"Cả nền văn minh nhân loại giờ chỉ còn là một đống đổ nát hoang tàn, chìm trong biển lửa và khói bụi nghẹt thở."
-✅ SAU (có personality, có rhythm):
-"Nhìn đi. Toàn bộ nền văn minh mà nhân loại mất hàng ngàn năm gây dựng—tan tành trong chưa đầy sáu phút."
-
-❌ TRƯỚC (tell, không show):
-"Khuôn mặt lạnh tanh nhuốm đầy bụi bặm cho thấy những khắc nghiệt tột cùng mà anh từng trải qua."
-✅ SAU (show, chi tiết cụ thể):
-"Bụi bặm phủ kín, đôi mắt trũng sâu không còn biết chớp—khuôn mặt của một người đã chứng kiến quá nhiều cái chết."
-
-❌ TRƯỚC (thiếu contrast):
-"Căn hầm trú ẩn ấm cúng và đầy đủ tiện nghi này chính là thành quả từ sự chuẩn bị chu đáo trước thảm họa."
-✅ SAU (contrast juxtaposition):
-"Bên ngoài, cả thành phố đang giành giật từng hạt gạo cuối cùng. Bên trong? Anh đang ngồi rung đùi lướt mạng Wi-Fi tốc độ cao, với tủ lạnh chất đầy thực phẩm đủ ăn ba năm."
-
-❌ TRƯỚC (monotone — 3 câu cùng cấu trúc):
-"Trở về thực tại, anh chăm chú chuẩn bị từng công đoạn để đối mặt với cuộc sống sinh tồn cô độc."
-"Đôi mắt sắc lẹm kiên định hướng về phía trước, quyết tâm giành giật sự sống qua từng ngày."
-"Từng bước sinh hoạt diễn ra trật tự bên trong một nơi trú ẩn kín kẽ tách biệt hẳn với hiểm nguy bên ngoài."
-✅ SAU (rhythm variation: Dài→NGẮN→Dài):
-"Quay lại thực tại. Không đồng đội. Không kế hoạch B."
-"Nhưng đôi mắt kia chẳng hề run rẩy—nhìn thẳng vào màn đêm như đang thách thức nó."
-"Từng bữa ăn, từng giấc ngủ, từng nhịp thở—tất cả được tính toán đến mili-giây bên trong căn hầm cách ly hoàn toàn."
-
-❌ TRƯỚC (no audience engagement):
-"Mở diễn đàn mạng lên khoe chiếc hầm kiên cố, anh lập tức bị đám cư dân mạng buông lời mỉa mai."
-✅ SAU (audience pulse check):
-"Và thay vì im lặng tận hưởng, anh làm gì? Lên diễn đàn khoe hầm. Đương nhiên là bị đám anh hùng bàn phím xúm lại chửi cho tơi bời."
-
-6. KHỚP ĐÚNG CHỦ THỂ HÌNH ẢNH (Hero Subject Alignment & Weighted Multi-Panel):
-   - Khi lời dẫn miêu tả quái vật, vũ khí, chiêu thức, hoặc bảng hệ thống, BẮT BUỘC chọn đúng trang đặc tả cận cảnh rõ nét của chủ thể đó.
-   - Tuyệt đối KHÔNG chọn ảnh phụ (như lưng hay biểu cảm mờ nhạt của nhân vật) khi lời đọc đang mô tả quái vật lao tới.
-   - Khi ghép 2 trang (Đòn đánh -> Phản ứng): BẮT BUỘC gán trọng số phần trăm [Trang_chính:70%, Trang_phụ:30%] (ví dụ [39:75%, 40:25%]), KHÔNG chia đều 50/50 làm loãng cảnh hành động chính.
-
-ĐỊNH DANH NHÂN VẬT CHÍNH (CONTEXTUAL PROTAGONIST ANCHORING):
-- CHỈ gọi tên riêng ở 4 vị trí: Hook mở đầu, Chuyển cảnh/thời gian, Phân biệt đông người, Flex cao trào.
-- 80% thời lượng còn lại: Dùng CHỦ NGỮ ẨN hoặc đại từ tự nhiên ('anh', 'cậu', 'hắn' / 'cô', 'nàng').
-- 'anh chàng nhà ta', 'thanh niên nhà ta' tối đa 1-2 lần / toàn bộ tập.
-
-BỘ LỌC CHỐNG VĂN MẪU AI:
-- CẤM: 'khiến anh chàng nhà ta chẳng còn lý do gì để...'
-- CẤM: 'không hề vội vàng liều lĩnh mà cẩn thận...'
-- CẤM: 'chứng minh bản năng đang thức tỉnh mạnh mẽ hơn bao giờ hết'
-- CẤM: 'nhận thức rõ ngày tàn sắp giáng xuống...'
-- CẤM: 'cảm thấy tình hình tương đối khả quan...'
-
-GIỚI TÍNH & NHÂN VẬT PHỤ:
-- Nam chính: 'cậu', 'anh', 'hắn'. CẤM gọi là 'cô nàng'.
-- Nữ chính: 'cô', 'nàng', 'cô ấy'. CẤM gọi là 'anh chàng'.
-- Nhân vật phụ: Phải có nhãn cụ thể ('gã láng giềng', 'tên cầm đầu', 'ông lão'). CẤM dùng danh xưng MC.
-
-AN TOÀN YOUTUBE:
-- Dùng 'tiêu diệt', 'hạ gục', 'tiễn lên đường', 'xử đẹp', 'quét sạch', 'cho đo ván'.
-- Dùng chữ Latin tiêu chuẩn tiếng Việt. Giữ nguyên tên riêng từ glossary.
-"""
-    else:
-        language_rules = f"""
-LANGUAGE & US MANHWA/WEBTOON CULTURE RULES:
-- Write like a top-tier US YouTube Manhwa Recap storyteller (in the signature style of Manhwa Fresh, Plot Armor, Manga Recaps, and Manhwa Clan).
-- Adopt the "Sarcastic Bro-Commentary" standard: 80% immersive survival tension + 20% deadpan sarcasm and conversational wit.
-- The "Couch Companion Persona": Speak directly to the viewer like a knowledgeable friend watching together on the couch.
-- Conversational Spoken Connectors: Seamlessly integrate natural speech transitions: 'Look,', 'You know,', 'Turns out,', 'Speaking of which,', 'Here's the kicker,', 'And guess what?'.
-- CONTEXTUAL PROTAGONIST ANCHORING (ORGANIC FLOW & ZERO FORMULAIC REPETITION):
-  * DO NOT mechanically force the protagonist's proper name into every 2nd or 3rd sentence! Robotic name repetition destroys immersion and sounds like an AI algorithm.
-  * Restrict direct proper name usage to ONLY 4 CRITICAL CONTEXTUAL ANCHORS:
-    1. Opening Hook (0-15s): Anchor the protagonist's identity immediately in the very first sentence.
-    2. Scene & Time Transitions: Re-anchor the protagonist when jumping across time or shifting locations (e.g., 'Three months later, Paran settled into...', 'Back at the underground vault, Paran...').
-    3. Multi-Character Disambiguation: When teammates, monsters, or raiders share the scene, explicitly use the protagonist's name so the viewer clearly knows who takes the action (e.g., 'While the party leader panicked, Paran quietly drew his dagger...').
-    4. Climax Milestone & Signature Flex: During pivotal boss takedowns, major system level-ups, or epic plot revelations.
-  * THE 80% NARRATIVE FREEDOM: During continuous solo action, exploration, crafting, and standard story progression, NEVER repeat the proper name! Instead, seamlessly use natural direct pronouns ('he', 'his' / 'she', 'her'), participial action clauses ('Kicking open the rusted door...', 'Inspecting the fresh tracks...'), or let the event/world drive the sentence ('A muffled growl echoed through the corridor...', 'One bite of the glowing fruit filled his stamina gauge completely.').
-- ANTI-AI CLICHÉ FILTER (BAN FORMULAIC AI STEREOTYPES):
-  * NEVER use repetitive, predictable AI tropes and filler phrasing:
-    - BANNED: 'leaving our boy/our MC with no choice but to...'
-    - BANNED: 'proving his/her instincts were sharper than ever...'
-    - BANNED: 'without wasting a single second, he/she decided to...'
-    - BANNED: 'little did they know...' / 'unbeknownst to everyone...'
-    - BANNED: 'could not help but wonder...'
-  * Instead, write authentic, punchy conversational reactions: 'Jackpot.', 'Easy pickings.', 'Classic amateur mistake.', 'Not on his watch.', 'And just like that, problem solved.'
-- SENTENCE VARIETY & CADENCE:
-  * Ban structural monotony! Do NOT start every sentence with an adverbial participle clause followed by a pronoun.
-  * Alternate between sharp, high-impact one-liners and descriptive tactical observations to create a cinematic, human rhythm.
-- GENDER-ADAPTIVE PRONOUN MATRIX (ZERO MISGENDERING MANDATE):
-  * Accurately identify the protagonist's gender from character design, attire, visual cues, dialogue, or provided context.
-  * If Male MC: Use standard pronouns ('he', 'him', 'his'). Casual epithets like 'our boy', 'our guy', or 'this dude' must be used SPARINGLY (at most 1–2 times per entire episode, reserved only for peak flexing or hilarious deadpan moments).
-  * If Female MC: Use standard pronouns ('she', 'her', 'hers'). Casual epithets like 'our girl', 'our heroine', or 'the queen herself' must be used SPARINGLY (at most 1–2 times per entire episode).
-  * ZERO MISGENDERING: If the protagonist is FEMALE, NEVER use 'he', 'him', 'boy', or 'dude'! If MALE, NEVER use 'she', 'her', or 'girl'.
-- SIDE CHARACTER ISOLATION SHIELD:
-  * NEVER refer to teammates, raiders, party members, or monsters as 'boy', 'girl', 'dude', or 'our guy'. Those terms are strictly reserved for the protagonist.
-  * Side characters MUST ALWAYS have distinct, descriptive labels: 'the greedy teammates', 'the party leader', 'the mutated neighbor', 'the arrogant bandit', 'his/her younger sister'.
-- Use natural Western manhwa community terminology and tropes where appropriate:
-  * Awakened abilities, Hunter rankings (S-Rank, E-Rank), Dungeon Break, Status Window / System Prompt, Leveling Up;
-  * Overpowered (OP) Protagonist, Regressor, Reincarnator, Hidden Mastermind, Aura / Killing Intent, flexing / humbled.
-- Verbal Velocity: Use strong, active transitive verbs (e.g., 'obliterates', 'stockpiles', 'outsmarts', 'dispatches', 'unleashes', 'corners', 'exposes', 'shatters', 'ambushes') rather than passive explanations ('is seen doing', 'was attacked by').
-
-YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY:
-- To prevent YouTube demonetization or age-restrictions, NEVER use raw graphic or prohibited terms (such as suicide, murder, massacre, slaughter, bloodbath, kill).
-- Always use dramatic, high-energy YouTube-safe alternatives:
-  * Use 'eliminated', 'dispatched', 'wiped out', 'taken down', 'neutralized', 'sent to the afterlife', 'erased', 'finished off', or 'crushed'.
-- Follow the glossary consistently.
-- Preserve proper names when translating them would be unnatural unless an explicit glossary translation is provided.
-"""
-
-    if lang_key in {"en", "english"}:
-        prompt_examples = """5 - Turns out, Paran wasn't crazy after all—the moment the sirens blare, he's the only one ready.#
-[12:75%, 13:25%] - A mutated beast lunges straight for him, but Paran simply sidesteps and slices off its arm like butter.#
-[14, 15, 16] - With one clean strike, our boy drops the monster cold, while his greedy teammates are left completely speechless.#
-24 - But just as he catches his breath, an ominous red system alert warns him that the real nightmare has only begun.#"""
-    else:
-        prompt_examples = """5 - Hóa ra Paran chẳng hề gàn dở—ngay khi còi báo động vang lên, cậu là người duy nhất sẵn sàng nghênh đón thảm họa.#
-[12:75%, 13:25%] - Một con quái vật đột biến lao thẳng tới, nhưng Paran chỉ nhẹ nhàng né sang một bên rồi chém đứt cánh tay nó trong chớp mắt.#
-[14, 15, 16] - Một đòn dứt khoát của thanh niên nhà ta tiễn con quái vật đo ván tại chỗ, khiến hai gã đồng đội hám danh chỉ biết đứng hình há hốc mồm.#
-24 - Thế nhưng vừa mới kịp thở phào, một dòng cảnh báo đỏ rực từ hệ thống bất ngờ hiện lên, báo hiệu cơn ác mộng thực sự mới chỉ bắt đầu.#"""
-
-    # ---------------------------------------------------------
-    # Main prompt
-    # ---------------------------------------------------------
-    return f"""
-ROLE:
-
-You are an elite YouTube Manhwa Recap storyteller and scriptwriter (in the style of Manhwa Fresh, Plot Armor, Manga Recaps).
-
-Your job is to analyze the provided comic pages and create a high-retention,
-binge-worthy story recap script in {lang_name} for YouTube audiences using
-the "Sarcastic Bro-Commentary" standard (80% immersive tension + 20% witty, pragmatic human commentary).
-
-The goal is to captivate the audience with natural spoken narration,
-authentic human-like pacing, and relatable deadpan observations.
-
-SOURCE:
-Title: "{comic_title}"
-Episode: {ep}
-Total provided pages: {total_pages}
-
-IMPORTANT:
-The provided pages are the primary source of truth.
-
-Do not invent events, characters, motivations, dialogue, outcomes, or
-future plot developments that are not supported by the provided material.
-
-If something is ambiguous, describe only what can be confidently established.
-Use only information that can reasonably be established from the visual
-content and readable text.
-
---------------------------------------------------
-STORY BEAT WORKFLOW & STRICT ASCENDING PAGE ORDER
---------------------------------------------------
-
-For EVERY segment you produce, follow this natural workflow:
-  Step 1 — STORY BEAT:   Identify the next important story event or beat.
-  Step 2 — FIND PAGE(S): Scan the PDF for candidate pages that depict the action/reaction.
-  Step 3 — SELECT:       Pick the page or multi-page range [start, end] with clear visual evidence.
-  Step 4 — WRITE:        Write 1-2 concise narration sentences describing what the selected page(s) show.
-
-All selected page numbers across the ENTIRE output must appear in STRICTLY
-ASCENDING order.
-
-  Correct: 5 → 12 → 17 → 25 → 38
-  WRONG:   5 → 12 → 8 → 25   (page 8 goes backward)
-  WRONG:   5 → 12 → 12 → 25  (page 12 repeats)
-
-Never go backward, never repeat, never rearrange page order for dramatic
-effect. The story must flow forward exactly as the comic presents it.
-
---------------------------------------------------
-1. TRANSFORMATIVE RECAP
---------------------------------------------------
-
-Create a concise recap of the major story developments contained in the
-provided pages.
-
-This is a recap, not a page-by-page transcription.
-
-Use your own wording and narration.
-
-Do NOT reproduce dialogue, narration, captions, or other source text
-verbatim.
-
-Do NOT translate the source text line-by-line.
-
-Instead:
-- identify the important events;
-- explain what happens in your own words;
-- connect events naturally;
-- focus on character actions, motivations, conflicts, discoveries,
-  consequences, and important reveals;
-- remove repetitive or trivial information.
-
-The result should feel like a creator is naturally telling the audience
-what happened in the chapter rather than reading or translating the comic.
-
---------------------------------------------------
-2. STORY COVERAGE & DENSE PACING
---------------------------------------------------
-
-Create a rich, fast-paced recap of the {total_pages} provided pages with
-approximately {max(22, total_pages // 2)}–{min(45, total_pages)} high-value recap
-micro-segments (minimum = ceil(total_pages / 2), to ensure dense story coverage).
-
-ANTI-GAP RULE: Never skip more than 4 consecutive pages without at least one
-segment referencing that range. Every significant scene cluster must be covered.
-
-
-Cover the important story progression continuously from the beginning
-toward the end of the provided material.
-
-Prioritize:
-1. important character introductions;
-2. major actions and battle sequences;
-3. important discoveries and clues;
-4. conflicts and character dynamics;
-5. turning points and strategy shifts;
-6. emotional reactions and expressions;
-7. meaningful reveals;
-8. the ending or cliffhanger.
-
-Do not artificially create one segment per page, but maintain strong
-visual and narrative continuity across the chapter.
-
-The final segment must represent the latest meaningful story development
-shown in the provided material.
-
---------------------------------------------------
-3. NATURAL STORYTELLING STYLE & SPOKEN FLOW
---------------------------------------------------
-
-Write like a seasoned YouTube recap narrator telling a story to an audience of peers.
-
-{language_rules}
-
-Style:
-- fast-paced and punchy;
-- conversational spoken flow;
-- concise (each segment approximately 1–2 short sentences, 2.5s–4.0s spoken);
-- dramatic tension balanced with deadpan wit;
-- easy to understand;
-- optimized for natural TTS breath pauses;
-- short sentences with active verbs;
-- natural pauses and conversational cadence;
-- minimal complicated sentence structures.
-
-Avoid:
-- literal translation style;
-- academic language or stiff book narration;
-- excessive exposition;
-- repetitive sentence structures;
-- unnecessary descriptions of artwork.
-
-The narration should sound like an authentic human speaking aloud to a friend.
-
---------------------------------------------------
-4. HUMOR
---------------------------------------------------
-
-For normal recap segments, use light humor, irony, sarcasm, playful
-commentary, or relatable observations when they naturally fit the scene.
-
-Humor must support the story rather than replace it.
-
-Do not force a joke into every line.
-
-Do not change the meaning of the original events for the sake of humor.
-
-Episode 1 hook is exempt from the humor requirement.
-
---------------------------------------------------
-5. ACCURACY
---------------------------------------------------
-
-ZERO HALLUCINATION.
-
-Only use information supported by the provided comic pages or reliable
-context explicitly available to you.
-
-Never:
-- invent future events;
-- invent dialogue;
-- invent character thoughts;
-- invent relationships;
-- invent powers or abilities;
-- invent explanations;
-- continue the story beyond the provided material;
-- assume an unreadable panel contains information that cannot be verified.
-
-If something is ambiguous, describe only what can be confidently established.
-
-The recap must end where the provided story material ends.
-
---------------------------------------------------
-6. PROPER NAMES AND GLOSSARY
---------------------------------------------------
-
-Apply this glossary consistently:
-
-{glossary}
-
-If a glossary term conflicts with another interpretation, prefer the
-explicit glossary mapping.
-
-Do not randomly translate character names or established fictional terms
-unless the glossary or the target language convention clearly supports it.
-
---------------------------------------------------
-7. PAGE & PANEL SELECTION (HIGH-IMPACT STORY PANELS ONLY & MULTI-PANEL DENSITY)
---------------------------------------------------
-
-Every output segment must be assigned to the exact page/panel number(s)
-from the provided comic that visually depicts the event, character, or action
-described in that segment.
-
-Crucial Visual Grounding & Expressiveness Rules:
-- HERO SUBJECT ALIGNMENT MANDATE (CRITICAL):
-  * Direct Alignment: If the narration mentions a monster, boss, weapon, explosive attack, or system window, the selected page MUST be the direct closeup/action panel of THAT EXACT SUBJECT.
-  * NEVER assign a monster attack sentence to a panel showing only the character's back/reaction if a dedicated monster action panel exists!
-  * WEIGHTED MULTI-PANEL RULE: When pairing 2 pages for cause-and-effect (e.g. Monster lunges -> Character knocked back), ALWAYS use weighted percentages: [<hero_subject_page>:70%, <reaction_page>:30%] (e.g. [39:75%, 40:25%]).
-  * DO NOT use equal 50/50 splits on action scenes when one panel is the primary visual subject!
-- Multi-Panel Density on Key Scenes: Select multi-panel ranges (e.g. [5, 6] or [12:70%, 13:30%]) whenever describing consecutive character actions, reactions, or combats within the same meaningful scene.
-- DENSE VISUAL PACING & IMAGE ALLOCATION:
-  * For longer narrative sentences exceeding 100 characters (or duration > 6s), allocate 2 distinct consecutive pages with clear visual evidence (e.g. [<page1>, <page2>]) to maintain visual momentum and prevent viewer fatigue.
-  * For short, punchy phrases (< 40 characters), allocate exactly 1 page. Never assign multiple pages to rapid short phrases.
-- POINT SCORE HARD REQUIREMENT (STRICT ANTI-FILLER):
-  * Check the watermark header on every page in the PDF: "Page: <number> - Point: <score>".
-  * Point >= {point_score_threshold} is a HARD REQUIREMENT for normal page selection.
-  * NEVER select a page with Point < {point_score_threshold}. Low-point pages (< {point_score_threshold}) are filler, speech bubbles, empty text boxes, or low-detail panels.
-  * Art clarity, character expressions, and combat action completely override raw point scores as long as Point >= {point_score_threshold}.
-- VISUAL EVIDENCE HIERARCHY:
-  * LEVEL A — DIRECT VISUAL (HIGHEST PRIORITY): The page clearly displays the character's face, active combat, monster attacks, emotional reactions, physical actions, or dynamic apocalypse environments.
-  * LEVEL B — ESSENTIAL INFORMATIONAL VISUAL (USE SPARINGLY): The page shows an essential status/system window or world map critical to the plot (MUST still have Point >= {point_score_threshold}).
-  * LEVEL C & D — WEAK / NO EVIDENCE (STRICTLY FORBIDDEN): Do NOT use.
-- NO FILLER / NO MEANINGLESS IMAGES (STRICT RULE):
-  * NEVER select empty dark skies, ambient background textures, speed lines,
-    sound effect text bubbles, transition slivers, or solid black/white backgrounds.
-  * NEVER select pure text cards, floating narrator text boxes without characters,
-    or single word splash pages (e.g. 'WAR', 'PEACE', 'BOOM'). Always select panels
-    showing characters, faces, monsters, powers, or actions.
-  * ANTI-MECHANICAL PAIRING MANDATE: DO NOT mechanically pair pages simply because numbers are consecutive (e.g. [1, 2], [3, 4], [56, 57]).
-  * You MUST ONLY pair 2 pages if BOTH pages show distinct, high-impact story visuals (e.g. [Attack Page: 75%, Impact/Damage Page: 25%] or [Monster Charge: 70%, Hero Counter: 30%]).
-  * If only ONE page contains strong character art or combat, assign THAT SINGLE PAGE only (e.g. 39 - Narration sentence.#). Never drag in a weak, transitional, or bubble-heavy adjacent page!
-  * Only select multi-panel ranges if BOTH panels contain meaningful story visuals.
-  * If a page lacks meaningful story or character visuals, SKIP IT completely.
-- Prioritize pages containing:
-  * Characters and clear facial expressions;
-  * High-energy combat, powers, and dynamic movements;
-  * Important discoveries, weapons, monsters, or revelations;
-  * Key character interactions and dialogue scenes.
-- Zero non-story pages: Never assign any segment to a cover, chapter title,
-  production info, credit, or pure text card.
-
-ONE PAGE = ONE PRIMARY BEAT:
-  Each output segment represents exactly ONE primary story event.
-  Do not cram multiple distant story events into a single narration line.
-  Structure: [event] + [brief context] + [immediate consequence].
-
-NARRATION MUST FOLLOW THE PAGE:
-  The narration text MUST describe what the selected page visually shows.
-  If the page shows a sword, describe the sword.
-  If the page shows a punch, describe the punch.
-  If the page shows a system status window, explain the stats.
-  NEVER fabricate details that are not visible on the selected page.
-
---------------------------------------------------
-8. ENDING ANCHOR
---------------------------------------------------
-
-The final recap segment must describe the latest meaningful story event
-visible in the provided material.
-
-Use the latest suitable story page as its page reference.
-
-Do not continue beyond the supplied pages.
-
-Do not use a credits page, title card, or unrelated final image as the
-ending anchor.
-
---------------------------------------------------
-9. EPISODE 1
---------------------------------------------------
-
-{intro_rule}
-
---------------------------------------------------
-10. VIOLENCE AND SENSITIVE MATERIAL
---------------------------------------------------
-
-If the story contains violence or disturbing material, describe it in a
-non-graphic narrative style.
-
-Focus on:
-- what happened;
-- who was affected;
-- the consequence;
-- how the event changes the story.
-
-Avoid unnecessary graphic descriptions.
-
-Do not exaggerate the severity of an event beyond what is shown.
-
---------------------------------------------------
-11. GOLDEN CONTENT RATIO & ZERO CTA
---------------------------------------------------
-
-Content balance for EVERY recap:
-  85%% Plot / Context — Focus on story events, character actions, reveals
-  10%% Natural Humor — Light, character-driven humor that flows naturally
-   5%% Punchline — Witty observations, ironic twists, or clever commentary
-
-ZERO CTA / ZERO THROAT-CLEARING:
-  ABSOLUTELY FORBIDDEN opening lines:
-    "Let's dive in...", "Welcome back...", "In today's episode...",
-    "Cùng theo dõi...", "Hãy cùng xem...", "Chào mừng các bạn..."
-  Jump straight into the story from the VERY FIRST line.
-  The first segment must be a story event or hook, never a greeting.
-
---------------------------------------------------
-12. OUTPUT FORMAT
---------------------------------------------------
-
-The output is consumed by an automated parser.
-
-Return ONLY the following format:
-
-[Page number(s)] - [Recap text]#
-
-Rules:
-- One segment per line.
-- Every line must end with "#".
-- The line starts with page number(s) in brackets (e.g. [5] or [12, 13] or [14, 15, 16] or [14:40%, 15:60%]).
-- No title.
-- No introduction outside the format.
-- No conclusion outside the format.
-- No Markdown.
-- No bullet points.
-- No numbering other than the required page number.
-- Do not include analysis or explanations.
-- Do not include quotation marks around the recap.
-- Keep each segment concise enough for spoken narration.
-
-Examples:
-
-{prompt_examples}
-
-FINAL VALIDATION BEFORE RESPONDING:
-
-Silently verify that:
-1. Every line follows "[Page(s)] - [Text]#".
-2. The output uses only {lang_name}.
-3. There are approximately 30–45 concise micro-segments with dense multi-panel coverage.
-4. No source dialogue or narration has been reproduced verbatim.
-5. No unsupported plot event has been invented.
-6. The final segment represents the latest meaningful story event.
-7. Page references correspond strictly to visually relevant pages/panels.
-8. There are no greetings, titles, explanations, or Markdown.
-9. The result sounds natural when read aloud.
+    comic_title="",
+    ep="",
+    total_pages=0,
+    target_language="vi",
+    min_scenes=20,
+    max_scenes=26,
+    character_name="",
+):
+    lang = LANGUAGE_MAP.get(target_language, "Vietnamese")
+    title_line = comic_title.strip() or "the attached manhwa chapter"
+    ep_line = f" Episode/chapter: {ep}." if str(ep).strip() else ""
+    page_line = f" The PDF has {total_pages} pages." if total_pages else ""
+    name_line = (
+        f" Protagonist name to use consistently: {character_name}."
+        if character_name.strip()
+        else " Infer the protagonist name from the chapter and keep it consistent."
+    )
+
+    return f"""You are a manhwa/webtoon recap director and TTS scriptwriter.
+
+INPUT
+- Work: {title_line}.{ep_line}{page_line}
+- A manhwa chapter PDF. Panels are labeled visual regions (Start:Rx / End:Rx). Use that exact region ID as printed (R1, R2, R10, R16).
+- TARGET_LANGUAGE: {lang}
+-{name_line}
+
+TASK
+Build a recap video script of THIS chapter only. Pick story-bearing regions and write TTS narration in {lang} so a viewer follows the protagonist through hook, events, rules/twists, emotion, and ending beat.
+
+READ FIRST
+Extract setting, protagonist goal, conflict, beats, rules/systems, tone, and cliffhanger.
+Ignore scanlation UI, credits, banners, watermarks, and translator notes unless that text belongs to the story world.
+
+SELECT REGIONS
+Target {min_scenes} to {max_scenes} regions in chronological story order.
+Prefer the count that best covers beginning → turning point → end without padding.
+If the chapter does not have {min_scenes} valid pictorial regions, select fewer. Never invent IDs, never renumber, never split one beat across extra near-duplicate crops to hit a quota.
+
+Keep a region when it is visually strong and carries the beat through the protagonist: face, body language, action, emotion, a key object in their hands, or an establishing shot that still keeps the lead readable.
+Drop:
+- text-only, caption-only, or rule-card-only frames with no useful pictorial subject
+- empty backgrounds, texture fillers, decorative shots with no story role
+- near-duplicates
+- leftover "cont." lettering fragments that add no new beat
+- credits, logos, scanlation dressing
+One in-world chapter title card is allowed if it is a real story-title beat, not a watermark or site logo.
+
+WRITE NARRATION
+- 100% {lang}. No mixed language. Keep character names, skill names, and item names as they appear unless the work itself already uses a natural form in {lang}. Do not translate proper names into nicknames.
+- One narration block per selected region. Write only what that shot can honestly carry. A quiet face stays short. A turning point may run longer. Do not dump the chapter onto one region. Do not pad a weak shot.
+- Third-person recap, spoken like a person telling the chapter out loud. Continuous voiceover from the protagonist's seat: situation, reaction, choice, cost or gain. Side characters appear only when they pressure, help, mock, or change the lead. Name the protagonist once, then reuse that same name.
+- Paraphrase dialogue in narrator voice when useful. Do not catalog objects. Do not turn the recap into an ensemble summary.
+- Each line is primarily the beat visible in that region. A short time-link in {lang} at the start of a line is allowed. Do not spend the line narrating a previous or next shot.
+- Diction: plain spoken {lang}. Name the action, the person, and the cost. Do not use flowery, literary, poetic, or exaggerated wording. No stacked intensifiers, destiny talk, legend talk, trailer taglines, or poster adjectives. If a word can be cut and the fact remains, cut it. If a line sounds advertised rather than reported, rewrite it as what happens in this shot.
+- Light dry humor only when the beat already has irony. One sly remark max per line. No slapstick, no meme slang, no fourth wall. Never joke on death, assault, or grief.
+- TTS-ready: speakable sentences, punctuation for pauses. No lists, markdown, emojis, stage directions, or extra brackets inside the spoken line.
+- Never say "in this panel", "the image shows", "as we can see", "in this chapter", or "welcome".
+- Faithful to this chapter only. No later-chapter plot.
+
+OUTPUT
+Return ONLY the script lines in playback order. No title, no analysis, no blank lines, no extra text.
+
+Each line MUST be exactly:
+[R2] - <narration>#
+
+- Original region ID inside [], written as printed. Never R001. Never source=.
+- One space on each side of "-".
+- Spoken text in plain {lang}.
+- Each line ends with # then a newline.
+- One selected region per line.
+
+DONE WHEN
+- Every [Rx] exists in the PDF.
+- Count is at most {max_scenes}, and at least {min_scenes} unless the chapter lacks enough valid shots.
+- Shots stay in story order and the protagonist stays the center.
+- No selected region is text-only or empty of story.
+- Each line fits the image it plays over and is ready to read aloud in {lang}.
 """
 
 
 def generate_intro_prompt(
-    comic_title: str,
-    total_pages: int,
-    target_language: str = "en",
-    market_id: str = None,
-    point_score_threshold: int = 65,
-) -> str:
-    """Generate a specialized prompt for Episode 1 Intro Hook only.
+    comic_title="",
+    total_pages=0,
+    target_language="vi",
+    character_name="",
+):
+    lang = LANGUAGE_MAP.get(target_language, "Vietnamese")
+    title_line = comic_title.strip() or "the attached manhwa"
+    name_line = (
+        f" Use this protagonist name consistently: {character_name}."
+        if character_name.strip()
+        else " Infer the protagonist name from episode 1 and official series info, then keep it consistent."
+    )
+    page_line = f" The PDF has {total_pages} pages." if total_pages else ""
 
-    This prompt is used in Dual-Session mode: Session 1 generates only
-    a single explosive hook line, while Session 2 generates the full
-    story recap separately.
-    """
-    lang_map = {
-        "vi": "Vietnamese", "en": "English", "ko": "Korean", "ja": "Japanese",
-        "zh": "Chinese", "th": "Thai", "id": "Indonesian",
-    }
-    lang_key = str(target_language).lower().strip()
-    lang_name = lang_map.get(lang_key, target_language)
-    pt = point_score_threshold
+    return f"""You are a manhwa series trailer writer and TTS scriptwriter.
 
-    return f"""
-ROLE:
-You are a hook-writing specialist for comic recap videos.
+THIS TASK IS A SERIES INTRO TRAILER, anchored on Episode 1 visuals. Not a page-by-page recap.
+Work: {title_line}. Episode 1.{page_line}
+TARGET_LANGUAGE: {lang}
+{name_line}
 
-TASK:
-Analyze the provided PDF of "{comic_title}" (Episode 1, {total_pages} pages).
-Your ONLY job is to produce exactly ONE explosive opening hook line.
+GOAL
+Write exactly 5 narration lines that sell THIS series through the protagonist.
+A first-time listener must know who the lead is after line 1, then understand the premise on first listen.
 
-RULES:
-1. Find the BEST character portrait page (the page with the most striking,
-   dramatic depiction of the main protagonist).
+FACTS
+Use only the official premise plus what Episode 1 actually shows.
+Introduce real nouns with their role the first time they appear: person, house, clan, estate, guild, school, title, place, skill.
+After that, the short name may stand alone.
+Do not use later-arc twists, the ending, future companions who are absent from Episode 1, or invented skills and titles.
+Do not invent a premise engine this work does not have.
 
-2. Write exactly ONE hook sentence in {lang_name}:
-   - Formula: [Shocking Paradox / Dire Crisis] + [Mysterious Twist / Hidden Power]
-   - MUST be under 18 words (2.5s-4.0s spoken)
-   - ZERO throat-clearing: no "Welcome", no "Today we...", no "Let's dive in"
-   - Make it cinematic, attention-grabbing, and impossible to scroll past
+SELECT 5 REGIONS
+Pick exactly 5 labeled regions (Start:Rx / End:Rx) that already exist, in story order. Do not invent IDs.
+Prefer the protagonist in frame. Another person may appear only if the series engine is that relationship.
+Reject text-only boxes, credits, logos, ugly SFX, blurry crops, extras-only shots.
 
-3. Output format (EXACTLY one line):
-   <page_number> - <hook text>#
+Assign jobs to LINES, not to a forced shot type in that slot:
+1) Identify the lead: role, name, and one concrete opening situation from this work.
+2) Where they stand now: world, job, rank, body, or house they are stuck in.
+3) Why that position is bad, funny, tender, or dangerous.
+4) The tool this series actually uses: skill, habit, power, vow, craft, or relationship shown in premise / Episode 1.
+5) One question that restates the series promise, over an unresolved look if one exists.
 
-EXAMPLE:
-7 - Everyone laughed at the weakest hunter, until he awakened a power that shattered the S-Rank ceiling.#
+If the cleanest hero face is not the earliest valid region, keep chronological order and put the identification in line 1 over the earliest usable lead shot.
 
-OUTPUT:
-Produce ONLY the single hook line. Nothing else.
+WRITE IN {lang} ONLY
+No mixed language. Do not default to Vietnamese stock phrases when {lang} is not Vietnamese.
+Do not borrow wording, jokes, roles, or plot from any other series.
+
+Line 1 is one spoken sentence. It must name the lead with a role and a concrete situation. Use the gender and role this work actually has. Never call a heroine the male lead. Never call a hero the female lead. If two people share the engine, name the viewpoint lead first, then the other person with a role. After line 1, use the short name.
+Never drop a bare name, house, or title as if the listener already knows it.
+Do not start with empty frames such as "There is a family", "There are geniuses", or "This is the story of".
+Do not use "this is the intro", "welcome to", "in this video", or "in this panel".
+
+Lines 2 to 4: one sentence, or two short sentences if a period helps the breath.
+Line 5: one question only.
+Sound like a person talking to a friend about a series they just started. Everyday connective wording. Proper nouns stay if you attach the role in the same breath.
+Diction: plain spoken {lang}. Name the person, the situation, and the problem. Do not use flowery, literary, poetic, or exaggerated wording. No stacked intensifiers, destiny talk, legend talk, trailer taglines, or poster adjectives. If a word can be cut and the fact remains, cut it. If a line sounds advertised rather than reported, rewrite it with a fact unique to this work.
+Humor only at this series' temperature.
+TTS-ready: punctuation for pauses. No lists, markdown, emojis, stage directions, or extra brackets inside the spoken text.
+
+Each line should be one speaking breath. If a line sounds like a trailer tagline, or can be pasted onto another title by swapping one name, rewrite it with a fact unique to this work.
+
+OUTPUT
+Return ONLY these 5 lines, no blank lines, no commentary:
+
+[Rx] - <spoken text>#
+[Ry] - <spoken text>#
+[Rz] - <spoken text>#
+[Rw] - <spoken text>#
+[Rv] - <spoken text>#
+
+- Original PDF region ID, written as printed.
+- One space on each side of "-".
+- Spoken text in plain {lang}.
+- Each line ends with # then a newline.
 """
 
 
 class OpenFolderRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     comic_folder: str
-    episode: int = Field(ge=1)
+    episode: int
 
 
 class ImportJsonRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     comic_folder: str
-    episode: int = Field(ge=1)
+    episode: int
     json_content: str
 
 
 class SaveSummaryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     comic_folder: str
-    episode: int = Field(ge=1)
+    episode: int
     summary_data: list
-
-
 
 
 @app.post("/api/open-pdf-folder")
 async def open_pdf_folder(payload: OpenFolderRequest):
-    try:
-        folder_path = resolve_download_path(payload.comic_folder, f"ep_{payload.episode}", must_exist=True)
-    except PathAccessError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Thư mục không tồn tại.") from exc
-    if folder_path.exists():
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    folder_path = os.path.normpath(os.path.join(project_dir, "downloads", payload.comic_folder, f"ep_{payload.episode}"))
+    if os.path.exists(folder_path):
         try:
-            os.startfile(str(folder_path))
+            os.startfile(folder_path)
             return {"status": "success"}
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Không thể mở thư mục: {str(e)}")
-    raise HTTPException(status_code=404, detail="Thư mục không tồn tại.")
+    else:
+        raise HTTPException(status_code=404, detail="Thư mục không tồn tại.")
 
 
 @app.get("/api/get-prompt")
-async def get_prompt(comic_folder: str, episode: int = 1):
-    if episode < 1:
-        raise HTTPException(status_code=422, detail="episode must be at least 1")
-    try:
-        prompt_path = resolve_download_path(comic_folder, f"ep_{episode}", "gemini_prompt.txt")
-    except PathAccessError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if prompt_path.exists():
+async def get_prompt(comic_folder: str, episode: int):
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    prompt_path = os.path.join(project_dir, "downloads", comic_folder, f"ep_{episode}", "gemini_prompt.txt")
+    if not os.path.exists(prompt_path):
+        prompt_path = os.path.join(project_dir, "downloads", comic_folder, f"ep_{episode}", "chatgpt_prompt.txt")
+    if os.path.exists(prompt_path):
         try:
-            with prompt_path.open("r", encoding="utf-8") as f:
+            with open(prompt_path, "r", encoding="utf-8") as f:
                 content = f.read()
             return {"status": "success", "prompt": content}
         except Exception as e:
@@ -4291,15 +4620,13 @@ async def import_json(payload: ImportJsonRequest):
         raise HTTPException(status_code=400, detail="Không tìm thấy danh sách phân đoạn nào hoặc danh sách rỗng.")
     
 
-    try:
-        ep_dir = resolve_download_path(comic_folder, f"ep_{ep}")
-    except PathAccessError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not ep_dir.exists():
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    ep_dir = os.path.join(project_dir, "downloads", comic_folder, f"ep_{ep}")
+    if not os.path.exists(ep_dir):
         raise HTTPException(status_code=404, detail=f"Không tìm thấy thư mục tập {ep} để xác thực ảnh.")
     
 
-    image_files = sorted([f.name for f in ep_dir.iterdir() if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp')])
+    image_files = sorted([f for f in os.listdir(ep_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
     if not image_files:
         raise HTTPException(status_code=400, detail="Thư mục tập không chứa ảnh nào.")
     total_images = len(image_files)
@@ -4401,8 +4728,8 @@ async def import_json(payload: ImportJsonRequest):
         validated_segments.append(segment_dict)
     
 
-    narrations_file = ep_dir / "narrations.json"
-    with narrations_file.open("w", encoding="utf-8") as f:
+    narrations_file = os.path.join(ep_dir, "narrations.json")
+    with open(narrations_file, "w", encoding="utf-8") as f:
         json.dump(validated_segments, f, ensure_ascii=False, indent=2)
     
 
@@ -4428,25 +4755,21 @@ async def save_summary(payload: SaveSummaryRequest):
         summary_data = payload.summary_data
     
 
-        try:
-            save_dir = resolve_download_path(comic_folder)
-        except PathAccessError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        save_dir.mkdir(parents=True, exist_ok=True)
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+        save_dir = os.path.join(project_dir, "downloads", comic_folder)
+        os.makedirs(save_dir, exist_ok=True)
     
 
         file_name = f"ep_{ep}_summary.json"
-        save_path = save_dir / file_name
+        save_path = os.path.join(save_dir, file_name)
     
 
-        with save_path.open("w", encoding="utf-8") as f:
+        with open(save_path, "w", encoding="utf-8") as f:
             json.dump(summary_data, f, ensure_ascii=False, indent=2)
         
 
         await sse_logger.log(f"Tập {ep}: Lưu summary thành công vào file '{file_name}'.", "success")
         return {"status": "success", "message": f"Đã lưu summary tập {ep} thành công."}
-    except HTTPException:
-        raise
     except Exception as e:
         error_msg = f"Lỗi lưu summary: {str(e)}"
         await sse_logger.log(error_msg, "error")
@@ -4578,13 +4901,13 @@ async def run_test_task(logo_path: str = None, overlay_path: str = None):
                 # Create stitched image & Prompt
                 await sse_logger.log("[TEST] Đang tạo tệp stitched.jpg và prompt...", "info")
                 stitch_images_vertically(ep_dir, stitched_path)
-                image_files = sorted([f for f in os.listdir(ep_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f not in ("chapter.pdf", "gemini_prompt.txt", "stitched.jpg")])
+                image_files = sorted([f for f in os.listdir(ep_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f not in ("chapter.pdf", "gemini_prompt.txt", "chatgpt_prompt.txt", "stitched.jpg")])
                 prompt_content = generate_gemini_prompt(title_text, ep, len(image_files), "vi")
                 with open(prompt_path, "w", encoding="utf-8") as pf:
                     pf.write(prompt_content)
                 await sse_logger.log("[TEST] Đã tạo thành công stitched.jpg và gemini_prompt.txt.", "success")
         
-            # 3. Perform headed Gemini browser test
+            # 3. Perform headed browser VLM / ChatGPT Web test
             vlm_provider = "gemini"
             vlm_url = "https://gemini.google.com/app"
             vlm_name = "Gemini"
@@ -4715,78 +5038,111 @@ async def run_test_task(logo_path: str = None, overlay_path: str = None):
 
                     # Try to fill the prompt
                     await sse_logger.log("[TEST] Đang điền prompt tóm tắt của chương...", "info")
-                    try:
-                        await textbox.click(force=True)
-                        if stop_requested:
-                            raise Exception("Tiến trình test bị dừng bởi người dùng.")
-                        await textbox.fill(prompt_content)
-                        await sse_logger.log("[TEST] Đã điền nội dung prompt thành công. Đang chờ 5 giây trước khi gửi...", "success")
-
-                        await sse_logger.log(f"[TEST] Đang gửi yêu cầu (gửi tệp và prompt) tới {vlm_name}...", "info")
-                        if stop_requested:
-                            raise Exception("Tiến trình test bị dừng bởi người dùng.")
-
-                        await asyncio.sleep(5)
-                    
-
-                        if stop_requested:
-                            raise Exception("Tiến trình test bị dừng bởi người dùng.")
-                    
-
-                        # Click the send button using fallback selectors
-                        send_selectors = [
-                            "div[data-test-id='send-button-container'] button",
-                            "div[data-test-id='send-button-container'] gem-icon-button",
-                            "gem-icon-button.send-button button",
-                            "gem-icon-button.send-button",
-                            "gem-icon-button.submit button",
-                            "gem-icon-button.submit",
-                            "button[aria-label='Send message']",
-                            "button[aria-label*='Send']",
-                            "button[aria-label*='send']",
-                            "button#composer-submit-button",
-                            "#composer-submit-button",
-                            "button[data-testid='send-button']",
-                            "button[data-testid='chat-submit']",
-                            "button[data-testid*='submit']",
-                            "button[aria-label*='Submit']",
-                            "button[aria-label*='submit']",
-                            "button[type='submit']",
-                            "input-area-v2 button.send-button",
-                            "xpath=/html/body/chat-app-orchestrator/chat-app/main/side-navigation-v2/bard-sidenav-container/bard-sidenav-content/div/div/div/chat-window/div/input-container/fieldset/input-area-v2/div/div/div[5]/div[2]/div[2]/gem-icon-button/button",
-                            "xpath=/html/body/chat-app-orchestrator/chat-app/main/side-navigation-v2/bard-sidenav-container/bard-sidenav-content/div/div/div/chat-window/div/input-container/fieldset/input-area-v2/div/div/div[3]/div[2]/div[2]/gem-icon-button/button",
-                            "xpath=/html/body/chat-app-orchestrator/chat-app/main/side-navigation-v2/bard-sidenav-container/bard-sidenav-content/div[2]/div/div/chat-window/div/input-container/fieldset/input-area-v2/div/div/div[3]/div[2]/div[2]/gem-icon-button/button",
-                            "xpath=/html/body/chat-app-orchestrator/chat-app/main/side-navigation-v2/bard-sidenav-container/bard-sidenav-content/div/div/div/chat-window/div/input-container/fieldset/input-area-v2/div/div/div[5]/div[2]/div[2]/gem-icon-button",
-                            "gem-icon-button button",
-                            "gem-icon-button"
-                        ]
-                        send_button = None
-                        for _ in range(30):
-                            if stop_requested:
-                                raise Exception("Tiến trình test bị dừng bởi người dùng.")
-                            for sel in send_selectors:
-                                try:
-                                    loc = page.locator(sel).first
-                                    if await loc.count() > 0 and await loc.is_visible() and await loc.is_enabled():
-                                        send_button = loc
-                                        break
-                                except Exception:
-                                    pass
-                            if send_button:
+                    textbox = None
+                    for tb_sel in [
+                        "rich-textarea p",
+                        "rich-textarea div[contenteditable='true']",
+                        "div.ql-editor[contenteditable='true']",
+                        "div[contenteditable='true']",
+                        "[role='textbox']"
+                    ]:
+                        try:
+                            loc = page.locator(tb_sel).first
+                            if await loc.count() > 0 and await loc.is_visible():
+                                textbox = loc
                                 break
-                            await asyncio.sleep(1)
+                        except Exception:
+                            pass
 
-                        if send_button:
-                            await send_button.click(force=True)
-                            await sse_logger.log("[TEST] Đã click gửi tin nhắn.", "success")
+                    pasted = False
+                    if textbox:
+                        try:
+                            await textbox.click(force=True)
+                            await asyncio.sleep(0.3)
+                            await textbox.fill(prompt_content)
+                            pasted = True
+                        except Exception:
+                            pass
+
+                    if not pasted:
+                        try:
+                            p_el = page.locator("rich-textarea div.ql-editor p, div.ql-editor p, rich-textarea p").first
+                            if await p_el.count() > 0:
+                                await p_el.click(force=True)
+                            elif textbox:
+                                await textbox.click(force=True)
+                            await page.keyboard.insert_text(prompt_content)
+                            pasted = True
+                        except Exception:
+                            pass
+
+                    try:
+                        if textbox:
+                            await textbox.press_sequentially(" ")
+                            await textbox.press("Backspace")
                         else:
-                            await textbox.press("Enter")
-                            await sse_logger.log("[TEST] Đã gửi tin nhắn bằng cách nhấn Enter.", "success")
-                    except Exception as e:
+                            await page.keyboard.press("Space")
+                            await page.keyboard.press("Backspace")
+                    except Exception:
+                        pass
+
+                    await asyncio.sleep(1.0)
+                    await sse_logger.log("[TEST] Đã điền nội dung prompt thành công.", "success")
+
+                    await sse_logger.log(f"[TEST] Đang gửi yêu cầu (gửi tệp và prompt) tới {vlm_name}...", "info")
+                    if stop_requested:
+                        raise Exception("Tiến trình test bị dừng bởi người dùng.")
+
+                    # Click the send button using fallback selectors
+                    send_selectors = [
+                        "div[data-test-id='send-button-container'] button",
+                        "div[data-test-id='send-button-container'] gem-icon-button",
+                        "gem-icon-button.send-button button",
+                        "gem-icon-button.send-button",
+                        "gem-icon-button.submit button",
+                        "gem-icon-button.submit",
+                        "button[aria-label='Send message']",
+                        "button[aria-label*='Send']",
+                        "button[aria-label*='send']",
+                        "button#composer-submit-button",
+                        "#composer-submit-button",
+                        "button[data-testid='send-button']",
+                        "button[data-testid='chat-submit']",
+                        "button[data-testid*='submit']",
+                        "button[aria-label*='Submit']",
+                        "button[aria-label*='submit']",
+                        "button[type='submit']",
+                        "input-area-v2 button.send-button",
+                        "gem-icon-button button",
+                        "gem-icon-button"
+                    ]
+                    send_button = None
+                    for _ in range(30):
                         if stop_requested:
                             raise Exception("Tiến trình test bị dừng bởi người dùng.")
-                        await sse_logger.log(f"[TEST] Lỗi nhập prompt / gửi tin nhắn: {str(e)}", "warning")
-                        raise Exception(f"Lỗi khi gửi yêu cầu tới {vlm_name}. Chuyển sang nạp dữ liệu giả lập.")
+                        for sel in send_selectors:
+                            try:
+                                loc = page.locator(sel).first
+                                if await loc.count() > 0 and await loc.is_visible() and await loc.is_enabled():
+                                    send_button = loc
+                                    break
+                            except Exception:
+                                pass
+                        if send_button:
+                            break
+                        await asyncio.sleep(1)
+
+                    if send_button:
+                        await send_button.click(force=True)
+                        await sse_logger.log("[TEST] Đã click gửi tin nhắn.", "success")
+                    else:
+                        await textbox.press("Enter")
+                        await sse_logger.log("[TEST] Đã gửi tin nhắn bằng cách nhấn Enter.", "success")
+                except Exception as e:
+                    if stop_requested:
+                        raise Exception("Tiến trình test bị dừng bởi người dùng.")
+                    await sse_logger.log(f"[TEST] Lỗi nhập prompt / gửi tin nhắn: {str(e)}", "warning")
+                    raise Exception(f"Lỗi khi gửi yêu cầu tới {vlm_name}. Chuyển sang nạp dữ liệu giả lập.")
                     
 
                     # Now poll for the JSON content in the page body
@@ -4816,81 +5172,182 @@ async def run_test_task(logo_path: str = None, overlay_path: str = None):
                             raise Exception("Tiến trình test bị dừng bởi người dùng.")
                         await asyncio.sleep(1)
                         try:
-                            # Read text from response selectors
-                            text_content = ""
-                            for sel in response_selectors:
-                                try:
-                                    loc = page.locator(sel).last
-                                    if await loc.count() > 0:
-                                        txt = await loc.inner_text()
-                                        if txt.strip():
-                                            if "you are an elite" in txt.lower():
-                                                continue
-                                            text_content = txt
-                                            break
-                                except Exception:
-                                    pass
-                        
-                            if not text_content:
-                                try:
-                                    thinking_indicator = page.locator("[data-testid='thinking-indicator'], .thinking-container button, .thinking-container").first
-                                    if await thinking_indicator.count() > 0 and await thinking_indicator.is_visible():
-                                        thinking_txt = await thinking_indicator.inner_text()
-                                        thinking_txt = thinking_txt.strip().replace("\n", " ")
-                                        if thinking_txt and thinking_txt != last_thinking_text:
-                                            last_thinking_text = thinking_txt
-                                            await sse_logger.log(f"[TEST] Gemini đang suy nghĩ ({thinking_txt})...", "info")
-                                except Exception:
-                                    pass
+                            # Atomic evaluation to get text, thinking state, generating state, and action bar
+                            ui_state = await page.evaluate("""() => {
+                                const respSelectors = [
+                                    "div.response-content-markdown.markdown",
+                                    "div.response-content-markdown",
+                                    "div[class*='response-content-markdown']",
+                                    "message-content",
+                                    "model-response message-content",
+                                    "structured-content-container",
+                                    "model-response message-content div",
+                                    "div.prose",
+                                    "div.markdown"
+                                ];
+                                let text = "";
+                                for (const sel of respSelectors) {
+                                    const els = document.querySelectorAll(sel);
+                                    if (els.length > 0) {
+                                        const lastEl = els[els.length - 1];
+                                        const txt = (lastEl.textContent || "").trim();
+                                        if (txt && !txt.toLowerCase().includes("you are an elite")) {
+                                            text = txt;
+                                            break;
+                                        }
+                                    }
+                                }
 
-                            # Check thinking container state
-                            has_thinking = False
-                            is_still_thinking = False
-                            has_finished_thinking = False
-                            
-                            thinking_container = page.locator(".thinking-container, [data-testid='thinking-indicator']").first
-                            if await thinking_container.count() > 0 and await thinking_container.is_visible():
-                                has_thinking = True
-                                chevron_down = page.locator(".thinking-container svg.lucide-chevron-down, [data-testid='thinking-indicator'] svg.lucide-chevron-down").first
-                                if await chevron_down.count() > 0 and await chevron_down.is_visible():
-                                    is_still_thinking = True
-                                
-                                panel_left_open = page.locator(".thinking-container svg.lucide-panel-left-open, [data-testid='thinking-indicator'] svg.lucide-panel-left-open").first
-                                if await panel_left_open.count() > 0 and await panel_left_open.is_visible():
-                                    has_finished_thinking = True
+                                let hasThinking = false;
+                                let isStillThinking = false;
+                                let thinkingText = "";
+                                const thinkEl = document.querySelector(".thinking-container, [data-testid='thinking-indicator'], thinking-bubble");
+                                if (thinkEl && thinkEl.offsetParent !== null) {
+                                    hasThinking = true;
+                                    const chevron = thinkEl.querySelector("svg.lucide-chevron-down, svg[data-icon='chevron-down']");
+                                    if (chevron && chevron.offsetParent !== null) {
+                                        isStillThinking = true;
+                                    }
+                                    thinkingText = (thinkEl.textContent || "").trim().replace(/\\s+/g, " ");
+                                }
+
+                                let isGenerating = false;
+                                const stopSelectors = [
+                                    "button[aria-label*='Stop']",
+                                    "button[aria-label*='stop']",
+                                    "button[aria-label*='Dừng']",
+                                    "button[aria-label*='dừng']",
+                                    "button[aria-label*='Cancel']",
+                                    "button[aria-label*='Hủy']",
+                                    "button[data-testid='stop-button']",
+                                    "button[data-testid*='stop']",
+                                    "[data-testid='stop-button']",
+                                    "[aria-label*='Stop generating']",
+                                    "[aria-label*='Stop response']",
+                                    "[aria-label*='Dừng tạo']",
+                                    "[aria-label*='Dừng phản hồi']",
+                                    "gem-icon-button[aria-label*='Stop']",
+                                    "gem-icon-button[aria-label*='stop']",
+                                    "gem-icon-button[aria-label*='Dừng']",
+                                    "gem-icon-button[aria-label*='dừng']",
+                                    "button.stop-generating-button",
+                                    ".stop-button"
+                                ];
+                                for (const sel of stopSelectors) {
+                                    const el = document.querySelector(sel);
+                                    if (el && el.offsetParent !== null) {
+                                        isGenerating = true;
+                                        break;
+                                    }
+                                }
+
+                                if (!isGenerating) {
+                                    const streamSelectors = [
+                                        "[class*='streaming']",
+                                        "[class*='generating']",
+                                        "[class*='typing']",
+                                        ".blinking-cursor",
+                                        ".cursor",
+                                        "gem-streaming-indicator",
+                                        "sparkle-icon.animate-spin",
+                                        "[data-is-generating='true']",
+                                        "[data-is-streaming='true']",
+                                        "input-area-v2 [role='progressbar']",
+                                        "form [role='progressbar']"
+                                    ];
+                                    for (const sel of streamSelectors) {
+                                        const el = document.querySelector(sel);
+                                        if (el && el.offsetParent !== null) {
+                                            isGenerating = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                let hasActionBar = false;
+                                const actionSelectors = [
+                                    "message-actions",
+                                    ".message-actions",
+                                    "[data-testid='message-actions']",
+                                    "response-container .response-bottom-actions",
+                                    "button[aria-label*='Copy']",
+                                    "button[aria-label*='Sao chép']",
+                                    "button[aria-label*='Good response']",
+                                    "button[aria-label*='Phản hồi tốt']",
+                                    "button[aria-label*='Share']",
+                                    "button[aria-label*='Chia sẻ']",
+                                    "button[aria-label*='More options']",
+                                    "button[aria-label*='Tùy chọn khác']"
+                                ];
+                                for (const sel of actionSelectors) {
+                                    const els = document.querySelectorAll(sel);
+                                    if (els.length > 0) {
+                                        const last = els[els.length - 1];
+                                        if (last && last.offsetParent !== null) {
+                                            hasActionBar = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                return {
+                                    text: text,
+                                    has_thinking: hasThinking,
+                                    is_still_thinking: isStillThinking,
+                                    thinking_text: thinkingText,
+                                    is_generating: isGenerating,
+                                    has_action_bar: hasActionBar
+                                };
+                            }""")
+
+                            text_content = ui_state.get("text", "")
+                            has_thinking = ui_state.get("has_thinking", False)
+                            is_still_thinking = ui_state.get("is_still_thinking", False)
+                            thinking_txt = ui_state.get("thinking_text", "")
+                            is_generating = ui_state.get("is_generating", False)
+                            has_action_bar = ui_state.get("has_action_bar", False)
+
+                            if not text_content and thinking_txt and thinking_txt != last_thinking_text:
+                                last_thinking_text = thinking_txt
+                                await sse_logger.log(f"[TEST] Grok đang suy nghĩ ({thinking_txt})...", "info")
 
                             cleaned_content = clean_gemini_response(text_content).strip() if text_content else ""
-                            can_check_completion = True
-                            if has_thinking:
-                                if is_still_thinking or not has_finished_thinking:
-                                    if not cleaned_content.endswith("#"):
-                                        can_check_completion = False
 
-                            if text_content and can_check_completion:
-                                # Save raw text for debugging
+                            if text_content:
                                 if len(text_content) > last_logged_len:
                                     raw_debug_path = os.path.join(ep_dir, "raw_gemini_response.txt")
                                     try:
                                         with open(raw_debug_path, "w", encoding="utf-8") as rdf:
-                                            rdf.write(text_content)
+                                            rdf.write(cleaned_content or text_content)
                                     except Exception:
                                         pass
                                     last_logged_len = len(text_content)
-                                
 
-                                extracted = extract_json_from_text(text_content)
-                                if extracted:
-                                    # Try parsing JSON to verify completeness
-                                    try:
-                                        parsed = json.loads(extracted)
-                                        raw_json_text = extracted
-                                        mock_json = parsed
-                                        gemini_web_success = True
-                                        await sse_logger.log("[TEST] Đã trích xuất và biên dịch thành công JSON đầy đủ!", "success")
-                                        break
-                                    except Exception:
-                                        # Not complete or malformed yet, continue waiting
-                                        pass
+                                if not is_generating and not is_still_thinking:
+                                    if cleaned_content.endswith("#"):
+                                        try:
+                                            parsed = parse_gemini_recap_text(text_content)
+                                            if parsed and len(parsed) >= 4:
+                                                mock_json = parsed
+                                                gemini_web_success = True
+                                                await sse_logger.log(f"[TEST] Đã trích xuất và biên dịch thành công ({len(parsed)} đoạn)! ", "success")
+                                                break
+                                        except Exception:
+                                            pass
+
+                                    extracted = extract_json_from_text(text_content)
+                                    if extracted:
+                                        try:
+                                            parsed = json.loads(extracted)
+                                            if isinstance(parsed, list) and len(parsed) > 0:
+                                                raw_json_text = extracted
+                                                mock_json = parsed
+                                                gemini_web_success = True
+                                                await sse_logger.log("[TEST] Đã trích xuất và biên dịch thành công JSON đầy đủ!", "success")
+                                                break
+                                        except Exception:
+                                            pass
+
                         except Exception:
                             pass
                         
@@ -5133,18 +5590,14 @@ class TestRequest(BaseModel):
     overlay_path: str = None
 
 @app.post("/api/run-test")
-async def run_test_endpoint(payload: TestRequest):
-    if os.getenv("RECAP_ENABLE_LEGACY_TESTS", "").strip() != "1":
-        raise HTTPException(status_code=404, detail="Legacy test endpoint is disabled.")
+async def run_test_endpoint(payload: TestRequest, background_tasks: BackgroundTasks):
     global crawler_running
     if crawler_running:
         await sse_logger.log("Yêu cầu chạy test bị từ chối: Một tiến trình khác đang chạy.", "warning")
         raise HTTPException(status_code=409, detail="A task is already running.")
     
 
-    logo_path = _validated_asset_reference(payload.logo_path)
-    overlay_path = _validated_asset_reference(payload.overlay_path)
-    asyncio.create_task(run_test_task(logo_path, overlay_path))
+    background_tasks.add_task(run_test_task, payload.logo_path, payload.overlay_path)
     return {"status": "success", "message": "Bắt đầu chạy test workflow trong nền."}
 
 
@@ -5188,16 +5641,25 @@ async def clear_cache():
                     await sse_logger.log(f"Không thể xóa tệp tải lên {file}: {str(e)}", "warning")
                     
 
-    await sse_logger.log(f"Đã xóa thành công {len(deleted_files)} file cache và tệp tải lên.", "success")
-    return {"status": "success", "message": f"Đã xóa {len(deleted_files)} cache files thành công."}
+    # Clear browser cache
+    b_cache_info = ""
+    try:
+        b_res = await asyncio.to_thread(clear_browser_cache)
+        b_cache_info = f" Đồng thời dọn dẹp {b_res.get('cleaned_mb', 0)} MB browser cache ({b_res.get('cleaned_folders', 0)} thư mục)."
+    except Exception as b_err:
+        await sse_logger.log(f"Lỗi khi xóa browser cache: {b_err}", "warning")
+
+    await sse_logger.log(f"Đã xóa thành công {len(deleted_files)} file cache và tệp tải lên.{b_cache_info}", "success")
+    return {"status": "success", "message": f"Đã xóa {len(deleted_files)} cache files thành công.{b_cache_info}"}
 
 @app.post("/api/upload-logo")
 async def upload_logo(file: UploadFile = File(...)):
     import uuid
+    # Create static/uploads directory if it doesn't exist
     os.makedirs(os.path.join("static", "uploads"), exist_ok=True)
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in {".png", ".jpg", ".jpeg", ".webp"}:
-        raise HTTPException(status_code=400, detail="Logo must be a PNG, JPEG, or WebP image.")
+    
+    # Generate unique filename to avoid caching issues
+    ext = os.path.splitext(file.filename)[1] or ".png"
     filename = f"logo_{uuid.uuid4().hex}{ext}"
     file_path = os.path.join("static", "uploads", filename)
     
@@ -5212,11 +5674,11 @@ async def upload_ref_audio(file: UploadFile = File(...)):
     import uuid
     import subprocess
     import sys
+    # Create static/uploads directory if it doesn't exist
     os.makedirs(os.path.join("static", "uploads"), exist_ok=True)
-    source_ext = os.path.splitext(file.filename or "")[1].lower()
-    if source_ext not in {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg"}:
-        raise HTTPException(status_code=400, detail="Reference audio has an unsupported file type.")
-    temp_filename = f"temp_ref_{uuid.uuid4().hex}{source_ext}"
+    
+    # Save original uploaded file first
+    temp_filename = f"temp_ref_{uuid.uuid4().hex}_{file.filename}"
     temp_path = os.path.join("static", "uploads", temp_filename)
     with open(temp_path, "wb") as buffer:
         content = await file.read()
@@ -5256,10 +5718,11 @@ async def upload_ref_audio(file: UploadFile = File(...)):
 @app.post("/api/upload-overlay")
 async def upload_overlay(file: UploadFile = File(...)):
     import uuid
+    # Create static/uploads directory if it doesn't exist
     os.makedirs(os.path.join("static", "uploads"), exist_ok=True)
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in {".png", ".jpg", ".jpeg", ".webp"}:
-        raise HTTPException(status_code=400, detail="Overlay must be a PNG, JPEG, or WebP image.")
+    
+    # Generate unique filename to avoid caching issues
+    ext = os.path.splitext(file.filename)[1] or ".png"
     filename = f"overlay_{uuid.uuid4().hex}{ext}"
     file_path = os.path.join("static", "uploads", filename)
     
@@ -5270,29 +5733,48 @@ async def upload_overlay(file: UploadFile = File(...)):
     return {"status": "success", "file_path": file_path, "url": f"/uploads/{filename}"}
 
 class VideoRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     comic_folder: str
-    from_episode: int = Field(ge=1)
-    to_episode: int = Field(ge=1)
-    voice_id: str = "clone_andrew"
+    from_episode: int
+    to_episode: int
+    voice_id: str = "auto"
     logo_path: str = None
     overlay_path: str = None
     remove_text: bool = True
     remove_text_conf: float = 0.3
     remove_text_radius: int = 3
     ref_audio_path: Optional[str] = None
-    enable_flash_forward_intro: bool = False
-    flash_forward_custom_hook: Optional[str] = None
-
+    ai33pro_api_key: Optional[str] = None
+    film_grain: bool = True
+    grain_strength: int = 6
+    flip_horizontal: bool = False
+    video_mark_path: Optional[str] = None
+    video_mark_alpha: float = 0.01
+    enable_video_mark: bool = True
 
 def find_ffmpeg() -> str:
     import shutil
+    # 0. Check custom environment variable
+    env_override = os.getenv("FFMPEG_PATH")
+    if env_override and os.path.exists(env_override):
+        return env_override
+
     # 1. Check in PATH
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path:
         return ffmpeg_path
 
-    # 2. Check CapCut AppData directory
+    # 2. Check standard Windows tools directories
+    common_paths = [
+        r"C:\tools\ffmpeg\bin\ffmpeg.exe",
+        r"C:\ffmpeg\bin\ffmpeg.exe",
+        r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "ffmpeg", "bin", "ffmpeg.exe"),
+    ]
+    for p in common_paths:
+        if os.path.exists(p):
+            return p
+
+    # 3. Check CapCut AppData directory
     appdata_local = os.getenv("LOCALAPPDATA")
     if appdata_local:
         capcut_dir = os.path.join(appdata_local, "CapCut", "Apps")
@@ -5306,13 +5788,59 @@ def find_ffmpeg() -> str:
                 if os.path.exists(exe_path):
                     return exe_path
 
-    # 3. Fail safe fallback
+    # 4. Fail safe fallback
     return "ffmpeg"
+
+def check_ffmpeg_has_mp3lame(ffmpeg_exe: str) -> bool:
+    """Returns True if the specified FFmpeg binary supports libmp3lame encoding."""
+    import subprocess
+    if not ffmpeg_exe or not os.path.exists(ffmpeg_exe):
+        return False
+    try:
+        startupinfo = None
+        if sys.platform == 'win32':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        res = subprocess.run(
+            [ffmpeg_exe, "-encoders"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            startupinfo=startupinfo, timeout=5, text=True, errors="ignore"
+        )
+        return "libmp3lame" in res.stdout
+    except Exception:
+        return False
+
+def get_nvenc_params(encoder: str) -> list:
+    """
+    Returns optimal FFmpeg encoding parameters for the given video encoder.
+    Optimized for NVIDIA GeForce RTX 3060 (NVENC Gen 7/8).
+    """
+    if encoder == 'h264_nvenc':
+        return [
+            "-c:v", "h264_nvenc",
+            "-preset", "p4",        # p4: balanced speed & quality on Ampere
+            "-tune", "hq",          # High quality mode
+            "-rc", "vbr",           # Variable bitrate
+            "-cq", "22",            # Constant quality target
+            "-b:v", "0",
+            "-maxrate", "12M",
+            "-bufsize", "24M",
+            "-pix_fmt", "yuv420p"
+        ]
+    elif encoder == 'libx264':
+        return [
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "22",
+            "-pix_fmt", "yuv420p",
+            "-threads", "6"
+        ]
+    return ["-c:v", encoder]
 
 def get_working_encoder(ffmpeg_path: str, test_image: str) -> str:
     import subprocess
     import sys
-    encoders = ['h264_videotoolbox', 'h264_nvenc', 'h264_amf', 'h264_qsv', 'libx264']
+    encoders = ['h264_nvenc', 'h264_qsv', 'h264_amf', 'h264_videotoolbox', 'libx264']
     if not test_image or not os.path.exists(test_image):
         return 'libx264'
     for enc in encoders:
@@ -5443,15 +5971,19 @@ async def render_camera_clip(
     
     extra_args = []
     if encoder == "libx264":
-        extra_args = ["-crf", "20", "-preset", "veryfast"]
+        extra_args = ["-crf", "23", "-preset", "veryfast", "-maxrate", "3500k", "-bufsize", "6000k", "-threads", "0"]
     elif encoder == "h264_nvenc":
-        extra_args = ["-cq", "20", "-preset", "p1"]
+        extra_args = [
+            "-preset", "p3", "-tune", "hq", "-rc", "vbr", "-cq", "26",
+            "-b:v", "2200k", "-maxrate", "3800k", "-bufsize", "6000k",
+            "-spatial_aq", "1", "-temporal_aq", "1", "-threads", "0"
+        ]
     elif encoder == "h264_amf":
-        extra_args = ["-rc", "cqp", "-qp_i", "20", "-qp_p", "20"]
+        extra_args = ["-rc", "cqp", "-qp_i", "24", "-qp_p", "24", "-b:v", "2200k", "-maxrate", "3800k", "-threads", "0"]
     elif encoder == "h264_qsv":
-        extra_args = ["-global_quality", "20"]
+        extra_args = ["-preset", "veryfast", "-global_quality", "25", "-b:v", "2200k", "-maxrate", "3800k", "-threads", "0"]
     else:
-        extra_args = ["-b:v", "6M"]
+        extra_args = ["-b:v", "2500k", "-threads", "0"]
 
     # Calculate keyframe timings
     if not keyframes:
@@ -5523,22 +6055,10 @@ async def render_camera_clip(
             
             cropped = img.crop((x1, y1, x2, y2))
             crop_aspect = cropped.width / cropped.height
-            # Foreground sizing
-            if crop_aspect > target_aspect:
-                fg_w = target_w
-                fg_h = int(target_w / crop_aspect)
-            else:
-                fg_h = target_h
-                fg_w = int(target_h * crop_aspect)
-                
-            # Ensure main image width is at least 1/3 of video width
-            min_fg_w = target_w // 3
-            if fg_w < min_fg_w:
-                fg_w = min_fg_w
-                fg_h = int(round(fg_w / crop_aspect))
-                
+            # Foreground sizing: Always full height (1080px)
+            fg_h = target_h
+            fg_w = max(1, int(round(target_h * crop_aspect)))
             if fg_w <= 0: fg_w = 1
-            if fg_h <= 0: fg_h = 1
 
 
             
@@ -5674,23 +6194,20 @@ async def run_video_pipeline(
     comic_folder: str, 
     from_ep: int, 
     to_ep: int, 
-    voice_id: str = "clone_andrew", 
+    voice_id: str = "auto", 
     logo_path: str = None, 
     overlay_path: str = None,
     remove_text: bool = True,
     remove_text_conf: float = 0.3,
     remove_text_radius: int = 3,
-    ref_audio_path: str = None
+    ref_audio_path: str = None,
+    ai33pro_api_key: str = None,
+    video_mark_path: str = None,
+    video_mark_alpha: float = 0.01,
+    enable_video_mark: bool = True
 ):
     global crawler_running, stop_requested
     stop_requested = False
-
-    if from_ep < 1 or to_ep < from_ep:
-        raise ValueError("Invalid episode range")
-    download_dir = str(resolve_download_path(comic_folder, must_exist=True))
-    logo_path = str(resolve_upload_path(logo_path, must_exist=True)) if logo_path else None
-    overlay_path = str(resolve_upload_path(overlay_path, must_exist=True)) if overlay_path else None
-    ref_audio_path = str(resolve_upload_path(ref_audio_path, must_exist=True)) if ref_audio_path else None
 
     import httpx
     async with crawler_lock:
@@ -5699,6 +6216,7 @@ async def run_video_pipeline(
 
         try:
             project_dir = os.path.dirname(os.path.abspath(__file__))
+            download_dir = os.path.join(project_dir, "downloads", comic_folder)
 
             # Clean up old render cache files before starting to avoid caching issues
             for cache_file in ["audio.mp3", "transcript.srt", "combined_silent.mp4", "final.mp4", "concat_list.txt"]:
@@ -5759,7 +6277,7 @@ async def run_video_pipeline(
             else:
                 await sse_logger.log("Đang sinh local TTS...", "info")
                 from tts_provider import generate_tts
-                success = await generate_tts(concatenated_text, audio_path, srt_path, voice_id, ref_audio_path)
+                success = await generate_tts(concatenated_text, audio_path, srt_path, voice_id, ref_audio_path, ai33pro_api_key=ai33pro_api_key)
                 if not success:
                     raise Exception("Lỗi khi tạo local TTS hoặc Whisper transcript.")
 
@@ -5776,9 +6294,11 @@ async def run_video_pipeline(
 
                 await sse_logger.log("Đã tạo xong local audio.mp3 và transcript.srt.", "success")
 
-            # 3. Parse transcript.srt
-            await sse_logger.log("Đang phân tích transcript.srt...", "info")
-            with open(srt_path, "r", encoding="utf-8") as f:
+            # 3. Parse transcript.srt (prefer raw transcript if available)
+            raw_srt_path = os.path.join(download_dir, "transcript_raw.srt")
+            source_srt_path = raw_srt_path if os.path.exists(raw_srt_path) else srt_path
+            await sse_logger.log(f"Đang phân tích {os.path.basename(source_srt_path)}...", "info")
+            with open(source_srt_path, "r", encoding="utf-8") as f:
                 srt_content = f.read()
 
             srt_content = srt_content.replace('\r\n', '\n').strip()
@@ -5814,15 +6334,27 @@ async def run_video_pipeline(
                     seg["episode"] = ep_num
                     summary_segments.append(seg)
 
-            from workflow_stages_2 import align_subtitles_to_segments, get_video_duration
-            audio_dur = 0.0
-            if os.path.exists(audio_path):
-                try:
-                    audio_dur = get_video_duration(audio_path, ffmpeg_exe)
-                except Exception:
-                    pass
+            def clean_w(word):
+                return re.sub(r'[^a-z0-9]', '', word.lower())
 
-            normalized_srt_entries = align_subtitles_to_segments(subtitles, summary_segments, audio_dur)
+            # Compute cumulative word boundaries for segments
+            segment_word_counts = []
+            for seg in summary_segments:
+                speech = seg.get("speech", "")
+                words = [clean_w(w) for w in speech.split() if clean_w(w)]
+                segment_word_counts.append(len(words))
+
+            segment_ranges = []
+            current_idx = 0
+            for count in segment_word_counts:
+                segment_ranges.append((current_idx, current_idx + count))
+                current_idx += count
+            total_segment_words = current_idx
+
+            # 4. Match and Normalize Subtitles to Summary Segments (1-to-1 matching)
+            await sse_logger.log("Đang khớp nối và chuẩn hóa phụ đề với các cảnh truyện tranh...", "info")
+            from workflow_stages_2 import align_transcript_to_segments
+            normalized_srt_entries = align_transcript_to_segments(subtitles, summary_segments)
 
             # Overwrite the srt_path with normalized subtitles
             try:
@@ -5919,7 +6451,7 @@ async def run_video_pipeline(
                             bg.save(fallback_jpg, "JPEG")
                             bg.close()
                             
-                            extra_args = ["-crf", "20", "-preset", "veryfast"] if working_encoder == "libx264" else ["-b:v", "6M"]
+                            extra_args = ["-crf", "23", "-preset", "veryfast", "-maxrate", "3500k", "-bufsize", "6000k"] if working_encoder == "libx264" else ["-b:v", "2200k", "-maxrate", "3800k"]
                             fallback_cmd = [
                                 ffmpeg_exe, "-y",
                                 "-loop", "1",
@@ -6077,15 +6609,19 @@ async def run_video_pipeline(
 
             final_args = []
             if working_encoder == "libx264":
-                final_args = ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast"]
+                final_args = ["-c:v", "libx264", "-crf", "23", "-preset", "veryfast", "-maxrate", "3500k", "-bufsize", "6000k", "-threads", "0"]
             elif working_encoder == "h264_nvenc":
-                final_args = ["-c:v", "h264_nvenc", "-cq", "20", "-preset", "p1"]
+                final_args = [
+                    "-c:v", "h264_nvenc", "-preset", "p3", "-tune", "hq", "-rc", "vbr", "-cq", "26",
+                    "-b:v", "2200k", "-maxrate", "3800k", "-bufsize", "6000k",
+                    "-spatial_aq", "1", "-temporal_aq", "1", "-threads", "0"
+                ]
             elif working_encoder == "h264_amf":
-                final_args = ["-c:v", "h264_amf", "-rc", "cqp", "-qp_i", "20", "-qp_p", "20"]
+                final_args = ["-c:v", "h264_amf", "-rc", "cqp", "-qp_i", "24", "-qp_p", "24", "-b:v", "2200k", "-maxrate", "3800k", "-threads", "0"]
             elif working_encoder == "h264_qsv":
-                final_args = ["-c:v", "h264_qsv", "-global_quality", "20"]
+                final_args = ["-c:v", "h264_qsv", "-preset", "veryfast", "-global_quality", "25", "-b:v", "2200k", "-maxrate", "3800k", "-threads", "0"]
             else:
-                final_args = ["-c:v", working_encoder, "-b:v", "6M"]
+                final_args = ["-c:v", working_encoder, "-b:v", "2500k", "-threads", "0"]
 
             logo_path_to_use = logo_path
             if logo_path_to_use:
@@ -6099,15 +6635,71 @@ async def run_video_pipeline(
             if not overlay_path_to_use or not os.path.exists(overlay_path_to_use):
                 overlay_path_to_use = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "overlay.png")
 
+            video_mark_path_to_use = video_mark_path
+            if video_mark_path_to_use:
+                video_mark_path_to_use = os.path.abspath(video_mark_path_to_use)
+            if not video_mark_path_to_use or not os.path.exists(video_mark_path_to_use):
+                video_mark_path_to_use = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "video_mark.mp4")
+
+            has_video_mark = enable_video_mark and os.path.exists(video_mark_path_to_use) and os.path.getsize(video_mark_path_to_use) > 1000
+            has_logo = os.path.exists(logo_path_to_use) and os.path.getsize(logo_path_to_use) > 0
+            has_overlay = os.path.exists(overlay_path_to_use) and os.path.getsize(overlay_path_to_use) > 0
+
             final_cmd = [
                 ffmpeg_exe, "-y",
                 "-i", "combined_silent.mp4",
                 "-i", "audio.mp3",
-                "-i", logo_path_to_use,
-                "-i", overlay_path_to_use,
-                "-filter_complex", "[2:v]scale=50:50[logo];[3:v]scale=1920:1080,format=rgba,colorchannelmixer=aa=0.005[ol];[0:v][ol]overlay[temp1];[temp1][logo]overlay=25:25[v]",
+            ]
+            current_idx = 2
+            vm_idx = None
+            ol_idx = None
+            lg_idx = None
+
+            if has_video_mark:
+                final_cmd += ["-stream_loop", "-1", "-i", video_mark_path_to_use]
+                vm_idx = current_idx
+                current_idx += 1
+
+            if has_overlay:
+                final_cmd += ["-loop", "1", "-i", overlay_path_to_use]
+                ol_idx = current_idx
+                current_idx += 1
+
+            if has_logo:
+                final_cmd += ["-loop", "1", "-i", logo_path_to_use]
+                lg_idx = current_idx
+                current_idx += 1
+
+            filter_parts = []
+            curr_v = "0:v"
+
+            if has_video_mark:
+                filter_parts.append(f"[{vm_idx}:v]crop=w=min(iw\\,ih*16/9):h=min(ih\\,iw*9/16),scale=1920:1080,format=rgba,colorchannelmixer=aa={video_mark_alpha:.4f}[vm]")
+                next_v = "v_vm" if (has_overlay or has_logo) else "v"
+                filter_parts.append(f"[{curr_v}][vm]overlay=shortest=1[{next_v}]")
+                curr_v = next_v
+
+            if has_overlay:
+                filter_parts.append(f"[{ol_idx}:v]scale=1920:1080,format=rgba,colorchannelmixer=aa=0.005[ol]")
+                next_v = "v_ol" if has_logo else "v"
+                filter_parts.append(f"[{curr_v}][ol]overlay=shortest=1[{next_v}]")
+                curr_v = next_v
+
+            if has_logo:
+                filter_parts.append(f"[{lg_idx}:v]scale=50:50[logo]")
+                filter_parts.append(f"[{curr_v}][logo]overlay=25:25:shortest=1[v]")
+                curr_v = "v"
+
+            if curr_v == "0:v":
+                filter_parts.append("[0:v]null[v]")
+
+            filter_parts.append("[1:a]loudnorm=I=-14:TP=-1.5:LRA=11,apad[a]")
+            final_filter_str = ";".join(filter_parts)
+
+            final_cmd += [
+                "-filter_complex", final_filter_str,
                 "-map", "[v]",
-                "-map", "1:a"
+                "-map", "[a]"
             ] + final_args + [
                 "-c:a", "aac",
                 "-b:a", "192k",
@@ -6147,114 +6739,566 @@ async def run_video_pipeline(
 
             await sse_logger.log("Đã xuất video thành công!", "success")
             await sse_logger.log("Video completed.", "success", app_status="idle", status_text="Sẵn sàng")
-            return True
 
         except Exception as e:
             import traceback
             traceback.print_exc()
             await sse_logger.log(f"Lỗi tiến trình tạo video: {str(e)}", "error", "idle", "Sẵn sàng")
-            return False
         finally:
             crawler_running = False
 
-VIDEO_RUNTIME_ROOT = (Path(__file__).resolve().parent / "runtime" / "video-jobs").resolve()
-
-
-def _video_job_dir(job_id: str) -> Path:
-    try:
-        normalized = str(__import__("uuid").UUID(job_id))
-    except (ValueError, AttributeError) as exc:
-        raise HTTPException(status_code=404, detail="Video job not found.") from exc
-    return VIDEO_RUNTIME_ROOT / normalized
-
-
 @app.post("/api/generate-video")
-async def generate_video(payload: VideoRequest):
-    if payload.to_episode < payload.from_episode:
-        raise HTTPException(status_code=422, detail="to_episode must be greater than or equal to from_episode")
-    try:
-        resolve_download_path(payload.comic_folder, must_exist=True)
-    except PathAccessError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Comic folder does not exist.") from exc
+async def generate_video(payload: VideoRequest, background_tasks: BackgroundTasks):
+    global crawler_running
+    if crawler_running:
+        await sse_logger.log("Yêu cầu tạo video bị từ chối: Một tiến trình khác đang chạy.", "warning")
+        raise HTTPException(status_code=409, detail="Another task is already running.")
 
-    import uuid
-    job_id = str(uuid.uuid4())
-    job_dir = VIDEO_RUNTIME_ROOT / job_id
-    job_dir.mkdir(parents=True, exist_ok=False)
-    worker_input = {
-        "job_id": job_id,
-        "comic_folder": payload.comic_folder,
-        "from_episode": payload.from_episode,
-        "to_episode": payload.to_episode,
-        "voice_id": normalize_tts_voice_mode(payload.voice_id),
-        "logo_path": _validated_asset_reference(payload.logo_path),
-        "overlay_path": _validated_asset_reference(payload.overlay_path),
-        "remove_text": payload.remove_text,
-        "remove_text_conf": payload.remove_text_conf,
-        "remove_text_radius": payload.remove_text_radius,
-        "ref_audio_path": _validated_asset_reference(payload.ref_audio_path),
-        "enable_flash_forward_intro": payload.enable_flash_forward_intro,
-        "flash_forward_custom_hook": payload.flash_forward_custom_hook,
-    }
-    atomic_write_json(job_dir / "input.json", worker_input)
-    command = [sys.executable, "-m", "video_worker", "--job-dir", str(job_dir)]
-    env = os.environ.copy()
-    env["RECAP_WORKER_PROCESS"] = "1"
-    env["RECAP_TASK_DB"] = str(job_dir / "worker_app_state.json")
-    process = await asyncio.to_thread(
-        popen_command,
-        command,
-        cwd=Path(__file__).resolve().parent,
-        env=env,
+    background_tasks.add_task(
+        run_video_pipeline,
+        payload.comic_folder,
+        payload.from_episode,
+        payload.to_episode,
+        payload.voice_id,
+        payload.logo_path,
+        payload.overlay_path,
+        payload.remove_text,
+        payload.remove_text_conf,
+        payload.remove_text_radius,
+        payload.ref_audio_path,
+        payload.ai33pro_api_key,
+        payload.video_mark_path,
+        payload.video_mark_alpha,
+        payload.enable_video_mark
     )
-    identity = identity_for_process(process, command)
-    atomic_write_json(job_dir / "launch.json", identity.to_dict())
+    return {"status": "success", "message": f"Bắt đầu quy trình tạo video cho {payload.comic_folder} trong nền."}
+
+VOICES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
+os.makedirs(VOICES_DIR, exist_ok=True)
+
+def _init_sample_voices():
+    sample_files = [
+        "voice_preview_amy - natural and sweet.mp3",
+        "jessa - easygoing and effortless.mp3"
+    ]
+    for sf in sample_files:
+        src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", sf)
+        if os.path.exists(src):
+            dst = os.path.join(VOICES_DIR, sf)
+            if not os.path.exists(dst):
+                try:
+                    shutil.copy2(src, dst)
+                except Exception:
+                    pass
+
+_init_sample_voices()
+
+@app.get("/api/voices")
+async def list_voices_endpoint():
+    os.makedirs(VOICES_DIR, exist_ok=True)
+    valid_exts = (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".webm")
+    voices = []
+    for f in sorted(os.listdir(VOICES_DIR)):
+        if any(f.lower().endswith(ext) for ext in valid_exts):
+            fp = os.path.join(VOICES_DIR, f)
+            size = os.path.getsize(fp)
+            name = os.path.splitext(f)[0]
+            if name.startswith("voice_preview_"):
+                name = name[len("voice_preview_"):]
+            name = name.replace("_", " ").strip().title()
+            voices.append({
+                "name": name,
+                "filename": f,
+                "path": os.path.join("voices", f).replace("\\", "/"),
+                "url": f"/voices/{urllib.parse.quote(f)}",
+                "size_bytes": size,
+                "size_formatted": f"{round(size / 1024, 1)} KB" if size < 1024*1024 else f"{round(size / (1024*1024), 2)} MB"
+            })
+    return {"status": "success", "voices": voices}
+
+@app.post("/api/voices/upload")
+async def upload_voice_endpoint(file: UploadFile = File(...)):
+    os.makedirs(VOICES_DIR, exist_ok=True)
+    valid_exts = (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".webm")
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in valid_exts:
+        raise HTTPException(status_code=400, detail="Định dạng âm thanh không hỗ trợ. Vui lòng tải lên file .mp3, .wav, .m4a, .ogg, .flac")
+    
+    clean_name = os.path.splitext(file.filename)[0]
+    clean_name = "".join(c for c in clean_name if c.isalnum() or c in (" ", "_", "-")).strip()
+    if not clean_name:
+        clean_name = f"voice_{int(time.time())}"
+    final_filename = f"{clean_name}{ext}"
+    dest_path = os.path.join(VOICES_DIR, final_filename)
+    
+    counter = 1
+    while os.path.exists(dest_path):
+        final_filename = f"{clean_name}_{counter}{ext}"
+        dest_path = os.path.join(VOICES_DIR, final_filename)
+        counter += 1
+        
+    with open(dest_path, "wb") as f_out:
+        content = await file.read()
+        f_out.write(content)
+        
+    size = len(content)
+    display_name = os.path.splitext(final_filename)[0].replace("_", " ").strip().title()
     return {
         "status": "success",
-        "message": f"Bắt đầu quy trình tạo video cho {payload.comic_folder} trong worker riêng.",
-        "job_id": job_id,
-        "status_url": f"/api/video-jobs/{job_id}",
+        "voice": {
+            "name": display_name,
+            "filename": final_filename,
+            "path": os.path.join("voices", final_filename).replace("\\", "/"),
+            "url": f"/voices/{urllib.parse.quote(final_filename)}",
+            "size_bytes": size,
+            "size_formatted": f"{round(size / 1024, 1)} KB" if size < 1024*1024 else f"{round(size / (1024*1024), 2)} MB"
+        }
+    }
+
+@app.delete("/api/voices/{filename}")
+async def delete_voice_endpoint(filename: str):
+    filename = os.path.basename(filename)
+    target = os.path.join(VOICES_DIR, filename)
+    if not os.path.exists(target):
+        raise HTTPException(status_code=404, detail="Không tìm thấy file voice.")
+    try:
+        os.remove(target)
+        return {"status": "success", "message": f"Đã xóa voice {filename}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không thể xóa file voice: {str(e)}")
+
+# --- PRESETS MANAGEMENT API ---
+import time
+PRESETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "presets.json")
+
+class PresetItem(BaseModel):
+    id: Optional[str] = None
+    name: str
+    headless: bool = False
+    language: str = "vi"
+    gemini_model: str = "flash"
+    tts_voice_id: str = "auto"
+    flip_horizontal: bool = False
+    voice_sample_path: Optional[str] = ""
+    voice_sample_name: Optional[str] = ""
+
+def _load_presets_data():
+    os.makedirs(os.path.dirname(PRESETS_FILE), exist_ok=True)
+    if not os.path.exists(PRESETS_FILE):
+        default_data = {
+            "active_preset_id": "default_vi",
+            "presets": [
+                {
+                    "id": "default_vi",
+                    "name": "Tiếng Việt Chuẩn (Flash)",
+                    "headless": False,
+                    "language": "vi",
+                    "gemini_model": "flash",
+                    "tts_voice_id": "auto",
+                    "flip_horizontal": False,
+                    "voice_sample_path": "",
+                    "voice_sample_name": ""
+                },
+                {
+                    "id": "english_pro_flipped",
+                    "name": "English Pro (Lật ảnh)",
+                    "headless": True,
+                    "language": "en",
+                    "gemini_model": "pro",
+                    "tts_voice_id": "auto",
+                    "flip_horizontal": True,
+                    "voice_sample_path": "",
+                    "voice_sample_name": ""
+                }
+            ]
+        }
+        try:
+            with open(PRESETS_FILE, "w", encoding="utf-8") as f:
+                json.dump(default_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return default_data
+    try:
+        with open(PRESETS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if "presets" not in data or not isinstance(data["presets"], list):
+                data["presets"] = []
+            return data
+    except Exception:
+        return {"active_preset_id": None, "presets": []}
+
+def _save_presets_data(data):
+    os.makedirs(os.path.dirname(PRESETS_FILE), exist_ok=True)
+    with open(PRESETS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+@app.get("/api/presets")
+async def get_presets_endpoint():
+    data = _load_presets_data()
+    return {
+        "status": "success",
+        "active_preset_id": data.get("active_preset_id"),
+        "presets": data.get("presets", [])
+    }
+
+@app.post("/api/presets")
+async def save_preset_endpoint(preset: PresetItem):
+    data = _load_presets_data()
+    presets = data.get("presets", [])
+    
+    preset_dict = preset.dict()
+    if not preset_dict.get("id"):
+        preset_dict["id"] = f"preset_{int(time.time())}_{random.randint(100, 999)}"
+        presets.append(preset_dict)
+    else:
+        found = False
+        for i, p in enumerate(presets):
+            if p.get("id") == preset_dict["id"]:
+                presets[i] = preset_dict
+                found = True
+                break
+        if not found:
+            presets.append(preset_dict)
+            
+    data["presets"] = presets
+    data["active_preset_id"] = preset_dict["id"]
+    _save_presets_data(data)
+    return {
+        "status": "success",
+        "active_preset_id": data["active_preset_id"],
+        "preset": preset_dict,
+        "presets": presets
+    }
+
+@app.post("/api/presets/active/{preset_id}")
+async def set_active_preset_endpoint(preset_id: str):
+    data = _load_presets_data()
+    data["active_preset_id"] = preset_id
+    _save_presets_data(data)
+    return {"status": "success", "active_preset_id": preset_id}
+
+@app.delete("/api/presets/{preset_id}")
+async def delete_preset_endpoint(preset_id: str):
+    data = _load_presets_data()
+    presets = data.get("presets", [])
+    original_len = len(presets)
+    presets = [p for p in presets if p.get("id") != preset_id]
+    if len(presets) == original_len:
+        raise HTTPException(status_code=404, detail="Không tìm thấy preset cần xóa.")
+        
+    data["presets"] = presets
+    if data.get("active_preset_id") == preset_id:
+        data["active_preset_id"] = presets[0]["id"] if presets else None
+    _save_presets_data(data)
+    return {
+        "status": "success",
+        "active_preset_id": data.get("active_preset_id"),
+        "presets": presets
+    }
+
+from typing import List, Dict, Optional, Any
+import re
+
+class SubtitleTranslateRequest(BaseModel):
+    srt_text: Optional[str] = None
+    cues: Optional[List[Dict[str, Any]]] = None
+    target_lang: str = "vi"
+    source_lang: str = "auto"
+
+
+def _sync_translate_chunk(combined_text: str, target_lang: str = "vi", source_lang: str = "auto") -> str:
+    """Synchronous translate worker using Google Translate API with fallback clients."""
+    import urllib.request
+    import urllib.parse
+    import json
+
+    clients = ["gtx", "dict-chrome-ex"]
+    last_err = None
+    for client in clients:
+        try:
+            data = urllib.parse.urlencode({
+                "client": client,
+                "sl": source_lang,
+                "tl": target_lang,
+                "dt": "t",
+                "q": combined_text
+            }).encode("utf-8")
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Accept": "*/*",
+                "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
+            }
+
+            req = urllib.request.Request(
+                "https://translate.googleapis.com/translate_a/single",
+                data=data,
+                headers=headers
+            )
+
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+                if body and isinstance(body, list) and len(body) > 0 and isinstance(body[0], list):
+                    return "".join(part[0] for part in body[0] if part and len(part) > 0 and part[0])
+        except Exception as e:
+            last_err = e
+            continue
+    raise last_err or Exception("All translation clients failed")
+
+
+@app.post("/api/subtitles/translate")
+async def translate_subtitles_endpoint(payload: SubtitleTranslateRequest):
+    import re
+    target_lang = (payload.target_lang or "vi").strip()
+    source_lang = (payload.source_lang or "auto").strip()
+    raw_cues = payload.cues or []
+
+    # If cues were not sent but srt_text was provided, parse SRT
+    if not raw_cues and payload.srt_text:
+        parsed_cues = []
+        blocks = re.split(r'\n\s*\n', payload.srt_text.replace('\r\n', '\n').replace('\r', '\n').strip())
+        for block in blocks:
+            lines = [l.strip() for l in block.split('\n') if l.strip()]
+            if len(lines) < 2:
+                continue
+            time_idx = -1
+            for i, line in enumerate(lines):
+                if '-->' in line:
+                    time_idx = i
+                    break
+            if time_idx != -1:
+                parts = lines[time_idx].split('-->')
+                if len(parts) == 2:
+                    text_content = "\n".join(lines[time_idx + 1:])
+                    parsed_cues.append({
+                        "id": len(parsed_cues) + 1,
+                        "startStr": parts[0].strip(),
+                        "endStr": parts[1].strip(),
+                        "text": text_content
+                    })
+        raw_cues = parsed_cues
+
+    if not raw_cues:
+        raise HTTPException(status_code=400, detail="Không tìm thấy câu thoại hợp lệ để dịch.")
+
+    # Batch translate concurrently with semaphore
+    batch_size = 40
+    batches = [raw_cues[i:i + batch_size] for i in range(0, len(raw_cues), batch_size)]
+    translated_map = {}
+    sem = asyncio.Semaphore(8)
+
+    async def _process_batch(b_idx: int, batch: list):
+        offset = b_idx * batch_size
+        lines = [f"[{offset + i}] {c.get('text', '').replace(chr(10), ' _nl_ ')}" for i, c in enumerate(batch)]
+        combined = "\n".join(lines)
+
+        try:
+            async with sem:
+                raw_trans = await asyncio.to_thread(_sync_translate_chunk, combined, target_lang, source_lang)
+            pattern = re.compile(r"^[\[【\s]*(\d+)[\]】\s\:\.\-]+\s*(.*)$")
+            cur_idx = None
+            cur_lines = []
+
+            for line in raw_trans.splitlines():
+                trimmed = line.strip()
+                if not trimmed:
+                    continue
+                m = pattern.match(trimmed)
+                if m:
+                    if cur_idx is not None:
+                        combined_sub = "\n".join(cur_lines).replace(" _nl_ ", "\n").replace("_nl_", "\n").strip()
+                        translated_map[cur_idx] = combined_sub
+                    cur_idx = int(m.group(1))
+                    cur_lines = [m.group(2).strip()] if m.group(2).strip() else []
+                else:
+                    if cur_idx is not None:
+                        cur_lines.append(trimmed)
+
+            if cur_idx is not None:
+                combined_sub = "\n".join(cur_lines).replace(" _nl_ ", "\n").replace("_nl_", "\n").strip()
+                translated_map[cur_idx] = combined_sub
+        except Exception as e:
+            print(f"[Translate] Batch {b_idx} error: {e}", flush=True)
+
+    await asyncio.gather(*[_process_batch(idx, b) for idx, b in enumerate(batches)])
+
+    translated_cues = []
+    srt_output_lines = []
+
+    for i, c in enumerate(raw_cues):
+        orig_text = c.get("text", "")
+        trans_text = translated_map.get(i, orig_text)
+        cue_item = {
+            **c,
+            "original_text": orig_text,
+            "translated_text": trans_text,
+            "text": trans_text
+        }
+        translated_cues.append(cue_item)
+
+        start_str = c.get("fullStartStr") or c.get("startStr") or c.get("start") or "00:00:00,000"
+        end_str = c.get("fullEndStr") or c.get("endStr") or c.get("end") or "00:00:00,000"
+        srt_output_lines.append(f"{i + 1}\n{start_str} --> {end_str}\n{trans_text}\n")
+
+    return {
+        "status": "success",
+        "target_lang": target_lang,
+        "source_lang": source_lang,
+        "cues": translated_cues,
+        "translated_cues": translated_cues,
+        "translated_srt": "\n".join(srt_output_lines)
     }
 
 
-@app.get("/api/video-jobs/{job_id}")
-async def get_video_job(job_id: str):
-    job_dir = _video_job_dir(job_id)
-    if not job_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Video job not found.")
-    status_path = job_dir / "status.json"
-    if status_path.is_file():
-        try:
-            data = json.loads(status_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            data = {"status": "running", "message": "Worker status is being updated."}
-    else:
-        data = {"status": "running", "message": "Worker is starting."}
-        launch_path = job_dir / "launch.json"
-        if launch_path.is_file():
+@app.get("/api/subtitles")
+async def get_subtitles_endpoint(
+    folder: Optional[str] = None,
+    episode: Optional[str] = None,
+    video: Optional[str] = None,
+    raw_path: Optional[str] = None
+):
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    downloads_dir = os.path.join(project_dir, "downloads")
+    
+    candidates_to_check = []
+    
+    clean_folder = urllib.parse.unquote((folder or "").strip().replace("\\", "/").strip("/"))
+    if clean_folder.lower().startswith("downloads/"):
+        clean_folder = clean_folder[len("downloads/"):]
+    if clean_folder.lower() in ("none", "null"):
+        clean_folder = ""
+        
+    clean_ep = (str(episode) if episode is not None else "").strip()
+    if clean_ep.lower() in ("none", "null"):
+        clean_ep = ""
+        
+    clean_video = urllib.parse.unquote((video or "").strip().replace("\\", "/"))
+    clean_raw = urllib.parse.unquote((raw_path or "").strip())
+    
+    # 0. Check raw_path on disk directly if provided
+    if clean_raw:
+        raw_norm = os.path.normpath(clean_raw)
+        if os.path.isfile(raw_norm):
+            candidates_to_check.append(os.path.splitext(raw_norm)[0] + ".srt")
+            candidates_to_check.append(os.path.join(os.path.dirname(raw_norm), "transcript.srt"))
+            candidates_to_check.append(os.path.join(os.path.dirname(raw_norm), "transcript_raw.srt"))
+        elif clean_raw.lower().endswith((".mp4", ".mkv", ".webm")):
+            candidates_to_check.append(os.path.splitext(raw_norm)[0] + ".srt")
+
+    # 1. Video-based resolution
+    if clean_video:
+        if os.path.isfile(clean_video):
+            candidates_to_check.append(os.path.splitext(clean_video)[0] + ".srt")
+            candidates_to_check.append(os.path.join(os.path.dirname(clean_video), "transcript.srt"))
+
+        norm_v = clean_video
+        d_idx = norm_v.lower().find("downloads/")
+        if d_idx != -1:
+            rel_path = norm_v[d_idx + len("downloads/"):].lstrip("/")
+            abs_v = os.path.join(downloads_dir, rel_path.replace("/", os.sep))
+            v_dir = os.path.dirname(abs_v)
+            # The exact 1-to-1 video subtitle matching the mp4 filename
+            base_srt = os.path.splitext(abs_v)[0] + ".srt"
+            candidates_to_check.append(base_srt)
+            candidates_to_check.append(os.path.join(v_dir, "transcript.srt"))
+            candidates_to_check.append(os.path.join(v_dir, "transcript_raw.srt"))
+            
+            parts = rel_path.split("/")
+            if parts and not clean_folder and parts[0].lower() not in ("none", "null", ""):
+                clean_folder = parts[0]
+                
+    # 2. Folder and episode-based resolution
+    if clean_folder:
+        folder_dir = os.path.join(downloads_dir, clean_folder)
+        if clean_ep and "-" not in clean_ep:
+            # Single episode requested: prioritize episode directory transcript
+            ep_dir = os.path.join(folder_dir, f"episode_{clean_ep}")
+            candidates_to_check.append(os.path.join(ep_dir, f"{clean_folder}_ep{clean_ep}.srt"))
+            candidates_to_check.append(os.path.join(ep_dir, "transcript.srt"))
+            candidates_to_check.append(os.path.join(ep_dir, "transcript_raw.srt"))
+            candidates_to_check.append(os.path.join(ep_dir, "video.srt"))
+            candidates_to_check.append(os.path.join(folder_dir, "output", f"{clean_folder}_ep{clean_ep}.srt"))
+            candidates_to_check.append(os.path.join(folder_dir, "output", f"{clean_folder}.srt"))
+            candidates_to_check.append(os.path.join(folder_dir, "output", "transcript.srt"))
+        elif clean_ep and "-" in clean_ep:
+            # Range episode requested (e.g. 1-3): prioritize output merged srt
+            parts = clean_ep.split("-")
+            f_ep, t_ep = parts[0].strip(), parts[1].strip()
+            candidates_to_check.append(os.path.join(folder_dir, "output", f"{clean_folder}_ep{f_ep}_{t_ep}.srt"))
+            candidates_to_check.append(os.path.join(folder_dir, "output", f"{clean_folder}.srt"))
+            candidates_to_check.append(os.path.join(folder_dir, "output", "transcript.srt"))
+        else:
+            candidates_to_check.append(os.path.join(folder_dir, "output", f"{clean_folder}.srt"))
+            candidates_to_check.append(os.path.join(folder_dir, "output", "transcript.srt"))
+            
+        candidates_to_check.append(os.path.join(folder_dir, f"{clean_folder}.srt"))
+        candidates_to_check.append(os.path.join(folder_dir, "transcript.srt"))
+        
+        out_d = os.path.join(folder_dir, "output")
+        if os.path.isdir(out_d):
+            for s_f in os.listdir(out_d):
+                if s_f.endswith(".srt"):
+                    candidates_to_check.append(os.path.join(out_d, s_f))
+
+        if os.path.isdir(folder_dir):
+            for sub in sorted(os.listdir(folder_dir)):
+                if sub.startswith("episode_"):
+                    candidates_to_check.append(os.path.join(folder_dir, sub, "transcript.srt"))
+                    candidates_to_check.append(os.path.join(folder_dir, sub, "transcript_raw.srt"))
+
+    # 3. Fallback: Search all folders in downloads_dir ONLY if NO video and NO folder was provided
+    if not clean_folder and not clean_video and not clean_raw and os.path.isdir(downloads_dir):
+        for fld in sorted(os.listdir(downloads_dir)):
+            fld_path = os.path.join(downloads_dir, fld)
+            if not os.path.isdir(fld_path):
+                continue
+            if clean_ep:
+                candidates_to_check.append(os.path.join(fld_path, f"episode_{clean_ep}", "transcript.srt"))
+                candidates_to_check.append(os.path.join(fld_path, f"episode_{clean_ep}", "transcript_raw.srt"))
+            candidates_to_check.append(os.path.join(fld_path, "output", f"{fld}.srt"))
+            candidates_to_check.append(os.path.join(fld_path, "output", "transcript.srt"))
+
+    seen_paths = set()
+    for c_path in candidates_to_check:
+        norm_c = os.path.normpath(c_path)
+        if norm_c in seen_paths:
+            continue
+        seen_paths.add(norm_c)
+        if os.path.isfile(norm_c) and os.path.getsize(norm_c) > 10:
             try:
-                identity = ProcessIdentity.from_dict(json.loads(launch_path.read_text(encoding="utf-8")))
-                if not process_matches(identity):
-                    data = {"status": "failed", "message": "Video worker exited before reporting status."}
-            except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
-                data = {"status": "failed", "message": "Video worker identity is invalid."}
+                with open(norm_c, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                if "-->" in content:
+                    rel_url = "/" + os.path.relpath(norm_c, project_dir).replace("\\", "/")
+                    return {
+                        "status": "success",
+                        "content": content,
+                        "filename": os.path.basename(norm_c),
+                        "url": rel_url
+                    }
+            except Exception:
+                continue
+
     return {
-        "job_id": job_id,
-        "status": data.get("status", "failed"),
-        "message": redact_sensitive_text(str(data.get("message", ""))),
-        "final_video_url": data.get("final_video_url"),
+        "status": "not_found",
+        "message": "No subtitle file found for the requested parameters."
     }
 
     # Mount static files (style.css, app.js)
     # Mount downloads static directory
 os.makedirs("downloads", exist_ok=True)
 app.mount("/downloads", StaticFiles(directory="downloads"), name="downloads")
+app.mount("/Downloads", StaticFiles(directory="downloads"), name="downloads_capital")
+
+    # Mount voices static directory
+os.makedirs("voices", exist_ok=True)
+app.mount("/voices", StaticFiles(directory="voices"), name="voices_dir")
 
     # Mount static files (style.css, app.js)
+app.mount("/static", StaticFiles(directory="static"), name="static_dir")
 app.mount("/", StaticFiles(directory="static"), name="static")
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=False)
+

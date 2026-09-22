@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Stage Studio — Chạy & Kiểm Tra Độc Lập Từng Stage</title>
+    <!-- Google Fonts: Outfit & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="test_stage.css?v=2.0">
+</head>
+<body>
+    <div class="background-glow"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <i data-lucide="flask-conical"></i>
+                </div>
+                <div>
+                    <h1>Test Stage Studio <span class="title-badge">Dev & QA</span></h1>
+                    <p class="subtitle">Kiểm tra và đánh giá độc lập từng Stage trong quy trình sản xuất recap truyện</p>
+                </div>
+            </div>
+            <div class="header-nav">
+                <a href="/" class="btn-back-home">
+                    <i data-lucide="arrow-left"></i>
+                    <span>Về Trang chủ</span>
+                </a>
+                <div class="status-indicator">
+                    <span class="status-dot idle" id="status-dot"></span>
+                    <span class="status-text" id="status-text">Sẵn sàng</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Studio Grid -->
+        <main class="studio-grid">
+            <!-- Left Panel: Stage & Input Controls -->
+            <section class="glass-card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <i data-lucide="layers"></i>
+                        <span>1. Chọn Stage Cần Test Độc Lập</span>
+                    </div>
+                </div>
+
+                <!-- Stage Selection Cards (4 Stages) -->
+                <div class="stage-selector-group">
+                    <label class="stage-card-option active" id="label-stage-2b">
+                        <input type="radio" name="test-stage" value="stage_2b" checked>
+                        <div class="stage-card-icon">
+                            <i data-lucide="scissors"></i>
+                        </div>
+                        <div class="stage-card-body">
+                            <div class="stage-card-head">
+                                <span class="stage-card-name">Phase 1 — Thu Thập & Xử Lý Ảnh (Smart Paging)</span>
+                                <span class="stage-card-pill">Phase 1 (Visual & PDF)</span>
+                            </div>
+                            <p class="stage-card-desc">Cắt phân trang bố cục visual thông minh, lọc khung rác/bong bóng thoại và xuất file PDF hoàn chỉnh.</p>
+                        </div>
+                    </label>
+
+                    <label class="stage-card-option" id="label-stage-5">
+                        <input type="radio" name="test-stage" value="stage_5">
+                        <div class="stage-card-icon">
+                            <i data-lucide="bot"></i>
+                        </div>
+                        <div class="stage-card-body">
+                            <div class="stage-card-head">
+                                <span class="stage-card-name">Phase 2 — Tạo Kịch Bản AI VLM (Gemini)</span>
+                                <span class="stage-card-pill">Phase 2 (Script & JSON)</span>
+                            </div>
+                            <p class="stage-card-desc">Gửi PDF tới AI Gemini tạo kịch bản tóm tắt recap.json và ghép cặp chuẩn xác [Ảnh — Lời dẫn].</p>
+                        </div>
+                    </label>
+
+                    <label class="stage-card-option" id="label-stage-8">
+                        <input type="radio" name="test-stage" value="stage_8">
+                        <div class="stage-card-icon">
+                            <i data-lucide="volume-2"></i>
+                        </div>
+                        <div class="stage-card-body">
+                            <div class="stage-card-head">
+                                <span class="stage-card-name">Phase 3 & 4 — Giọng Đọc TTS & Phụ Đề</span>
+                                <span class="stage-card-pill">Phase 3 & 4 (TTS & SRT)</span>
+                            </div>
+                            <p class="stage-card-desc">Chuyển đổi kịch bản recap.json thành file âm thanh lồng tiếng audio.mp3 và phụ đề transcript.srt.</p>
+                        </div>
+                    </label>
+
+                    <label class="stage-card-option" id="label-stage-10">
+                        <input type="radio" name="test-stage" value="stage_10">
+                        <div class="stage-card-icon">
+                            <i data-lucide="video"></i>
+                        </div>
+                        <div class="stage-card-body">
+                            <div class="stage-card-head">
+                                <span class="stage-card-name">Phase 5 — Render Video & Xuất Bản</span>
+                                <span class="stage-card-pill">Phase 5 (Render Video)</span>
+                            </div>
+                            <p class="stage-card-desc">Ghép các khung ảnh visual với âm thanh và hiệu ứng motion/zoom để render video.mp4 hoàn chỉnh.</p>
+                        </div>
+                    </label>
+                </div>
+
+                <div class="card-header" style="margin-top: 0.5rem;">
+                    <div class="card-title">
+                        <i data-lucide="folder-search"></i>
+                        <span>2. Nhập Folder / Input Kiểm Thử</span>
+                    </div>
+                </div>
+
+                <!-- Input Selector Tabs -->
+                <div class="tab-headers">
+                    <button class="tab-btn active" id="tab-btn-folder" onclick="switchInputTab('folder')">
+                        <i data-lucide="folder-check"></i>
+                        <span>Folder Tập Có Sẵn</span>
+                    </button>
+                    <button class="tab-btn" id="tab-btn-url" onclick="switchInputTab('url')">
+                        <i data-lucide="globe"></i>
+                        <span>Link Bộ Truyện Mới</span>
+                    </button>
+                </div>
+
+                <!-- Tab 1 Content: Local Folder Path (Direct / Dropdown) -->
+                <div class="tab-content active" id="tab-content-folder">
+                    <label class="form-label" for="folder-path-input">
+                        <i data-lucide="folder-input"></i>
+                        <span>Đường dẫn Folder Tập Truyện:</span>
+                    </label>
+                    <div class="path-input-wrapper">
+                        <input type="text" id="folder-path-input" class="form-input" placeholder="Ví dụ: downloads/the_forgotten_field_1_2_vi/episode_2" autocomplete="off" oninput="debounceValidateFolder()" onchange="validateCurrentFolder()">
+                        <button class="btn-inspect-path" onclick="validateCurrentFolder()" title="Kiểm tra tài nguyên folder">
+                            <i data-lucide="search"></i>
+                        </button>
+                    </div>
+
+                    <!-- Quick Pick from Dropdowns -->
+                    <div class="folder-picker-row">
+                        <div style="flex: 2;">
+                            <label class="form-label" style="font-size: 0.8rem;">Hoặc chọn từ danh sách:</label>
+                            <select id="local-comic-select" class="form-select" onchange="onComicSelectChange()">
+                                <option value="">-- Đang quét downloads/ --</option>
+                            </select>
+                        </div>
+                        <div style="flex: 1;">
+                            <label class="form-label" style="font-size: 0.8rem;">Tập số:</label>
+                            <select id="local-episode-select" class="form-select" onchange="onEpisodeSelectChange()">
+                                <option value="1">Tập 1</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Live Folder Validation Inspector Badge -->
+                    <div class="folder-inspector-box" id="folder-inspector-box" style="display: none;">
+                        <div class="inspector-header">
+                            <div class="inspector-status-badge valid" id="inspector-status-badge">
+                                <i data-lucide="check-circle" style="width: 0.9rem; height: 0.9rem;"></i>
+                                <span id="inspector-status-text">Đường dẫn hợp lệ</span>
+                            </div>
+                            <span class="inspector-target-name" id="inspector-target-name">the_forgotten_field_1_2_vi / episode_2</span>
+                        </div>
+                        <div class="inspector-pills" id="inspector-pills">
+                            <!-- Populated dynamically: [Raw: 32] [Visual: 28] [PDF: OK] [Recap: OK] etc. -->
+                        </div>
+                        <div class="inspector-warning" id="inspector-warning" style="display: none;">
+                            <i data-lucide="alert-triangle"></i>
+                            <span id="inspector-warning-text"></span>
+                        </div>
+                    </div>
+
+                    <!-- Quick sample chips -->
+                    <div>
+                        <span class="input-hint">Thư mục mẫu có sẵn:</span>
+                        <div class="sample-folders-grid" id="sample-folders-grid">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2 Content: Comic URL -->
+                <div class="tab-content" id="tab-content-url">
+                    <label class="form-label" for="comic-url">
+                        <i data-lucide="link"></i>
+                        <span>Đường dẫn bộ truyện (Sẽ crawl tập 1 tự động):</span>
+                    </label>
+                    <input type="url" id="comic-url" class="form-input" placeholder="https://asurascans.com/comics/solo-leveling" value="https://asurascans.com/comics/solo-leveling" autocomplete="off">
+                    <span class="input-hint">Nhấp vào một trong các trang truyện mẫu bên dưới để điền nhanh:</span>
+                    
+                    <div class="hosts-grid">
+                        <div class="host-chip" onclick="fillSampleUrl('https://asurascans.com/comics/solo-leveling')">Asura Scans</div>
+                        <div class="host-chip" onclick="fillSampleUrl('https://www.webtoons.com/en/action/lookism/list?title_no=1049')">Webtoons</div>
+                        <div class="host-chip" onclick="fillSampleUrl('https://vortexscans.org/series/nano-machine')">Vortex</div>
+                        <div class="host-chip" onclick="fillSampleUrl('https://www.toongod.org/webtoon/magic-emperor/')">ToonGod</div>
+                        <div class="host-chip" onclick="fillSampleUrl('https://comix.to/title/martial-peak')">Comix.to</div>
+                        <div class="host-chip" onclick="fillSampleUrl('https://nyxscans.com/series/lookism')">Nyx Scans</div>
+                        <div class="host-chip" onclick="fillSampleUrl('https://valirscans.org/series/player-who-returned-10000-years-later')">Valir Scans</div>
+                        <div class="host-chip" onclick="fillSampleUrl('https://manhuaplus.com/manga/tales-of-demons-and-gods/')">ManhuaPlus</div>
+                    </div>
+                </div>
+
+                <!-- Common Settings (Collapsible) -->
+                <div style="border-top: 1px solid var(--card-border); padding-top: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleAdvancedSettings()">
+                        <span class="form-label" style="cursor: pointer;">
+                            <i data-lucide="settings-2"></i>
+                            <span>Cấu hình nâng cao</span>
+                        </span>
+                        <i data-lucide="chevron-down" id="advanced-chevron" style="width: 1rem; height: 1rem; color: var(--text-muted);"></i>
+                    </div>
+
+                    <div id="advanced-settings-body" style="display: none; margin-top: 0.85rem; flex-direction: column; gap: 0.75rem;">
+                        <div style="display: flex; gap: 1rem;">
+                            <div style="flex: 1;">
+                                <label class="form-label">Gemini Model:</label>
+                                <select id="setting-gemini-model" class="form-select" style="padding: 0.5rem;">
+                                    <option value="flash" selected>Gemini 2.5 Flash (Nhanh)</option>
+                                    <option value="pro">Gemini 2.5 Pro (Chi tiết cao)</option>
+                                </select>
+                            </div>
+                            <div style="flex: 1;">
+                                <label class="form-label">Chất lượng PDF (DPI/Q):</label>
+                                <select id="setting-pdf-quality" class="form-select" style="padding: 0.5rem;">
+                                    <option value="30" selected>30 (Chuẩn nhẹ)</option>
+                                    <option value="50">50 (Trung bình)</option>
+                                    <option value="80">80 (Cao)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text-secondary); cursor: pointer;">
+                            <input type="checkbox" id="setting-force-recrawl">
+                            <span>Bắt buộc tải lại ảnh từ đầu (Bỏ qua ảnh đã có)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Action Button -->
+                <div class="action-buttons">
+                    <button class="btn-primary" id="btn-start-test" onclick="startTestStage()">
+                        <i data-lucide="play"></i>
+                        <span id="btn-start-label">Bắt đầu Test Stage 2b</span>
+                    </button>
+                    <button class="btn-secondary btn-danger" id="btn-cancel-test" onclick="cancelTestStage()" disabled>
+                        <i data-lucide="square"></i>
+                        <span>Hủy</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Right Panel: Live Terminal & Test Results -->
+            <section class="glass-card">
+                <!-- Progress Banner -->
+                <div class="progress-card" id="progress-card">
+                    <div class="progress-header">
+                        <span class="progress-stage-name" id="current-stage-label">Chưa bắt đầu</span>
+                        <span id="current-progress-label" style="font-family: 'JetBrains Mono', monospace; color: var(--text-muted);">0%</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill" id="progress-bar-fill"></div>
+                    </div>
+                </div>
+
+                <!-- Live Terminal Card -->
+                <div class="terminal-card">
+                    <div class="terminal-header">
+                        <div class="terminal-dots">
+                            <span class="terminal-dot dot-red"></span>
+                            <span class="terminal-dot dot-yellow"></span>
+                            <span class="terminal-dot dot-green"></span>
+                        </div>
+                        <span style="display: flex; align-items: center; gap: 0.35rem;">
+                            <i data-lucide="terminal" style="width: 0.9rem; height: 0.9rem;"></i>
+                            <span>Live Stage Logs</span>
+                        </span>
+                        <button onclick="clearLogs()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.75rem;">Xóa logs</button>
+                    </div>
+                    <div class="terminal-body" id="terminal-logs">
+                        <div class="log-line">
+                            <span class="log-time">[00:00:00]</span>
+                            <span class="log-msg info">Hệ thống Test Stage Studio đã sẵn sàng. Chọn Stage, truyền đường dẫn folder tập và bấm 'Bắt đầu Test Stage' để chạy.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================== -->
+                <!-- RESULT AREA: STAGE 2B (SMART PAGING)           -->
+                <!-- ============================================== -->
+                <div class="results-container" id="result-stage-2b" style="display: none;">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <i data-lucide="file-check"></i>
+                            <span id="stage-2b-result-title">Kết Quả Phân Trang Visual & PDF</span>
+                        </div>
+                    </div>
+
+                    <!-- Metrics bar -->
+                    <div class="metrics-row">
+                        <div class="metric-card">
+                            <span class="metric-label">Tổng Candidate</span>
+                            <span class="metric-val" id="meta-candidates">0</span>
+                        </div>
+                        <div class="metric-card success">
+                            <span class="metric-label">Khung Visual Xuất Ra</span>
+                            <span class="metric-val" id="meta-exported">0</span>
+                        </div>
+                        <div class="metric-card warning">
+                            <span class="metric-label">Khung Rác Đã Lọc</span>
+                            <span class="metric-val" id="meta-junk-dropped">0</span>
+                        </div>
+                    </div>
+
+                    <!-- PDF Showcase Card -->
+                    <div class="pdf-hero-card" id="pdf-hero-card">
+                        <div class="pdf-hero-info">
+                            <div class="pdf-hero-icon">
+                                <i data-lucide="file-text" style="width: 2rem; height: 2rem;"></i>
+                            </div>
+                            <div>
+                                <h3 class="pdf-hero-title" id="pdf-hero-title">tap_1.pdf</h3>
+                                <div class="pdf-hero-meta">
+                                    <span><i data-lucide="layers" style="width: 0.9rem; display: inline;"></i> <span id="pdf-meta-pages">0 trang</span></span>
+                                    <span><i data-lucide="hard-drive" style="width: 0.9rem; display: inline;"></i> <span id="pdf-meta-size">0 MB</span></span>
+                                    <span style="color: var(--success);">● File PDF hoàn chỉnh</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="pdf-hero-actions">
+                            <a id="btn-open-pdf" href="#" target="_blank" class="btn-secondary" style="text-decoration: none;">
+                                <i data-lucide="external-link"></i>
+                                <span>Xem Trực Tiếp</span>
+                            </a>
+                            <a id="btn-download-pdf" href="#" download class="btn-download-pdf">
+                                <i data-lucide="download"></i>
+                                <span>Tải File PDF</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Sub-tabs for Stage 2b: Visual Frames vs Junk Audit -->
+                    <div class="tab-headers">
+                        <button class="tab-btn active" id="tab-btn-visual-frames" onclick="switchStage2bSubTab('frames')">
+                            <i data-lucide="layout-grid"></i>
+                            <span>Khung Visual Hợp Lệ (<span id="tab-count-frames">0</span>)</span>
+                        </button>
+                        <button class="tab-btn" id="tab-btn-junk-audit" onclick="switchStage2bSubTab('junk')">
+                            <i data-lucide="shield-alert"></i>
+                            <span>Bảng Soát Khung Rác Bị Loại (<span id="tab-count-junk">0</span>)</span>
+                        </button>
+                    </div>
+
+                    <!-- Subtab 1: Visual Frames Grid -->
+                    <div class="subtab-content active" id="subtab-visual-frames">
+                        <div class="pages-grid" id="pages-grid">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Subtab 2: Dropped Junk Audit Log Table -->
+                    <div class="subtab-content" id="subtab-junk-audit">
+                        <div class="junk-audit-table-wrapper">
+                            <table class="junk-audit-table">
+                                <thead>
+                                    <tr>
+                                        <th>Region ID</th>
+                                        <th>Lý Do Loại Bỏ (Drop Reason)</th>
+                                        <th>Kích Thước</th>
+                                        <th>Visual Ratio</th>
+                                        <th>Edge Density</th>
+                                        <th>Laplacian</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="junk-audit-tbody">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================== -->
+                <!-- RESULT AREA: STAGE 5 (GEMINI AUTOMATION)       -->
+                <!-- ============================================== -->
+                <div class="results-container" id="result-stage-5" style="display: none;">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <i data-lucide="sparkles"></i>
+                            <span id="stage-5-result-title">Kết Quả Gemini Automation (Kịch Bản Recap)</span>
+                        </div>
+                    </div>
+
+                    <!-- Recap Stats & Actions Bar -->
+                    <div class="recap-hero-bar">
+                        <div class="recap-stats">
+                            <div class="recap-stat-item">
+                                <i data-lucide="list-ordered" style="width: 1rem; color: var(--primary);"></i>
+                                <span>Đoạn kịch bản: <strong class="recap-stat-value" id="recap-stat-segments">0</strong></span>
+                            </div>
+                            <div class="recap-stat-item">
+                                <i data-lucide="message-square" style="width: 1rem; color: var(--accent-blue);"></i>
+                                <span>Tổng số từ: <strong class="recap-stat-value" id="recap-stat-words">0</strong></span>
+                            </div>
+                        </div>
+                        <div class="recap-actions">
+                            <button class="btn-secondary" onclick="copyFullRecapScript()" title="Sao chép toàn bộ lời dẫn">
+                                <i data-lucide="copy"></i>
+                                <span>Copy Kịch Bản</span>
+                            </button>
+                            <button class="btn-secondary" onclick="openRawJsonModal()" title="Xem JSON thô">
+                                <i data-lucide="code"></i>
+                                <span>Raw JSON</span>
+                            </button>
+                            <button class="btn-secondary" onclick="openRawTextModal()" title="Xem Response gốc của Gemini">
+                                <i data-lucide="file-text"></i>
+                                <span>Raw Text</span>
+                            </button>
+                            <a id="btn-download-recap" href="#" download="recap.json" class="btn-secondary" style="text-decoration: none;" title="Tải file recap.json">
+                                <i data-lucide="download"></i>
+                                <span>Tải recap.json</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- The Core List: Image Page — Speech -->
+                    <div class="image-speech-list" id="image-speech-list">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- ============================================== -->
+                <!-- RESULT AREA: STAGE 8 (LOCAL TTS & SRT)         -->
+                <!-- ============================================== -->
+                <div class="results-container" id="result-stage-8" style="display: none;">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <i data-lucide="volume-2"></i>
+                            <span>Kết Quả Lồng Tiếng TTS & Phụ Đề SRT</span>
+                        </div>
+                    </div>
+
+                    <div class="audio-hero-card" id="audio-hero-card">
+                        <div class="audio-player-box">
+                            <audio id="tts-audio-player" controls style="width: 100%; outline: none;"></audio>
+                        </div>
+                        <div class="audio-actions">
+                            <a id="btn-download-audio" href="#" download="audio.mp3" class="btn-download-pdf">
+                                <i data-lucide="download"></i>
+                                <span>Tải Audio MP3 (<span id="audio-meta-size">0 MB</span>)</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="srt-box">
+                        <div class="srt-header">
+                            <span><i data-lucide="subtitles" style="width: 0.9rem; display: inline;"></i> Nội Dung Phụ Đề Transcript (SRT):</span>
+                            <button class="btn-secondary" onclick="copySrtText()" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Copy SRT</button>
+                        </div>
+                        <pre class="srt-body" id="srt-body-text"></pre>
+                    </div>
+                </div>
+
+                <!-- ============================================== -->
+                <!-- RESULT AREA: STAGE 10 (VIDEO RENDER)           -->
+                <!-- ============================================== -->
+                <div class="results-container" id="result-stage-10" style="display: none;">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <i data-lucide="video"></i>
+                            <span>Kết Quả Render Video Hoàn Chỉnh</span>
+                        </div>
+                    </div>
+
+                    <div class="video-hero-card">
+                        <video id="rendered-video-player" controls style="width: 100%; border-radius: var(--radius-sm); max-height: 500px; background: #000;"></video>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+                            <span style="font-size: 0.9rem; color: var(--text-secondary);">Dung lượng video: <strong id="video-meta-size" style="color: var(--primary);">0 MB</strong></span>
+                            <a id="btn-download-video" href="#" download="video.mp4" class="btn-download-pdf">
+                                <i data-lucide="download"></i>
+                                <span>Tải Video MP4</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+        </main>
+    </div>
+
+    <!-- Lightbox Modal for Full Image Inspection -->
+    <div class="lightbox-modal" id="lightbox-modal" onclick="closeLightbox(event)">
+        <div class="lightbox-content" onclick="event.stopPropagation()">
+            <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+            <img id="lightbox-img" src="" alt="Zoomed Frame">
+            <div id="lightbox-caption" style="margin-top: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);"></div>
+        </div>
+    </div>
+
+    <!-- Raw JSON Modal -->
+    <div class="raw-json-modal" id="raw-json-modal" onclick="closeRawJsonModal(event)">
+        <div class="raw-json-box" onclick="event.stopPropagation()">
+            <div class="raw-json-header">
+                <span style="font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="code" style="color: var(--primary);"></i>
+                    <span>Kịch bản recap.json (Raw JSON Response)</span>
+                </span>
+                <button class="lightbox-close" style="position: static; font-size: 1.25rem;" onclick="closeRawJsonModal()">&times;</button>
+            </div>
+            <pre class="raw-json-body" id="raw-json-body"></pre>
+        </div>
+    </div>
+
+    <!-- Raw Text Modal -->
+    <div class="raw-json-modal" id="raw-text-modal" onclick="closeRawTextModal(event)">
+        <div class="raw-json-box" onclick="event.stopPropagation()">
+            <div class="raw-json-header">
+                <span style="font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="file-text" style="color: var(--accent-blue);"></i>
+                    <span>Gemini Response Gốc (Raw Text)</span>
+                </span>
+                <button class="lightbox-close" style="position: static; font-size: 1.25rem;" onclick="closeRawTextModal()">&times;</button>
+            </div>
+            <pre class="raw-json-body" id="raw-text-body" style="color: #a7f3d0;"></pre>
+        </div>
+    </div>
+
+    <!-- Script -->
+    <script src="test_stage.js?v=2.0"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            if (window.lucide) lucide.createIcons();
+        });
+    </script>
+</body>
+</html>
