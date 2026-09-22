@@ -1498,7 +1498,7 @@ let currentSrtDisplayMode = 'translated'; // 'translated', 'bilingual', 'origina
 let currentTranslatedLang = '';
 let isTranslatingSubtitles = false;
 let currentSrtRaw = '';
-let isSubtitlesEnabled = true;
+let isSubtitlesEnabled = false;
 let isTranscriptOpen = true;
 let subtitleFontSize = 1.15; // rem
 let activeCueIndex = -1;
@@ -2597,20 +2597,23 @@ function renderAutoVoices(preferFilename = null) {
 
     let selectedPath = autoVoiceSelectedPath ? autoVoiceSelectedPath.value : '';
     const currentLang = document.getElementById('vlm-language') ? document.getElementById('vlm-language').value : 'vi';
+    const jessaVoice = currentVoicesList.find(v => v.filename && v.filename.toLowerCase().includes('jessa'));
     const andrewVoice = currentVoicesList.find(v => v.filename && v.filename.toLowerCase().includes('andrew'));
 
     let selectedVoice = null;
     if (preferFilename) {
         selectedVoice = currentVoicesList.find(v => v.filename === preferFilename || v.path === preferFilename);
     }
-    if (!selectedVoice && currentLang === 'en' && andrewVoice) {
+    if (!selectedVoice && currentLang === 'vi' && jessaVoice) {
+        selectedVoice = jessaVoice;
+    } else if (!selectedVoice && currentLang === 'en' && andrewVoice) {
         selectedVoice = andrewVoice;
     }
     if (!selectedVoice && selectedPath) {
         selectedVoice = currentVoicesList.find(v => v.path === selectedPath);
     }
     if (!selectedVoice) {
-        selectedVoice = andrewVoice || currentVoicesList[0];
+        selectedVoice = (currentLang === 'vi' ? jessaVoice : andrewVoice) || jessaVoice || andrewVoice || currentVoicesList[0];
     }
 
     if (selectedVoice) {
@@ -2772,7 +2775,12 @@ loadAutoVoices();
 const vlmLangSelect = document.getElementById('vlm-language');
 if (vlmLangSelect) {
     vlmLangSelect.addEventListener('change', (e) => {
-        if (e.target.value === 'en') {
+        if (e.target.value === 'vi') {
+            const jessaVoice = currentVoicesList.find(v => v.filename && v.filename.toLowerCase().includes('jessa'));
+            if (jessaVoice) {
+                renderAutoVoices(jessaVoice.filename);
+            }
+        } else if (e.target.value === 'en') {
             const andrewVoice = currentVoicesList.find(v => v.filename && v.filename.toLowerCase().includes('andrew'));
             if (andrewVoice) {
                 renderAutoVoices(andrewVoice.filename);

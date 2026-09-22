@@ -515,6 +515,48 @@ PDF
         self.assertEqual(parsed[0]["images"][0]["page"], "3")
         self.assertIn("Vào ngày ngôi trường chìm trong biển lửa", parsed[0]["speech"])
 
+    def test_glitch_c_r2_in_narration(self):
+        """
+        Tests AI Gemini glitch where narration contains 'C[R2] - ' or similar in-content glitch.
+        Must strip the glitch prefix completely and keep only the real narration text.
+        """
+        from app import clean_gemini_response, verify_gemini_response_format, parse_gemini_recap_text
+
+        # 1. Single line with C[R2] -
+        single_glitch = "[R37] - C[R2] - Gruhon là thanh thần kiếm chuyển sinh qua nhiều đời anh hùng.#"
+        cleaned_single = clean_gemini_response(single_glitch)
+        self.assertIn("Gruhon là thanh thần kiếm", cleaned_single)
+        self.assertNotIn("C[R2]", cleaned_single)
+        self.assertNotIn("[R2]", cleaned_single)
+
+        parsed_single = parse_gemini_recap_text(single_glitch)
+        self.assertEqual(len(parsed_single), 1)
+        self.assertEqual(parsed_single[0]["speech"], "Gruhon là thanh thần kiếm chuyển sinh qua nhiều đời anh hùng.")
+        self.assertNotIn("C[R2]", parsed_single[0]["speech"])
+
+        # 2. Full sequence with restart mid-recap
+        raw_sequence = (
+            "[R2] - Gruhon là thanh thần kiếm chuyển sinh qua nhiều đời anh hùng, chứng kiến người bạn thân lập nên vương quốc trước khi gửi gắm hậu duệ.#\n"
+            "[R26] - Nhiều thế kỷ trôi qua, đệ nhất hoàng tử Idrian thô bạo giật thanh kiếm khỏi bệ thờ và đòi tước đoạt toàn bộ sức mạnh.#\n"
+            "[R30] - Thần kiếm kích hoạt quyền năng thẩm định, phơi bày một kẻ béo phì lười biếng cùng chứng rối loạn cảm ứng mana bẩm sinh.#\n"
+            "[R34] - Bị từ chối ban tặng uy lực, Idrian mất kiểm soát vung kiếm loạn xạ khắp hoàng cung khiến quân lính kinh hãi dạt ra.#\n"
+            "[R37] - C[R2] - Gruhon là thanh thần kiếm chuyển sinh qua nhiều đời anh hùng, chứng kiến người bạn thân lập nên vương quốc trước khi gửi gắm hậu duệ.#\n"
+            "[R26] - Nhiều thế kỷ trôi qua, đệ nhất hoàng tử Idrian thô bạo giật thanh kiếm khỏi bệ thờ và đòi tước đoạt toàn bộ sức mạnh.#\n"
+            "[R30] - Thần kiếm kích hoạt quyền năng thẩm định, phơi bày một kẻ béo phì lười biếng cùng chứng rối loạn cảm ứng mana bẩm sinh.#"
+        )
+        cleaned_seq = clean_gemini_response(raw_sequence)
+        lines = cleaned_seq.splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[0].split(" - ")[0], "2")
+        self.assertIn("Gruhon là thanh thần kiếm", lines[0])
+        self.assertNotIn("C[R2]", cleaned_seq)
+
+        parsed_seq = parse_gemini_recap_text(raw_sequence)
+        self.assertEqual(len(parsed_seq), 3)
+        self.assertEqual(parsed_seq[0]["images"][0]["page"], "2")
+        self.assertNotIn("C[R2]", parsed_seq[0]["speech"])
+        self.assertNotIn("[R2]", parsed_seq[0]["speech"])
+
     def test_speech_bubble_never_sliced_at_top_or_bottom_boundary(self):
         """
         Tests that an upper bubble at the bottom of Panel 1 and a lower bubble at the top of Panel 2

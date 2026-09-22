@@ -412,9 +412,9 @@ class PDFAnnotator:
                     rect = fitz.Rect(0, 0, float(w), float(h))
                     page.insert_image(rect, stream=buf_bytes)
 
-                doc.save(output_pdf_path)
+                doc.save(output_pdf_path, deflate=True, garbage=4, clean=True)
                 doc.close()
-                logger.info(f"[PDFAnnotator] Successfully saved original canvas PDF via PyMuPDF ({len(slice_segments)} pages): {output_pdf_path}")
+                logger.info(f"[PDFAnnotator] Successfully saved compressed original canvas PDF via PyMuPDF ({len(slice_segments)} pages): {output_pdf_path}")
                 return True
             else:
                 pil_images = []

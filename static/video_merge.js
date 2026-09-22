@@ -361,9 +361,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         <i data-lucide="play"></i>
                         <span>Xem</span>
                     </button>
-                    <a href="${videoUrl}" download="${mv.file_name}" class="btn-card-action" title="Tải video">
+                    <a href="${videoUrl}" download="${mv.file_name}" class="btn-card-action" title="Tải video MP4">
                         <i data-lucide="download"></i>
                     </a>
+                    ${hasSrt ? `
+                    <a href="${srtUrl || videoUrl.replace(/\.mp4$/i, '.srt')}" download="${mv.file_name.replace(/\.mp4$/i, '.srt')}" class="btn-card-action" title="Tải phụ đề SRT">
+                        <i data-lucide="file-text"></i>
+                    </a>
+                    ` : ''}
                     <button type="button" class="btn-card-action danger" title="Xóa video gộp này">
                         <i data-lucide="trash-2"></i>
                     </button>

@@ -1581,6 +1581,18 @@ async def execute_single_episode_stage10(ep: int, context: WorkflowContext, rend
     if folder_name and not task.artifacts.get("download_folder_name"):
         task.artifacts["download_folder_name"] = folder_name
 
+    # Ensure matching .srt files are generated alongside video.mp4
+    srt_source = os.path.join(ep_dir, "transcript.srt")
+    if not os.path.exists(srt_source):
+        srt_source = os.path.join(ep_dir, "transcript_raw.srt")
+
+    if os.path.exists(srt_source):
+        try:
+            shutil.copy2(srt_source, os.path.join(ep_dir, "video.srt"))
+            shutil.copy2(srt_source, os.path.join(ep_dir, f"{folder_name}_ep{ep}.srt"))
+        except Exception as copy_err:
+            logger.warning(f"Lỗi sao chép tệp phụ đề video.srt tập {ep}: {copy_err}")
+
     if "final_videos" not in task.artifacts:
         task.artifacts["final_videos"] = {}
     task.artifacts["final_videos"][str(ep)] = f"/downloads/{folder_name}/episode_{ep}/video.mp4"
@@ -1588,7 +1600,7 @@ async def execute_single_episode_stage10(ep: int, context: WorkflowContext, rend
         task.artifacts["final_subtitles"] = {}
     task.artifacts["final_subtitles"][str(ep)] = f"/downloads/{folder_name}/episode_{ep}/transcript.srt"
 
-    await context.log(f"Tập {ep}: Render video hoàn tất!", "success", stage_name=stage_name, episode=ep)
+    await context.log(f"Tập {ep}: Render video và tạo tệp phụ đề .srt hoàn tất!", "success", stage_name=stage_name, episode=ep)
     task.episode_progress[ep_key][stage_name] = StageState.SUCCESS
     total_eps = task.to_episode - task.from_episode + 1
     completed = sum(1 for e in range(task.from_episode, task.to_episode + 1) if task.episode_progress.get(str(e), {}).get(stage_name) == StageState.SUCCESS)
@@ -1856,11 +1868,19 @@ class Stage11_FinalVideoAssembly(BaseStage):
             shutil.copy2(os.path.join(download_dir, f"episode_{from_ep}", "video.mp4"), final_video_path)
             await context.log(f"Chỉ có 1 tập, sao chép trực tiếp thành {final_video_name}.", "success")
             
-            # Copy srt file directly as final_srt_path if it exists
+            # Copy srt file directly as final_srt_path and standard aliases
             single_srt = os.path.join(download_dir, f"episode_{from_ep}", "transcript.srt")
+            if not os.path.exists(single_srt):
+                single_srt = os.path.join(download_dir, f"episode_{from_ep}", "video.srt")
             if os.path.exists(single_srt):
                 shutil.copy2(single_srt, final_srt_path)
-                await context.log(f"Sao chép transcript.srt thành {final_srt_name}.", "success")
+                try:
+                    shutil.copy2(single_srt, os.path.join(output_dir, "transcript.srt"))
+                    shutil.copy2(single_srt, os.path.join(output_dir, "video.srt"))
+                    shutil.copy2(single_srt, os.path.join(output_dir, f"{folder_name}_ep{from_ep}.srt"))
+                except Exception:
+                    pass
+                await context.log(f"Sao chép tệp phụ đề thành {final_srt_name}.", "success")
         else:
             await context.log("Đang tiến hành ghép nối các đoạn video bằng phương pháp concat demuxer (không encode lại)...", "info")
 
@@ -1904,6 +1924,11 @@ class Stage11_FinalVideoAssembly(BaseStage):
             await context.log("Đang tiến hành gộp các file phụ đề srt...", "info")
             try:
                 merge_srt_files(srt_paths, video_durations, final_srt_path)
+                try:
+                    shutil.copy2(final_srt_path, os.path.join(output_dir, "transcript.srt"))
+                    shutil.copy2(final_srt_path, os.path.join(output_dir, "video.srt"))
+                except Exception:
+                    pass
                 await context.log(f"Đã hoàn thành gộp phụ đề thành {final_srt_name}.", "success")
             except Exception as e:
                 await context.log(f"Lỗi khi gộp file phụ đề srt: {e}", "warning")

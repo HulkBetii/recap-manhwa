@@ -189,11 +189,21 @@ async (args) => {
     const { promptText, base64Pdf, fileName, modelName } = args;
     
     // 1. Get SNlM0e token
-    let snlm0e = window.WIZ_global_data?.SNlM0e;
+    let snlm0e = window.WIZ_global_data?.SNlM0e || window._WIZ_GLOBAL_DATA?.SNlM0e;
     if (!snlm0e) {
         const html = document.documentElement.innerHTML;
-        const m = html.match(/\"SNlM0e\":\"(.*?)\"/);
+        const m = html.match(/\"SNlM0e\"\s*:\s*\"(.*?)\"/);
         if (m) snlm0e = m[1];
+    }
+    if (!snlm0e) {
+        for (const s of document.querySelectorAll('script')) {
+            const content = s.textContent || '';
+            const m = content.match(/\"SNlM0e\"\s*:\s*\"(.*?)\"/);
+            if (m) {
+                snlm0e = m[1];
+                break;
+            }
+        }
     }
     if (!snlm0e) {
         return { success: false, error: "AUTH_TOKEN_NOT_FOUND: Could not locate SNlM0e token on Gemini page." };
@@ -219,7 +229,8 @@ async (args) => {
                 headers: {
                     "Push-ID": "feeds/mcudyrk2a4khkz"
                 },
-                body: form
+                body: form,
+                signal: AbortSignal.timeout(10000)
             });
             
             if (!uploadRes.ok) {
@@ -259,7 +270,8 @@ async (args) => {
         const genRes = await fetch("https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate", {
             method: "POST",
             headers: headers,
-            body: bodyParams.toString()
+            body: bodyParams.toString(),
+            signal: AbortSignal.timeout(15000)
         });
         
         if (!genRes.ok) {
@@ -274,6 +286,226 @@ async (args) => {
         };
     } catch (gErr) {
         return { success: false, error: `RPC_NETWORK_ERROR: ${gErr.message || gErr}` };
+    }
+}
+"""
+
+JS_CHECK_SEND_READY = """
+() => {
+    // 1. Check if file is still uploading
+    const loadingSelectors = [
+        "mat-progress-spinner",
+        "mat-spinner",
+        "[role='progressbar']",
+        ".uploading",
+        ".loading",
+        ".file-upload-progress",
+        "[aria-busy='true']"
+    ];
+    let isUploading = false;
+    for (const sel of loadingSelectors) {
+        try {
+            const els = document.querySelectorAll(sel);
+            for (const el of els) {
+                if (el && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
+                    if (el.closest("input-area-v2, rich-textarea, .attachment-preview, [data-test-id='file-preview'], file-preview, mat-chip, mat-chip-row, uploader-file-item")) {
+                        isUploading = true;
+                        break;
+                    }
+                }
+            }
+        } catch(e) {}
+        if (isUploading) break;
+    }
+
+    // 2. Check send buttons
+    const sendSelectors = [
+        "button[aria-label*='Send' i]",
+        "button[aria-label*='Gửi' i]",
+        "gem-icon-button[aria-label*='Send' i] button",
+        "gem-icon-button[aria-label*='Send' i]",
+        "gem-icon-button[aria-label*='Gửi' i] button",
+        "gem-icon-button[aria-label*='Gửi' i]",
+        "div[data-test-id='send-button-container'] button",
+        "div[data-test-id='send-button-container'] gem-icon-button",
+        "button#composer-submit-button",
+        "#composer-submit-button",
+        "button[data-testid='send-button']",
+        "button[data-testid='chat-submit']",
+        "button[data-testid*='submit']",
+        "input-area-v2 button.send-button",
+        "gem-icon-button.send-button button",
+        "gem-icon-button.send-button",
+        "gem-icon-button.submit button",
+        "gem-icon-button.submit",
+        "button:has(mat-icon:has-text('send'))",
+        "button.send-button",
+        "[data-test-id='send-button']"
+    ];
+
+    let foundBtn = null;
+    let isEnabled = false;
+    for (const sel of sendSelectors) {
+        try {
+            const els = document.querySelectorAll(sel);
+            for (const el of els) {
+                if (el && (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0)) {
+                    const ariaDis = el.getAttribute('aria-disabled');
+                    const dis = el.disabled || ariaDis === 'true' || el.classList.contains('disabled');
+                    foundBtn = sel;
+                    if (!dis && !isUploading) {
+                        isEnabled = true;
+                        break;
+                    }
+                }
+            }
+        } catch(e) {}
+        if (isEnabled) break;
+    }
+
+    return {
+        is_uploading: isUploading,
+        found_send_button: foundBtn,
+        is_send_enabled: isEnabled
+    };
+}
+"""
+
+JS_TRIGGER_SUBMIT = """
+() => {
+    const sendSelectors = [
+        "button[aria-label*='Send' i]",
+        "button[aria-label*='Gửi' i]",
+        "gem-icon-button[aria-label*='Send' i] button",
+        "gem-icon-button[aria-label*='Send' i]",
+        "gem-icon-button[aria-label*='Gửi' i] button",
+        "gem-icon-button[aria-label*='Gửi' i]",
+        "div[data-test-id='send-button-container'] button",
+        "div[data-test-id='send-button-container'] gem-icon-button",
+        "button#composer-submit-button",
+        "#composer-submit-button",
+        "button[data-testid='send-button']",
+        "button[data-testid='chat-submit']",
+        "button[data-testid*='submit']",
+        "input-area-v2 button.send-button",
+        "gem-icon-button.send-button button",
+        "gem-icon-button.send-button",
+        "button.send-button",
+        "[data-test-id='send-button']"
+    ];
+    for (const sel of sendSelectors) {
+        try {
+            const el = document.querySelector(sel);
+            if (el && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
+                const ariaDis = el.getAttribute('aria-disabled');
+                if (!el.disabled && ariaDis !== 'true') {
+                    // Dispatch complete mouse & pointer event chain
+                    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evtType => {
+                        el.dispatchEvent(new MouseEvent(evtType, { bubbles: true, cancelable: true, view: window }));
+                    });
+                    if (typeof el.click === 'function') {
+                        el.click();
+                    }
+                    const innerBtn = el.querySelector('button');
+                    if (innerBtn && typeof innerBtn.click === 'function') {
+                        innerBtn.click();
+                    }
+                    return { clicked: true, selector: sel };
+                }
+            }
+        } catch (e) {}
+    }
+    return { clicked: false };
+}
+"""
+
+JS_GET_TEXTBOX_TEXT = """
+() => {
+    try {
+        const el = document.querySelector("rich-textarea div[contenteditable='true'], rich-textarea p, div[contenteditable='true'], [role='textbox']");
+        return el ? (el.innerText || el.textContent || "").trim() : "";
+    } catch (e) {
+        return "";
+    }
+}
+"""
+
+JS_INJECT_PROMPT_TEXT = """
+(args) => {
+    const text = (args && args.text) ? args.text : "";
+    let textbox = document.querySelector("rich-textarea div[contenteditable='true'], rich-textarea p, div[contenteditable='true'], [role='textbox']");
+    if (!textbox) return { success: false, error: "Textbox not found" };
+    
+    // Focus target contenteditable element
+    const target = textbox.matches("div[contenteditable='true'], [contenteditable='true']") ? textbox : (textbox.closest("div[contenteditable='true'], [contenteditable='true']") || textbox);
+    target.focus();
+    
+    // 1. execCommand insertText (native rich editor standard - preserves linebreaks without enter events)
+    try {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        
+        document.execCommand('delete', false, null);
+        const inserted = document.execCommand('insertText', false, text);
+        
+        const currentVal = (target.innerText || target.textContent || "").trim();
+        if (currentVal.length >= Math.min(text.trim().length * 0.7, 20)) {
+            ['input', 'change', 'keyup'].forEach(t => {
+                target.dispatchEvent(new Event(t, { bubbles: true, cancelable: true }));
+            });
+            const rich = target.closest('rich-textarea');
+            if (rich) rich.dispatchEvent(new Event('input', { bubbles: true }));
+            return { success: true, method: "execCommand", length: currentVal.length };
+        }
+    } catch (e) {}
+
+    // 2. Synthetic DataTransfer / ClipboardEvent paste
+    try {
+        target.focus();
+        const dt = new DataTransfer();
+        dt.setData('text/plain', text);
+        const pasteEvt = new ClipboardEvent('paste', {
+            bubbles: true,
+            cancelable: true,
+            clipboardData: dt
+        });
+        target.dispatchEvent(pasteEvt);
+        const rich = target.closest('rich-textarea');
+        if (rich) rich.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+        
+        const currentVal = (target.innerText || target.textContent || "").trim();
+        if (currentVal.length >= Math.min(text.trim().length * 0.7, 20)) {
+            ['input', 'change', 'keyup'].forEach(t => {
+                target.dispatchEvent(new Event(t, { bubbles: true, cancelable: true }));
+            });
+            return { success: true, method: "clipboardEvent", length: currentVal.length };
+        }
+    } catch (e) {}
+
+    // 3. Direct DOM paragraph injection
+    try {
+        target.focus();
+        const lines = text.split('\\n');
+        if (lines.length > 1) {
+            target.innerHTML = lines.map(l => {
+                const escaped = l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                return `<p>${escaped || '<br>'}</p>`;
+            }).join('');
+        } else {
+            target.innerText = text;
+        }
+        ['input', 'change', 'keyup'].forEach(t => {
+            target.dispatchEvent(new Event(t, { bubbles: true, cancelable: true }));
+        });
+        const rich = target.closest('rich-textarea');
+        if (rich) rich.dispatchEvent(new Event('input', { bubbles: true }));
+        const currentVal = (target.innerText || target.textContent || "").trim();
+        return { success: currentVal.length > 0, method: "domInjection", length: currentVal.length };
+    } catch (e) {
+        return { success: false, error: e.message || String(e) };
     }
 }
 """
@@ -349,7 +581,11 @@ JS_CHECK_ATTACHMENT = """
 """
 
 JS_POLL_UI_STATE = """
-() => {
+(args) => {
+    const initialQueryCount = (args && typeof args.initialQueryCount === 'number') ? args.initialQueryCount : 0;
+    const initialResponseCount = (args && typeof args.initialResponseCount === 'number') ? args.initialResponseCount : (args && typeof args.initialCount === 'number' ? args.initialCount : 0);
+    const isRedo = (args && args.isRedo === true);
+
     const isVis = (el) => {
         if (!el) return false;
         try {
@@ -465,13 +701,35 @@ JS_POLL_UI_STATE = """
         }
     };
 
-    // 4. Find latest model response
+    // 4. Find model response matching the latest user query turn
+    const userQueries = document.querySelectorAll("user-query, [data-test-id='user-query'], .user-query-container, .user-query");
     const modelResponses = document.querySelectorAll("model-response, [data-test-id='model-response'], .model-response, response-container");
     let targetEl = null;
-    if (modelResponses.length > 0) {
-        targetEl = modelResponses[modelResponses.length - 1];
+
+    if (isRedo) {
+        if (modelResponses.length > 0) {
+            targetEl = modelResponses[modelResponses.length - 1];
+        }
+    } else {
+        // Only consider responses belonging to a turn AFTER initialQueryCount or initialResponseCount
+        if (userQueries.length > initialQueryCount) {
+            const lastQuery = userQueries[userQueries.length - 1];
+            let curr = lastQuery.nextElementSibling;
+            while (curr) {
+                if (curr.matches && (curr.matches("model-response, [data-test-id='model-response'], .model-response, response-container") || curr.querySelector("model-response, message-content, .response-content-markdown, [data-test-id='model-response']"))) {
+                    targetEl = curr.matches("model-response, [data-test-id='model-response'], .model-response, response-container") ? curr : curr.querySelector("model-response, message-content, .response-content-markdown, [data-test-id='model-response']");
+                    break;
+                }
+                curr = curr.nextElementSibling;
+            }
+        }
+        
+        if (!targetEl && modelResponses.length > initialResponseCount) {
+            targetEl = modelResponses[modelResponses.length - 1];
+        }
     }
-    if (!targetEl) {
+
+    if (!targetEl && (!isRedo && userQueries.length === 0)) {
         const respSelectors = [
             ".response-content-markdown",
             "message-content",
@@ -482,15 +740,11 @@ JS_POLL_UI_STATE = """
         for (const sel of respSelectors) {
             try {
                 const els = document.querySelectorAll(sel);
-                for (let i = els.length - 1; i >= 0; i--) {
-                    const el = els[i];
-                    if (!el.closest("user-query, user-message, [data-test-id='user-query'], .user-query-container, .query-text")) {
-                        targetEl = el;
-                        break;
-                    }
+                if (els.length > initialResponseCount) {
+                    targetEl = els[els.length - 1];
+                    break;
                 }
             } catch (e) {}
-            if (targetEl) break;
         }
     }
 
@@ -514,7 +768,9 @@ JS_POLL_UI_STATE = """
     return {
         text: text,
         is_generating: isGenerating,
-        has_action_bar: hasActionBar
+        has_action_bar: hasActionBar,
+        query_count: userQueries.length,
+        response_count: modelResponses.length
     };
 }
 """
@@ -552,23 +808,20 @@ class GeminiPlaywrightEngine:
         Attempts direct in-browser RPC invocation.
         Returns: (response_text, thoughts) if successful, or (None, None) if fallback needed.
         """
-        b64_pdf = None
-        file_name = None
         if pdf_path and os.path.exists(pdf_path):
-            with open(pdf_path, "rb") as pf:
-                b64_pdf = base64.b64encode(pf.read()).decode("utf-8")
-            file_name = os.path.basename(pdf_path)
+            await self._log(f"Tập {episode}: [Engine 1 - Direct RPC] Có file PDF đính kèm. Chuyển sang Engine 2 (Playwright Interceptor)...", "info", episode=episode)
+            return None, None
 
         await self._log(f"Tập {episode}: [Engine 1 - Direct RPC] Đang gửi yêu cầu trực tiếp qua API nội bộ Gemini...", "info", episode=episode)
         try:
             res = await asyncio.wait_for(
                 page.evaluate(JS_DIRECT_RPC_EXECUTE, {
                     "promptText": prompt_text,
-                    "base64Pdf": b64_pdf,
-                    "fileName": file_name,
+                    "base64Pdf": None,
+                    "fileName": None,
                     "modelName": model_name
                 }),
-                timeout=120.0
+                timeout=15.0
             )
 
             if isinstance(res, dict) and res.get("success"):
@@ -602,11 +855,13 @@ class GeminiPlaywrightEngine:
         min_sentences: int = 1,
         timeout: int = 120,
         episode: Optional[int] = None,
-        step_label: str = "Recap"
+        step_label: str = "Recap",
+        is_redo: bool = False
     ) -> Tuple[str, str]:
         """
         Executes prompt via Playwright with Network Response Stream Interception and DOM fallback.
         """
+        is_redo = is_redo or ("redo" in step_label.lower() or "thử lại" in step_label.lower())
         # 1. Setup Network Response Stream Interceptor
         intercepted_text = {"content": None, "thoughts": None, "error": None}
         response_completed_event = asyncio.Event()
@@ -619,90 +874,259 @@ class GeminiPlaywrightEngine:
                         body_text = await response.text()
                         txt, th, err = parse_stream_generate_response(body_text)
                         if txt:
-                            intercepted_text["content"] = txt
-                            intercepted_text["thoughts"] = th
+                            # Keep the longest / most complete text payload
+                            cur_len = len(intercepted_text["content"] or "")
+                            if len(txt) > cur_len:
+                                intercepted_text["content"] = txt
+                            if th:
+                                intercepted_text["thoughts"] = th
+                            # Signal that network has delivered a complete response
+                            response_completed_event.set()
                         if err:
                             intercepted_text["error"] = err
-                        response_completed_event.set()
                 except Exception:
                     pass
 
         page.on("response", on_response)
 
         try:
-            # 2. Attach PDF if present
-            if pdf_path and os.path.exists(pdf_path):
+            # 2. Attach PDF if present (only when NOT redo)
+            if not is_redo and pdf_path and os.path.exists(pdf_path):
                 file_name = os.path.basename(pdf_path)
                 await self._log(f"Tập {episode}: [Engine 2] Đính kèm file PDF [{file_name}]...", "info", episode=episode)
-                with open(pdf_path, "rb") as pf:
-                    pdf_bytes = pf.read()
-                b64_data = base64.b64encode(pdf_bytes).decode("utf-8")
 
-                await page.evaluate(JS_PASTE_PDF, {
-                    "base64Data": b64_data,
-                    "fileName": file_name,
-                    "mimeType": "application/pdf"
-                })
+                upload_success = False
+                try:
+                    # Click Plus / Upload button to mount input[type=file] if not present
+                    if await page.locator("input[type='file']").count() == 0:
+                        for plus_sel in [
+                            "button[aria-label*='Upload' i]",
+                            "button[aria-label*='Add' i]",
+                            "button[aria-label*='Thêm' i]",
+                            "button[aria-label*='Tải lên' i]",
+                            ".upload-button",
+                            "[data-test-id='upload-button']",
+                            "button.uploader-button"
+                        ]:
+                            loc = page.locator(plus_sel).first
+                            if await loc.count() > 0 and await loc.is_visible():
+                                try:
+                                    await loc.click()
+                                    await asyncio.sleep(0.5)
+                                    break
+                                except Exception:
+                                    pass
 
-                # Verify attachment chip appeared
+                    file_input = page.locator("input[type='file']").first
+                    if await file_input.count() > 0:
+                        await file_input.set_input_files(pdf_path)
+                        await asyncio.sleep(1.5)
+                        upload_success = True
+                except Exception:
+                    pass
+
+                if not upload_success:
+                    with open(pdf_path, "rb") as pf:
+                        pdf_bytes = pf.read()
+                    b64_data = base64.b64encode(pdf_bytes).decode("utf-8")
+
+                    await page.evaluate(JS_PASTE_PDF, {
+                        "base64Data": b64_data,
+                        "fileName": file_name,
+                        "mimeType": "application/pdf"
+                    })
+
+                # Verify attachment chip appeared & wait for upload progress
                 attached = False
                 for _ in range(30):
                     chk = await page.evaluate(JS_CHECK_ATTACHMENT)
                     if isinstance(chk, dict) and chk.get("attached"):
                         attached = True
                         break
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.3)
 
                 if attached:
                     await self._log(f"Tập {episode}: Đã xác nhận file PDF [{file_name}] được đính kèm vào khung chat.", "success", episode=episode)
                 else:
                     await self._log(f"Tập {episode}: Cảnh báo: Badge đính kèm chưa xuất hiện, tiếp tục điền prompt...", "warning", episode=episode)
 
-            # 3. Fill prompt text
-            await self._log(f"Tập {episode}: [Engine 2] Đang điền prompt [{step_label}]...", "info", episode=episode)
-            textbox = None
-            for sel in [
-                "rich-textarea p",
-                "rich-textarea div[contenteditable='true']",
-                "div.ql-editor[contenteditable='true']",
-                "div[contenteditable='true']",
-                "[role='textbox']"
-            ]:
-                loc = page.locator(sel).first
-                if await loc.count() > 0 and await loc.is_visible():
-                    textbox = loc
-                    break
+            initial_query_count = 0
+            initial_response_count = 0
+            try:
+                counts = await page.evaluate("""() => ({
+                    queryCount: document.querySelectorAll("user-query, [data-test-id='user-query'], .user-query-container, .user-query").length,
+                    responseCount: document.querySelectorAll("model-response, [data-test-id='model-response'], .model-response, response-container").length
+                })""")
+                if isinstance(counts, dict):
+                    initial_query_count = counts.get("queryCount", 0)
+                    initial_response_count = counts.get("responseCount", 0)
+            except Exception:
+                pass
 
-            if textbox:
+            if not is_redo:
+                # 3. Fill prompt text with multi-stage fallback & rigorous verification
+                await self._log(f"Tập {episode}: [Engine 2] Đang điền prompt [{step_label}]...", "info", episode=episode)
+
+                # Grant clipboard permissions if supported
                 try:
-                    await textbox.click(force=True)
-                    await asyncio.sleep(0.2)
-                    await textbox.fill(prompt_text)
+                    await page.context.grant_permissions(["clipboard-read", "clipboard-write"])
                 except Exception:
-                    await page.keyboard.insert_text(prompt_text)
-            else:
-                await page.keyboard.insert_text(prompt_text)
+                    pass
 
-            await asyncio.sleep(0.5)
+                fill_success = False
+                expected_min_chars = min(int(len(prompt_text.strip()) * 0.6), 25)
 
-            # 4. Click Send button
-            send_btn = None
-            for sel in [
-                "button[aria-label*='Send' i]",
-                "button[aria-label*='Gửi' i]",
-                "button.send-button",
-                "gem-icon-button[aria-label*='Send' i]",
-                "[data-test-id='send-button']"
-            ]:
-                loc = page.locator(sel).first
-                if await loc.count() > 0 and await loc.is_visible() and await loc.is_enabled():
-                    send_btn = loc
-                    break
+                async def _get_box_text() -> str:
+                    try:
+                        res = await page.evaluate(JS_GET_TEXTBOX_TEXT)
+                        return res.strip() if isinstance(res, str) else ""
+                    except Exception:
+                        return ""
 
-            if send_btn:
-                await send_btn.click(force=True, timeout=3000)
-            else:
-                await page.keyboard.press("Enter")
+                # Method 1: CDP Native insert_text (preserves newlines, does NOT trigger Enter key submission)
+                try:
+                    textbox = page.locator("rich-textarea div[contenteditable='true'], rich-textarea p, div[contenteditable='true'], [role='textbox']").first
+                    if await textbox.count() > 0:
+                        await textbox.click(force=True)
+                        await asyncio.sleep(0.1)
+                        await page.keyboard.press("Control+a")
+                        await asyncio.sleep(0.05)
+                        await page.keyboard.press("Delete")
+                        await asyncio.sleep(0.05)
+                        await page.keyboard.insert_text(prompt_text)
+                        await asyncio.sleep(0.3)
+                        
+                        box_content = await _get_box_text()
+                        if len(box_content) >= expected_min_chars:
+                            fill_success = True
+                except Exception:
+                    pass
+
+                # Method 2: DOM Injection (execCommand insertText + Synthetic DataTransfer)
+                if not fill_success:
+                    try:
+                        await page.evaluate(JS_INJECT_PROMPT_TEXT, {"text": prompt_text})
+                        await asyncio.sleep(0.3)
+                        box_content = await _get_box_text()
+                        if len(box_content) >= expected_min_chars:
+                            fill_success = True
+                    except Exception:
+                        pass
+
+                # Method 3: System Clipboard API Paste
+                if not fill_success:
+                    try:
+                        await page.evaluate("""(text) => navigator.clipboard.writeText(text)""", prompt_text)
+                        textbox = page.locator("rich-textarea div[contenteditable='true'], rich-textarea p, div[contenteditable='true'], [role='textbox']").first
+                        if await textbox.count() > 0:
+                            await textbox.click(force=True)
+                            await asyncio.sleep(0.1)
+                            await page.keyboard.press("Control+a")
+                            await asyncio.sleep(0.05)
+                            await page.keyboard.press("Control+v")
+                            await asyncio.sleep(0.3)
+                        box_content = await _get_box_text()
+                        if len(box_content) >= expected_min_chars:
+                            fill_success = True
+                    except Exception:
+                        pass
+
+                # Method 4: Playwright textbox.fill()
+                if not fill_success:
+                    try:
+                        textbox = page.locator("rich-textarea p, div[contenteditable='true'], [role='textbox']").first
+                        if await textbox.count() > 0:
+                            await textbox.click(force=True)
+                            await textbox.fill(prompt_text)
+                            await asyncio.sleep(0.3)
+                        box_content = await _get_box_text()
+                        if len(box_content) >= expected_min_chars:
+                            fill_success = True
+                    except Exception:
+                        pass
+
+                # Trigger Angular model update
+                try:
+                    el = page.locator("rich-textarea div[contenteditable='true'], [role='textbox']").first
+                    if await el.count() > 0:
+                        await page.evaluate("""(el) => {
+                            ['input', 'change', 'keyup'].forEach(t => {
+                                el.dispatchEvent(new Event(t, { bubbles: true, cancelable: true }));
+                            });
+                            const rich = el.closest('rich-textarea');
+                            if (rich) rich.dispatchEvent(new Event('input', { bubbles: true }));
+                        }""", await el.element_handle())
+                except Exception:
+                    pass
+
+                await asyncio.sleep(0.5)
+
+                # Final verification before proceeding to send
+                verified_text = await _get_box_text()
+                # If verified_text is empty or shorter than expected in real browser, check fallback
+                if len(verified_text) < expected_min_chars and not fill_success:
+                    await self._log(f"Tập {episode}: [Engine 2] CẢNH BÁO: Không thể điền đủ nội dung prompt (thực tế: {len(verified_text)} chars / yêu cầu: {len(prompt_text)} chars).", "error", episode=episode)
+                    raise GeminiWebException(f"Lỗi điền prompt: Nội dung trong ô chat ({len(verified_text)} ký tự) không đủ so với prompt gốc ({len(prompt_text)} ký tự).", error_type="prompt_fill_failed", can_retry_web=True)
+                else:
+                    await self._log(f"Tập {episode}: [Engine 2] Đã điền và xác thực prompt thành công ({len(verified_text) or len(prompt_text)}/{len(prompt_text)} ký tự).", "success", episode=episode)
+
+                # 4. Wait for upload to complete & Send button to become enabled
+                await self._log(f"Tập {episode}: [Engine 2] Đang chờ file upload hoàn tất và nút Gửi sẵn sàng...", "info", episode=episode)
+                send_selectors = [
+                    "button[aria-label*='Send' i]",
+                    "button[aria-label*='Gửi' i]",
+                    "gem-icon-button[aria-label*='Send' i] button",
+                    "gem-icon-button[aria-label*='Send' i]",
+                    "gem-icon-button[aria-label*='Gửi' i] button",
+                    "gem-icon-button[aria-label*='Gửi' i]",
+                    "div[data-test-id='send-button-container'] button",
+                    "button#composer-submit-button",
+                    "button[data-testid='send-button']",
+                    "button[data-testid='chat-submit']",
+                    "button.send-button"
+                ]
+
+                send_btn = None
+                for _ in range(60):  # Wait up to 30 seconds for upload
+                    for sel in send_selectors:
+                        try:
+                            loc = page.locator(sel).first
+                            if await loc.count() > 0 and await loc.is_visible() and await loc.is_enabled():
+                                send_btn = loc
+                                break
+                        except Exception:
+                            pass
+                    if send_btn:
+                        break
+                    
+                    sr = await page.evaluate(JS_CHECK_SEND_READY)
+                    if isinstance(sr, dict) and sr.get("is_send_enabled"):
+                        # Re-check selectors now that send is enabled
+                        for sel in send_selectors:
+                            try:
+                                loc = page.locator(sel).first
+                                if await loc.count() > 0 and await loc.is_visible():
+                                    send_btn = loc
+                                    break
+                            except Exception:
+                                pass
+                        if send_btn:
+                            break
+                    await asyncio.sleep(0.5)
+
+                # Click Send button
+                submitted = False
+                if send_btn:
+                    try:
+                        await send_btn.click(force=True, timeout=3000)
+                        submitted = True
+                    except Exception:
+                        pass
+
+                if not submitted:
+                    trig = await page.evaluate(JS_TRIGGER_SUBMIT)
+                    if isinstance(trig, dict) and trig.get("clicked"):
+                        submitted = True
 
             # 5. Listen for Response (Network Stream + DOM Stability Polling)
             await self._log(f"Tập {episode}: [Engine 2] Đang lắng nghe phản hồi từ Gemini...", "info", episode=episode)
@@ -711,12 +1135,29 @@ class GeminiPlaywrightEngine:
             last_len = 0
             last_progress = time.time()
             stable_count = 0
+            had_generating = False
             min_len = 25 if is_intro else 150
+            retry_submit_timer = time.time()
 
             while time.time() - gen_start < timeout:
                 # Check if Network Interceptor already caught full response
-                if response_completed_event.is_set() and intercepted_text["content"]:
+                if intercepted_text["content"]:
                     resp_text = intercepted_text["content"]
+                    # Check ngay nếu là Gemini error message
+                    exc = classify_gemini_exception(resp_text)
+                    if exc:
+                        raise exc
+                    # Check thêm các error message phổ biến chưa được classify
+                    resp_lower = resp_text.strip().lower()
+                    is_gemini_error_msg = any(k in resp_lower for k in [
+                        "i encountered an error", "could you try again",
+                        "something went wrong", "i'm having trouble",
+                        "i can't do that right now", "i was unable to",
+                        "there was an error", "try again later"
+                    ])
+                    if is_gemini_error_msg and len(resp_text.strip()) < 200:
+                        intercepted_text["content"] = None  # Reset để không dùng
+                        raise GeminiServerErrorException(f"Gemini trả về error message: '{resp_text.strip()[:100]}'")
                     await self._log(f"Tập {episode}: [Network Interceptor] Bắt thành công dữ liệu phản hồi nguyên bản ({len(resp_text)} chars)!", "success", episode=episode)
                     break
 
@@ -726,12 +1167,28 @@ class GeminiPlaywrightEngine:
                         raise exc
 
                 # Poll UI DOM state
-                ui_state = await page.evaluate(JS_POLL_UI_STATE)
+                ui_state = await page.evaluate(JS_POLL_UI_STATE, {
+                    "initialQueryCount": initial_query_count,
+                    "initialResponseCount": initial_response_count,
+                    "isRedo": is_redo
+                })
                 if not isinstance(ui_state, dict):
                     ui_state = {}
                 cur_text = ui_state.get("text", "")
                 is_generating = ui_state.get("is_generating", False)
                 has_action_bar = ui_state.get("has_action_bar", False)
+
+                # Periodic resubmit nudge if idle for >10s without any generation (only for non-redo)
+                if not is_redo and not cur_text and not is_generating and (time.time() - retry_submit_timer > 10.0):
+                    retry_submit_timer = time.time()
+                    try:
+                        await page.evaluate("""() => {
+                            const closeBtns = document.querySelectorAll("button[aria-label*='Close' i], button[aria-label*='Đóng' i], button[aria-label*='Dismiss' i]");
+                            for (const b of closeBtns) { try { b.click(); } catch(e) {} }
+                        }""")
+                        await page.evaluate(JS_TRIGGER_SUBMIT)
+                    except Exception:
+                        pass
 
                 # Check safety/rate limit in DOM text
                 if cur_text:
@@ -739,11 +1196,12 @@ class GeminiPlaywrightEngine:
                     if exc:
                         raise exc
 
-                # Check timeouts
-                if not cur_text and (time.time() - gen_start > 75.0):
-                    raise GeminiStreamHangException("Quá 75s không có ký tự phản hồi nào từ Gemini.")
+                # Check timeouts (120s max before first character to allow heavy PDF analysis)
+                if not cur_text and (time.time() - gen_start > 120.0):
+                    raise GeminiStreamHangException("Quá 120s không có ký tự phản hồi nào từ Gemini.")
 
                 if is_generating:
+                    had_generating = True
                     stable_count = 0
                     if len(cur_text) > last_len:
                         last_progress = time.time()
@@ -766,16 +1224,18 @@ class GeminiPlaywrightEngine:
                     last_progress = time.time()
 
                 # Completion conditions:
-                # 1. Action bar is visible and text meets minimum length
-                if has_action_bar and len(resp_text) >= min_len and stable_count >= 1:
-                    break
-                # 2. Text has stabilized for >= 4 cycles (approx 3.2s) without generating indicator
-                if stable_count >= 4 and len(resp_text) >= min_len:
-                    break
+                elapsed = time.time() - gen_start
+                if had_generating or elapsed >= 3.0:
+                    if has_action_bar and len(resp_text) >= min_len and stable_count >= 1:
+                        break
+                    if stable_count >= 4 and len(resp_text) >= min_len:
+                        break
 
                 await asyncio.sleep(0.8)
 
-            return resp_text, intercepted_text.get("thoughts") or ""
+            candidates = [t for t in [resp_text, cur_text, intercepted_text.get("content") or ""] if t]
+            final_text = max(candidates, key=len, default="")
+            return final_text, intercepted_text.get("thoughts") or ""
 
         finally:
             try:

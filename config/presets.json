@@ -1,44 +1,22 @@
 {
-  "active_preset_id": "preset_english_andrew",
+  "active_preset_id": "preset_vietnamese_jessa",
   "presets": [
+    {
+      "id": "preset_vietnamese_jessa",
+      "name": "Tiếng Việt - Jessa (Easygoing & Effortless)",
+      "headless": false,
+      "language": "vi",
+      "gemini_model": "flash",
+      "tts_voice_id": "auto",
+      "flip_horizontal": false,
+      "voice_sample_path": "voices/jessa - easygoing and effortless.mp3",
+      "voice_sample_name": "Jessa - Easygoing And Effortless"
+    },
     {
       "id": "preset_english_andrew",
       "name": "English - Andrew (Smooth & Clear)",
       "headless": false,
       "language": "en",
-      "gemini_model": "flash",
-      "tts_voice_id": "auto",
-      "flip_horizontal": false,
-      "voice_sample_path": "voices/Andrew - Smooth, Smart and Clear.wav",
-      "voice_sample_name": "Andrew - Smooth, Smart And Clear"
-    },
-    {
-      "id": "preset_1789855498_588",
-      "name": "Haein (English)",
-      "headless": false,
-      "language": "en",
-      "gemini_model": "flash",
-      "tts_voice_id": "auto",
-      "flip_horizontal": true,
-      "voice_sample_path": "voices/Andrew - Smooth, Smart and Clear.wav",
-      "voice_sample_name": "Andrew - Smooth, Smart And Clear"
-    },
-    {
-      "id": "preset_1789855557_354",
-      "name": "Bori + Yoo (English)",
-      "headless": false,
-      "language": "en",
-      "gemini_model": "flash",
-      "tts_voice_id": "auto",
-      "flip_horizontal": true,
-      "voice_sample_path": "voices/Andrew - Smooth, Smart and Clear.wav",
-      "voice_sample_name": "Andrew - Smooth, Smart And Clear"
-    },
-    {
-      "id": "preset_1789866902_282",
-      "name": "Tiếng Việt (Debug)",
-      "headless": false,
-      "language": "vi",
       "gemini_model": "flash",
       "tts_voice_id": "auto",
       "flip_horizontal": false,

@@ -58,5 +58,14 @@ class TestGeminiWebEngine(unittest.TestCase):
         exc = classify_gemini_exception("Sign in to continue using Gemini")
         self.assertIsInstance(exc, GeminiAuthExpiredException)
 
+    def test_js_prompt_injection_constants(self):
+        from gemini_web_engine import JS_INJECT_PROMPT_TEXT, JS_GET_TEXTBOX_TEXT, JS_TRIGGER_SUBMIT
+        self.assertIn("rich-textarea", JS_INJECT_PROMPT_TEXT)
+        self.assertIn("execCommand", JS_INJECT_PROMPT_TEXT)
+        self.assertIn("DataTransfer", JS_INJECT_PROMPT_TEXT)
+        self.assertIn("rich-textarea", JS_GET_TEXTBOX_TEXT)
+        self.assertIn("clicked", JS_TRIGGER_SUBMIT)
+
 if __name__ == "__main__":
     unittest.main()
+

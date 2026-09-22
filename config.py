@@ -5,8 +5,10 @@ import torch
 # Supported providers: "omnivoice", "kokoro", "edge_tts"
 TTS_PROVIDER = os.getenv("TTS_PROVIDER", "omnivoice")
 
-# Default Voice Sample for Cloning (English Video Default)
+# Default Voice Sample for Cloning
+DEFAULT_VI_VOICE_SAMPLE = os.getenv("DEFAULT_VI_VOICE_SAMPLE", "voices/jessa - easygoing and effortless.mp3")
 DEFAULT_EN_VOICE_SAMPLE = os.getenv("DEFAULT_EN_VOICE_SAMPLE", "voices/Andrew - Smooth, Smart and Clear.wav")
+DEFAULT_VOICE_SAMPLE = os.getenv("DEFAULT_VOICE_SAMPLE", "voices/jessa - easygoing and effortless.mp3")
 
 # Hugging Face model repository or local path
 TTS_MODEL = os.getenv("TTS_MODEL", "hexgrad/Kokoro-82M")

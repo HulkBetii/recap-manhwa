@@ -258,6 +258,13 @@ class Stage1_ComicParsing(BaseStage):
         elif "manhuaplus.com" in urllib.parse.urlparse(url).netloc.lower() and "/chapter-" in url:
             url = re.sub(r"/chapter-[^/]+/?$", "/", url)
             task.comic_url = url
+        elif "comic.naver.com" in url and "/webtoon/detail" in url:
+            parsed_url = urllib.parse.urlparse(url)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            title_id = query_params.get("titleId", [""])[0]
+            if title_id:
+                url = f"https://comic.naver.com/webtoon/list?titleId={title_id}"
+                task.comic_url = url
         elif "comix.to" in url:
             parsed_url = urllib.parse.urlparse(url)
             parts = parsed_url.path.strip("/").split("/")
@@ -602,9 +609,49 @@ class Stage1_ComicParsing(BaseStage):
                         return 0.0
                     manhua_chapters.sort(key=extract_manhua_number)
                     task.artifacts["chapter_slugs"] = manhua_chapters
+            elif "comic.naver.com" in url:
+                try:
+                    for sel in ["h2.EpisodeListInfo__title--mYLlC", "span.EpisodeListInfo__title--mYLlC", ".EpisodeListInfo__title", ".comic_info h2", "meta[property='og:title']"]:
+                        if await page.locator(sel).count() > 0:
+                            if sel.startswith("meta"):
+                                title_text = await page.locator(sel).first.get_attribute("content") or ""
+                            else:
+                                title_text = await page.locator(sel).first.inner_text()
+                            if title_text:
+                                break
+                    if title_text:
+                        title_text = re.sub(r"\s*::\s*.*$", "", title_text).strip()
+                        title_text = re.sub(r"\s*-\s*NAVER.*$", "", title_text, flags=re.IGNORECASE).strip()
+                except Exception:
+                    pass
+
+                try:
+                    await page.wait_for_selector("a[href*='/webtoon/detail?']", timeout=8000)
+                except Exception:
+                    pass
+
+                hrefs = await page.locator("a[href*='/webtoon/detail?']").evaluate_all(
+                    "elements => elements.map(el => el.getAttribute('href'))"
+                )
+                naver_nos = []
+                for href in hrefs:
+                    if href and "no=" in href:
+                        m = re.search(r"no=(\d+)", href)
+                        if m:
+                            naver_nos.append(int(m.group(1)))
+                if naver_nos:
+                    naver_nos = sorted(list(set(naver_nos)))
+                    task.artifacts["chapter_slugs"] = [str(n) for n in naver_nos]
+                
+                parsed_u = urllib.parse.urlparse(url)
+                q_params = urllib.parse.parse_qs(parsed_u.query)
+                t_id = q_params.get("titleId", [""])[0]
+                if t_id:
+                    task.artifacts["naver_title_id"] = t_id
             if not title_text:
                 title_text = await page.title()
                 title_text = title_text.split("|")[0].strip()
+                title_text = title_text.split("::")[0].strip()
                 title_text = title_text.split("Chapter")[0].strip()
             sanitized_title = sanitize_title(title_text)
             
@@ -693,6 +740,7 @@ async def execute_single_episode_stage2(
     is_valir = "valirscans.org" in parsed.netloc.lower()
     is_nyx = "nyxscans.com" in parsed.netloc.lower()
     is_manhuaplus = "manhuaplus.com" in parsed.netloc.lower()
+    is_naver = "comic.naver.com" in parsed.netloc.lower()
     
     if is_vortex:
         parts = parsed.path.strip("/").split("/")
@@ -756,6 +804,13 @@ async def execute_single_episode_stage2(
             series_slug = parts[0]
         else:
             await context.log("Không tìm thấy series slug trong URL ManhuaPlus.", "error", stage_name=stage_name, episode=ep)
+            task.episode_progress[ep_key][stage_name] = StageState.FAILED
+            return False
+    elif is_naver:
+        query = urllib.parse.parse_qs(parsed.query)
+        naver_title_id = query.get("titleId", [""])[0] or task.artifacts.get("naver_title_id", "")
+        if not naver_title_id:
+            await context.log("Không tìm thấy titleId trong URL Naver Webtoon.", "error", stage_name=stage_name, episode=ep)
             task.episode_progress[ep_key][stage_name] = StageState.FAILED
             return False
     else:
@@ -946,6 +1001,12 @@ async def execute_single_episode_stage2(
                         
                 viewer_url = f"{parsed.scheme}://{parsed.netloc}/title/{series_slug}/{chapter_slug}"
                 wait_sel = ".rpage-main, img.rpage-page__img"
+            elif is_naver:
+                slugs = task.artifacts.get("chapter_slugs", [])
+                chapter_slug = resolve_chapter_slug(slugs, ep, default_prefix="")
+                target_no = chapter_slug if chapter_slug else str(ep)
+                viewer_url = f"https://comic.naver.com/webtoon/detail?titleId={naver_title_id}&no={target_no}"
+                wait_sel = ".wt_viewer img, #comic_view_area img, div.wt_viewer img, img[src*='image-comic.pstatic.net']"
             else:
                 viewer_url = f"{parsed.scheme}://{parsed.netloc}/{base_path}/ep-{ep}/viewer?title_no={title_no}&episode_no={ep}"
                 wait_sel = "#_imageList img"
@@ -1185,6 +1246,10 @@ async def execute_single_episode_stage2(
                     image_urls = await page.locator("img").evaluate_all(
                         "elements => elements.map(el => el.getAttribute('data-src') || el.getAttribute('src') || el.src).filter(s => s && s.includes('cdn.manhuaplus.com'))"
                     )
+            elif is_naver:
+                image_urls = await page.locator(".wt_viewer img, #comic_view_area img, div.wt_viewer img, img[src*='image-comic.pstatic.net']").evaluate_all(
+                    "elements => elements.map(el => el.getAttribute('src') || el.getAttribute('data-src')).filter(s => s && (s.includes('image-comic.pstatic.net') || s.includes('pstatic.net') || s.includes('naver')))"
+                )
             else:
                 image_urls = await page.locator("#_imageList img").evaluate_all(
                     "elements => elements.map(el => el.getAttribute('data-url') || el.getAttribute('src'))"
@@ -1225,6 +1290,8 @@ async def execute_single_episode_stage2(
                         referer = "https://nyxscans.com/"
                     elif is_manhuaplus:
                         referer = "https://manhuaplus.com/"
+                    elif is_naver:
+                        referer = "https://comic.naver.com/"
                     else:
                         referer = "https://www.webtoons.com/"
                         
@@ -1738,7 +1805,7 @@ async def execute_single_episode_stage5(
         comic_title = task.artifacts.get("comic_title", "Manhwa")
         timeout = task.payload.get("timeout", 90)
         language = task.payload.get("language", "vi")
-        safe_mode = task.payload.get("safe_mode", True)
+        safe_mode = task.payload.get("safe_mode", False)
         gemini_model = task.payload.get("gemini_model", "flash")
         if not gemini_model or gemini_model == "default":
             gemini_model = "flash"
@@ -1819,8 +1886,8 @@ async def execute_single_episode_stage5(
             if context.cancel_token.is_cancelled():
                 break
 
-            # Ở lần retry thứ 3 trên tool: Bật che hình ảnh nhạy cảm (Safe Mode DINO+SAM) và tạo lại PDF an toàn
-            if attempt >= 3 and not safe_mode_applied:
+            # Ở lần retry thứ 3 trên tool: Bật che hình ảnh nhạy cảm (Safe Mode DINO+SAM) và tạo lại PDF an toàn (nếu safe_mode được bật)
+            if safe_mode and attempt >= 3 and not safe_mode_applied:
                 await context.log(f"Tập {ep}: [Tool Retry Lần {attempt}/3] Đang kích hoạt Safe Mode (DINO+SAM) để che nội dung nhạy cảm trước khi upload PDF lên {vlm_name}...", "warning", stage_name=stage_name, episode=ep)
                 try:
                     from app import sanitize_episode_images
@@ -2133,42 +2200,34 @@ async def execute_single_episode_stage5(
                             except Exception:
                                 page = await local_br_ctx.new_page()
 
-                            # Chuyển tới chat mới hoặc tải lại trang
+                            # Luôn navigate đến /app để bắt đầu chat mới hoàn toàn (tránh resume session cũ)
                             try:
                                 page_url = page.url or ""
-                                if "gemini.google.com" in page_url:
-                                    new_chat_clicked = False
-                                    for n_sel in [
-                                        "a[href='/app']",
-                                        "button[aria-label*='New chat' i]",
-                                        "button[aria-label*='Cuộc trò chuyện mới' i]",
-                                        "[data-test-id='new-chat-button']",
-                                        ".new-chat-button"
-                                    ]:
-                                        try:
-                                            btn = page.locator(n_sel).first
-                                            if await btn.count() > 0 and await btn.is_visible():
-                                                await btn.click(timeout=2000)
-                                                new_chat_clicked = True
-                                                await asyncio.sleep(1.0)
-                                                break
-                                        except Exception:
-                                            pass
-                                    if not new_chat_clicked:
-                                        await local_nm.safe_goto(page, vlm_url,
-                                            reason=f"Gemini {step_label} Ep {ep} (attempt {attempt})",
-                                            caller="Stage5_GeminiAutomation",
-                                            wait_until="domcontentloaded")
-                                else:
+                                if "gemini.google.com/app" in page_url and not page_url.endswith("/app") and "?" not in page_url:
+                                    # Đang trong một conversation cụ thể → navigate ra /app
                                     await local_nm.safe_goto(page, vlm_url,
-                                        reason=f"Gemini {step_label} Ep {ep} (attempt {attempt})",
+                                        reason=f"Gemini New Chat Ep {ep} (attempt {attempt})",
                                         caller="Stage5_GeminiAutomation",
                                         wait_until="domcontentloaded")
+                                elif "gemini.google.com" not in page_url:
+                                    # Không phải Gemini → navigate vào
+                                    await local_nm.safe_goto(page, vlm_url,
+                                        reason=f"Gemini Init Ep {ep} (attempt {attempt})",
+                                        caller="Stage5_GeminiAutomation",
+                                        wait_until="domcontentloaded")
+                                else:
+                                    # Đang ở /app nhưng có thể có session cũ → force reload
+                                    try:
+                                        await page.goto(vlm_url, wait_until="domcontentloaded", timeout=30000)
+                                    except Exception:
+                                        pass
+                                await asyncio.sleep(1.5)
                             except Exception:
                                 await local_nm.safe_goto(page, vlm_url,
-                                    reason=f"Gemini {step_label} Ep {ep} (attempt {attempt})",
+                                    reason=f"Gemini Fallback Ep {ep} (attempt {attempt})",
                                     caller="Stage5_GeminiAutomation",
                                     wait_until="domcontentloaded")
+
 
                             # Dismiss popups
                             try:
@@ -2250,9 +2309,12 @@ async def execute_single_episode_stage5(
                             # --- TẦNG 2: PLAYWRIGHT NETWORK INTERCEPTOR & DOM AUTOMATION ---
                             max_web_retries = 3
                             for web_attempt in range(1, max_web_retries + 1):
-                                if context.cancel_token.is_cancelled():
-                                    raise asyncio.CancelledError()
+                                if page.is_closed():
+                                    pages = local_br_ctx.pages
+                                    page = pages[0] if pages else await local_br_ctx.new_page()
+                                    await local_nm.safe_goto(page, vlm_url, reason=f"Gemini Ep {ep}", caller="Stage5_GeminiAutomation", wait_until="domcontentloaded")
 
+                                is_redo_attempt = False
                                 if web_attempt > 1:
                                     await context.log(
                                         f"Tập {ep}: [{step_label}] [Tool {attempt}/3 - Web {web_attempt}/3] Đang click Redo / Thử lại trên giao diện web...",
@@ -2262,6 +2324,7 @@ async def execute_single_episode_stage5(
                                     )
                                     redo_ok = await click_gemini_redo_button(page)
                                     if redo_ok:
+                                        is_redo_attempt = True
                                         await context.log(f"Tập {ep}: Đã click nút Redo -> 'Try again' thành công. Đang chờ Gemini tạo lại...", "info", stage_name=stage_name, episode=ep)
                                         await asyncio.sleep(2.0)
 
@@ -2270,13 +2333,14 @@ async def execute_single_episode_stage5(
                                     resp_text, thoughts = await engine.execute_playwright_interceptor(
                                         page=page,
                                         prompt_text=prompt_text,
-                                        pdf_path=pdf_path if web_attempt == 1 else None,
+                                        pdf_path=pdf_path if (web_attempt == 1 and not is_redo_attempt) else None,
                                         model_name=gemini_model,
                                         is_intro=is_intro,
                                         min_sentences=min_sentences,
                                         timeout=timeout,
                                         episode=ep,
-                                        step_label=f"{step_label} (Web {web_attempt}/3)"
+                                        step_label=f"{'Redo ' if is_redo_attempt else ''}{step_label} (Web {web_attempt}/3)",
+                                        is_redo=is_redo_attempt
                                     )
                                 except GeminiWebException:
                                     raise
@@ -2293,6 +2357,8 @@ async def execute_single_episode_stage5(
                                     is_valid, err_msg = verify_gemini_response_format(resp_text, is_intro=is_intro, min_sentences=min_sentences)
                                     if not is_valid:
                                         validation_error = f"Phản hồi chưa đạt chuẩn: {err_msg}"
+                                        preview = resp_text.replace('\n', ' ')[:120]
+                                        await context.log(f"Tập {ep}: [Web {web_attempt}/3] Chưa đạt: {err_msg} | Preview: '{preview}'", "warning", stage_name=stage_name, episode=ep)
                                     else:
                                         parsed = parse_gemini_recap_text(resp_text)
                                         if not parsed or not isinstance(parsed, list):

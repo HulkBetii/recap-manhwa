@@ -335,7 +335,7 @@ async def run_test_stage(payload: TestStageRunRequest):
         "gemini_model": payload.gemini_model or "flash",
         "language": payload.language or "vi",
         "pdf_quality": payload.pdf_quality or 20,
-        "safe_mode": True,
+        "safe_mode": False,
         "nsfw_threshold": 0.45,
         "nsfw_mode": "dino_sam",
         "concurrency": 2,
@@ -643,7 +643,19 @@ def extract_video_results(ep_dir: str, folder_name: str, ep_num: int = 1) -> Opt
         return None
 
     video_size_mb = round(os.path.getsize(video_path) / (1024 * 1024), 2)
-    srt_path = os.path.join(ep_dir, "transcript.srt")
+    srt_path = os.path.join(ep_dir, "video.srt")
+    if not os.path.exists(srt_path):
+        srt_path = os.path.join(ep_dir, "transcript.srt")
+
+    # Ensure video.srt is created if only transcript.srt existed
+    if os.path.exists(os.path.join(ep_dir, "transcript.srt")) and not os.path.exists(os.path.join(ep_dir, "video.srt")):
+        try:
+            import shutil
+            shutil.copy2(os.path.join(ep_dir, "transcript.srt"), os.path.join(ep_dir, "video.srt"))
+            srt_path = os.path.join(ep_dir, "video.srt")
+        except Exception:
+            pass
+
     srt_content = ""
     if os.path.exists(srt_path):
         try:
@@ -657,7 +669,7 @@ def extract_video_results(ep_dir: str, folder_name: str, ep_num: int = 1) -> Opt
         "episode": ep_num,
         "video_url": f"/downloads/{folder_name}/episode_{ep_num}/video.mp4",
         "video_size_mb": video_size_mb,
-        "srt_url": f"/downloads/{folder_name}/episode_{ep_num}/transcript.srt" if os.path.exists(srt_path) else None,
+        "srt_url": f"/downloads/{folder_name}/episode_{ep_num}/video.srt" if os.path.exists(os.path.join(ep_dir, "video.srt")) else (f"/downloads/{folder_name}/episode_{ep_num}/transcript.srt" if os.path.exists(srt_path) else None),
         "srt_content": srt_content
     }
 

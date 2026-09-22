@@ -856,7 +856,7 @@ class CrawlRequest(BaseModel):
     url: str
     from_episode: int
     to_episode: int
-    safe_mode: bool = True
+    safe_mode: bool = False
     nsfw_threshold: float = 0.3
     nsfw_mode: str = "mask"
     gemini_model: str = "default"
@@ -1047,16 +1047,8 @@ async def get_browser_context(p, headless=None, start_maximized=False, temp_suff
 
     if profile_path:
         profile_path = os.path.abspath(profile_path)
-
-        basename = os.path.basename(profile_path)
-        if basename.startswith("Profile ") or basename == "Default":
-            profile_dir_arg = basename
-            user_data_dir = os.path.dirname(profile_path)
-            launch_args["args"].append(f"--profile-directory={profile_dir_arg}")
-            print(f"Using persistent Chrome profile directory: {user_data_dir} with profile: {profile_dir_arg}")
-        else:
-            user_data_dir = profile_path
-            print(f"Using persistent Chrome profile at: {user_data_dir}")
+        user_data_dir = profile_path
+        print(f"Using persistent Chrome profile at: {user_data_dir}")
 
         # Clean browser lock files & heavy temp telemetry/model bloat inside profile path
         for lock_name in ["SingletonLock", "lock", "SingletonCookie", "SingletonSocket"]:
@@ -1836,6 +1828,8 @@ def download_image_sync(url: str, save_path: str, referer: str = None):
             referer = "https://nyxscans.com/"
         elif "manhuaplus.com" in url:
             referer = "https://manhuaplus.com/"
+        elif "comic.naver.com" in url or "pstatic.net" in url:
+            referer = "https://comic.naver.com/"
         else:
             referer = "https://www.webtoons.com/"
             
@@ -1864,7 +1858,7 @@ def download_image_sync(url: str, save_path: str, referer: str = None):
 async def download_image(url: str, save_path: str, referer: str = None, browser_context=None):
     if browser_context:
         try:
-            req_referer = referer or ("https://manhuaplus.com/" if "manhuaplus.com" in url else "https://www.webtoons.com/")
+            req_referer = referer or ("https://comic.naver.com/" if ("pstatic.net" in url or "comic.naver.com" in url) else ("https://manhuaplus.com/" if "manhuaplus.com" in url else "https://www.webtoons.com/"))
             resp = await browser_context.request.get(url, headers={"Referer": req_referer})
             if resp.status == 200:
                 body = await resp.body()
@@ -2049,15 +2043,18 @@ def clean_gemini_response(text: str) -> str:
         line_str = line.strip()
         if not line_str:
             continue
-        if "<thinking>" in line_str:
+        if "<thinking>" in line_str or "<thought>" in line_str:
             in_thinking = True
+
+        m_pref = page_prefix_pat.match(line_str)
+        if m_pref:
+            in_thinking = False
+
         if in_thinking:
-            cleaned_lines.append(line_str)
-            if "</thinking>" in line_str:
+            if "</thinking>" in line_str or "</thought>" in line_str:
                 in_thinking = False
             continue
 
-        m_pref = page_prefix_pat.match(line_str)
         if m_pref:
             page_num = str(int(m_pref.group(1)))
             raw_content = line_str[m_pref.end():].strip()
@@ -2066,6 +2063,10 @@ def clean_gemini_response(text: str) -> str:
             raw_content = re.sub(r"[\*\_`]", "", raw_content)
             # Clean citation badges at the end or anywhere in text
             raw_content = strip_gemini_citations(raw_content)
+
+            # Strip in-content [R\d+] - or C[R\d+] - glitch prefixes from raw_content
+            if re.search(r"\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*\d{1,4}\s*\]\s*[\-:\–\—\−\~]", raw_content):
+                raw_content = re.sub(r"^.*\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*\d{1,4}\s*\]\s*[\-:\–\—\−\~]\s*", "", raw_content, flags=re.IGNORECASE).strip()
 
             # Handle '#' at the end or inside line
             if "#" in raw_content:
@@ -2094,12 +2095,12 @@ def clean_gemini_response(text: str) -> str:
     # If any remaining valid lines are still missing '#', auto-append '#'
     for i in range(len(cleaned_lines)):
         cl = cleaned_lines[i].strip()
-        if not cl.endswith("#") and not cl.startswith("<thinking") and not cl.startswith("</thinking"):
+        if not cl.endswith("#"):
             cleaned_lines[i] = cl + "#"
     garbage_words_pat = re.compile(r"^(?:PDF|\.pdf|\(PDF\)|\+\s*\d+|chapter|#|\s*)+$", re.IGNORECASE)
     while cleaned_lines:
         last = cleaned_lines[-1].strip()
-        if not last or garbage_words_pat.match(last) or (not page_prefix_pat.match(last) and not last.endswith("</thinking>")):
+        if not last or garbage_words_pat.match(last) or not page_prefix_pat.match(last):
             cleaned_lines.pop()
         else:
             break
@@ -2160,8 +2161,8 @@ def verify_gemini_response_format(text: str, is_intro: bool = False, min_sentenc
         except Exception:
             pass
 
-    # 2. Clean thinking tags
-    clean_text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
+    # 2. Check format line by line after clean_gemini_response
+    clean_text = text.strip()
     if not clean_text:
         return False, "Response contains only thinking tags or is empty."
 
@@ -2230,7 +2231,10 @@ def parse_gemini_recap_text(text: str) -> list:
                         break
                 if valid:
                     for item in parsed:
-                        item["speech"] = strip_gemini_citations(item.get("speech", ""))
+                        sp = strip_gemini_citations(item.get("speech", ""))
+                        if re.search(r"\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*\d{1,4}\s*\]\s*[\-:\–\—\−\~]", sp):
+                            sp = re.sub(r"^.*\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*\d{1,4}\s*\]\s*[\-:\–\—\−\~]\s*", "", sp, flags=re.IGNORECASE).strip()
+                        item["speech"] = sp
                     return parsed
         except Exception:
             pass
@@ -2270,6 +2274,9 @@ def parse_gemini_recap_text(text: str) -> list:
                 content = re.sub(r"[\*\_`]", "", content)
                 # Clean any stray citation badges from content
                 content = strip_gemini_citations(content)
+                # Strip in-content [R\d+] - or C[R\d+] - glitch prefixes
+                if re.search(r"\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*\d{1,4}\s*\]\s*[\-:\–\—\−\~]", content):
+                    content = re.sub(r"^.*\[\s*(?:R|r|Region|Trang|Page|Khung|Frame)?\s*\d{1,4}\s*\]\s*[\-:\–\—\−\~]\s*", "", content, flags=re.IGNORECASE).strip()
                 if content:
                     parsed_list.append({
                         "speech": content,
@@ -2421,9 +2428,32 @@ async def analyze(payload: AnalyzeRequest):
                     url = urllib.parse.urlunparse(parsed_url._replace(path=new_path, query="", fragment=""))
                     await sse_logger.log(f"Đường dẫn tập truyện phát hiện. Chuẩn hóa thành trang chính bộ truyện: {url}", "info")
                     await nav_manager.safe_goto(page, url, reason="Load normalized manhwa series page for episode count analysis", caller="analyze")
+        elif "comic.naver.com" in url and "/webtoon/detail" in url:
+            parsed_url = urllib.parse.urlparse(url)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            title_id = query_params.get("titleId", [""])[0]
+            if title_id:
+                url = f"https://comic.naver.com/webtoon/list?titleId={title_id}"
+                await sse_logger.log(f"Đường dẫn tập truyện phát hiện. Chuẩn hóa thành trang chính bộ truyện: {url}", "info")
+                await nav_manager.safe_goto(page, url, reason="Load normalized manhwa series page for episode count analysis", caller="analyze")
 
         title_text = ""
-        if "vortexscans.org" in url:
+        if "comic.naver.com" in url:
+            try:
+                for sel in ["h2.EpisodeListInfo__title--mYLlC", "span.EpisodeListInfo__title--mYLlC", ".EpisodeListInfo__title", ".comic_info h2", "meta[property='og:title']"]:
+                    if await page.locator(sel).count() > 0:
+                        if sel.startswith("meta"):
+                            title_text = await page.locator(sel).first.get_attribute("content") or ""
+                        else:
+                            title_text = await page.locator(sel).first.inner_text()
+                        if title_text:
+                            break
+                if title_text:
+                    title_text = re.sub(r"\s*::\s*.*$", "", title_text).strip()
+                    title_text = re.sub(r"\s*-\s*NAVER.*$", "", title_text, flags=re.IGNORECASE).strip()
+            except Exception:
+                pass
+        elif "vortexscans.org" in url:
             try:
                 await page.wait_for_selector("h1.break-words, h1.text-2xl", timeout=5000)
                 title_text = await page.locator("h1.break-words, h1.text-2xl").first.inner_text()
@@ -2472,10 +2502,30 @@ async def analyze(payload: AnalyzeRequest):
         if not title_text:
             title_text = await page.title()
             title_text = title_text.split("|")[0].strip()
+            title_text = title_text.split("::")[0].strip()
             title_text = title_text.split("Chapter")[0].strip()
 
         max_ep = 0
-        if "comix.to" in url:
+        if "comic.naver.com" in url:
+            try:
+                try:
+                    await page.wait_for_selector("a[href*='/webtoon/detail?']", timeout=8000)
+                except Exception:
+                    pass
+                hrefs = await page.locator("a[href*='/webtoon/detail?']").evaluate_all(
+                    "elements => elements.map(el => el.getAttribute('href'))"
+                )
+                naver_nos = []
+                for href in hrefs:
+                    if href and "no=" in href:
+                        m = re.search(r"no=(\d+)", href)
+                        if m:
+                            naver_nos.append(int(m.group(1)))
+                if naver_nos:
+                    max_ep = max(naver_nos)
+            except Exception:
+                pass
+        elif "comix.to" in url:
             try:
                 hrefs = await page.locator("a.mchap-row__primary").evaluate_all(
                     "elements => elements.map(el => el.getAttribute('href'))"
@@ -2922,7 +2972,7 @@ async def sanitize_episode_images(ep_dir: str, nsfw_threshold: float, nsfw_mode:
 # Background Crawler Task
 async def run_crawler_task(
     url: str, from_ep: int, to_ep: int,
-    safe_mode: bool = True,
+    safe_mode: bool = False,
     nsfw_threshold: float = 0.4,
     nsfw_mode: str = "mask",
     gemini_model: str = "default",
@@ -3087,7 +3137,7 @@ async def run_crawler_task(
 
 async def run_auto_summarization_flow(
     download_dir: str, title_text: str, from_ep: int, to_ep: int,
-    safe_mode: bool = True,
+    safe_mode: bool = False,
     nsfw_threshold: float = 0.4,
     nsfw_mode: str = "mask",
     gemini_model: str = "default",
@@ -4449,6 +4499,9 @@ DONE WHEN
 - No selected region is text-only or empty of story.
 - Each line fits the image it plays over and is ready to read aloud in {lang}.
 """
+
+
+
 
 
 def generate_intro_prompt(

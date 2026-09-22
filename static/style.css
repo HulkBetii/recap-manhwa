@@ -937,6 +937,17 @@ body {
 }
 
 /* Host Chip Brand Variants */
+.host-chip.naver {
+    background: rgba(0, 220, 100, 0.08);
+    border-color: rgba(0, 220, 100, 0.25);
+    color: #00dc64;
+}
+.host-chip.naver:hover {
+    background: rgba(0, 220, 100, 0.18);
+    border-color: rgba(0, 220, 100, 0.5);
+    box-shadow: 0 4px 12px rgba(0, 220, 100, 0.2);
+}
+
 .host-chip.webtoons {
     background: rgba(16, 185, 129, 0.08);
     border-color: rgba(16, 185, 129, 0.22);

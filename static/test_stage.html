@@ -194,6 +194,7 @@
                     <span class="input-hint">Nhấp vào một trong các trang truyện mẫu bên dưới để điền nhanh:</span>
                     
                     <div class="hosts-grid">
+                        <div class="host-chip" onclick="fillSampleUrl('https://comic.naver.com/webtoon/list?titleId=814742')">Naver Webtoon</div>
                         <div class="host-chip" onclick="fillSampleUrl('https://asurascans.com/comics/solo-leveling')">Asura Scans</div>
                         <div class="host-chip" onclick="fillSampleUrl('https://www.webtoons.com/en/action/lookism/list?title_no=1049')">Webtoons</div>
                         <div class="host-chip" onclick="fillSampleUrl('https://vortexscans.org/series/nano-machine')">Vortex</div>
@@ -479,10 +480,16 @@
                         <video id="rendered-video-player" controls style="width: 100%; border-radius: var(--radius-sm); max-height: 500px; background: #000;"></video>
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
                             <span style="font-size: 0.9rem; color: var(--text-secondary);">Dung lượng video: <strong id="video-meta-size" style="color: var(--primary);">0 MB</strong></span>
-                            <a id="btn-download-video" href="#" download="video.mp4" class="btn-download-pdf">
-                                <i data-lucide="download"></i>
-                                <span>Tải Video MP4</span>
-                            </a>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <a id="btn-download-video-srt" href="#" download="transcript.srt" class="btn-secondary" style="text-decoration: none; display: none; align-items: center; gap: 0.35rem; font-size: 0.85rem; padding: 0.45rem 0.85rem; border-radius: var(--radius-sm);" title="Tải file phụ đề SRT">
+                                    <i data-lucide="file-text"></i>
+                                    <span>Tải Phụ Đề SRT</span>
+                                </a>
+                                <a id="btn-download-video" href="#" download="video.mp4" class="btn-download-pdf">
+                                    <i data-lucide="download"></i>
+                                    <span>Tải Video MP4</span>
+                                </a>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -456,28 +456,43 @@ async def generate_tts(text: str, output_audio_path: str, output_srt_path: str, 
                 ref_audio_path = opt_ref
 
         if (not voice_id or voice_id == "auto") and not ref_audio_path:
-            # 1. Check configured default English sample first
-            env_def = getattr(config, "DEFAULT_EN_VOICE_SAMPLE", "voices/Andrew - Smooth, Smart and Clear.wav")
-            cand_env = os.path.join(os.path.dirname(os.path.abspath(__file__)), env_def)
-            cand_env_ref = os.path.splitext(cand_env)[0] + "_ref.wav"
-            if os.path.exists(cand_env_ref):
-                ref_audio_path = cand_env_ref
-            elif os.path.exists(cand_env):
-                ref_audio_path = cand_env
+            # 1. Check configured default sample (Jessa for VI / general default, or Andrew for EN)
+            vi_def = getattr(config, "DEFAULT_VI_VOICE_SAMPLE", getattr(config, "DEFAULT_VOICE_SAMPLE", "voices/jessa - easygoing and effortless.mp3"))
+            cand_vi = os.path.join(os.path.dirname(os.path.abspath(__file__)), vi_def)
+            cand_vi_ref = os.path.splitext(cand_vi)[0] + "_ref.wav"
+            
+            if os.path.exists(cand_vi_ref):
+                ref_audio_path = cand_vi_ref
+            elif os.path.exists(cand_vi):
+                ref_audio_path = cand_vi
             else:
-                # 2. Check voices directory
-                voices_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
-                if os.path.exists(voices_dir):
-                    voice_files = sorted([os.path.join(voices_dir, f) for f in os.listdir(voices_dir) if f.lower().endswith(('.mp3', '.wav', '.m4a', '.ogg', '.flac', '.aac', '.webm'))])
-                    # Prioritize Andrew golden ref or sample
-                    andrew_ref = [f for f in voice_files if "andrew" in os.path.basename(f).lower() and "_ref" in f]
-                    andrew_cand = [f for f in voice_files if "andrew" in os.path.basename(f).lower()]
-                    if andrew_ref:
-                        ref_audio_path = andrew_ref[0]
-                    elif andrew_cand:
-                        ref_audio_path = andrew_cand[0]
-                    elif voice_files:
-                        ref_audio_path = voice_files[0]
+                env_def = getattr(config, "DEFAULT_EN_VOICE_SAMPLE", "voices/Andrew - Smooth, Smart and Clear.wav")
+                cand_env = os.path.join(os.path.dirname(os.path.abspath(__file__)), env_def)
+                cand_env_ref = os.path.splitext(cand_env)[0] + "_ref.wav"
+                if os.path.exists(cand_env_ref):
+                    ref_audio_path = cand_env_ref
+                elif os.path.exists(cand_env):
+                    ref_audio_path = cand_env
+                else:
+                    # 2. Check voices directory
+                    voices_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
+                    if os.path.exists(voices_dir):
+                        voice_files = sorted([os.path.join(voices_dir, f) for f in os.listdir(voices_dir) if f.lower().endswith(('.mp3', '.wav', '.m4a', '.ogg', '.flac', '.aac', '.webm'))])
+                        # Prioritize Jessa golden ref or sample first
+                        jessa_ref = [f for f in voice_files if "jessa" in os.path.basename(f).lower() and "_ref" in f]
+                        jessa_cand = [f for f in voice_files if "jessa" in os.path.basename(f).lower()]
+                        andrew_ref = [f for f in voice_files if "andrew" in os.path.basename(f).lower() and "_ref" in f]
+                        andrew_cand = [f for f in voice_files if "andrew" in os.path.basename(f).lower()]
+                        if jessa_ref:
+                            ref_audio_path = jessa_ref[0]
+                        elif jessa_cand:
+                            ref_audio_path = jessa_cand[0]
+                        elif andrew_ref:
+                            ref_audio_path = andrew_ref[0]
+                        elif andrew_cand:
+                            ref_audio_path = andrew_cand[0]
+                        elif voice_files:
+                            ref_audio_path = voice_files[0]
             if not ref_audio_path or not os.path.exists(ref_audio_path):
                 amy_ref = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "voice_preview_amy - natural and sweet.mp3")
                 if os.path.exists(amy_ref):

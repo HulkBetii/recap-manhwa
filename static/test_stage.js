@@ -796,6 +796,17 @@ function renderVideoResult(result) {
         document.getElementById("video-meta-size").textContent = `${result.video_size_mb || 0} MB`;
     }
 
+    const btnSrt = document.getElementById("btn-download-video-srt");
+    if (btnSrt) {
+        if (result.srt_url) {
+            btnSrt.href = result.srt_url;
+            btnSrt.download = result.video_url ? result.video_url.split('/').pop().replace(/\.mp4$/i, '.srt') : "video.srt";
+            btnSrt.style.display = "inline-flex";
+        } else {
+            btnSrt.style.display = "none";
+        }
+    }
+
     if (result.srt_content) {
         try {
             const vtt = srtToWebVTT(result.srt_content);
