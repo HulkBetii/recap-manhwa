@@ -871,6 +871,7 @@ class CrawlRequest(BaseModel):
     market_id: Optional[str] = None
     enable_flash_forward_intro: bool = False
     flash_forward_custom_hook: Optional[str] = None
+    streaming_pipeline: bool = True
 
 
 def _validated_asset_reference(value: str | None) -> str | None:
@@ -3485,6 +3486,7 @@ async def crawl(payload: CrawlRequest):
         "market_id": market_id,
         "enable_flash_forward_intro": payload.enable_flash_forward_intro,
         "flash_forward_custom_hook": payload.flash_forward_custom_hook,
+        "streaming_pipeline": payload.streaming_pipeline,
     }
 
     task_id = await workflow_manager.queue_task(

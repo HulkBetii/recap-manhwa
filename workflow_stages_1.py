@@ -1274,8 +1274,17 @@ class Stage5_GeminiAutomation(BaseStage):
             except Exception as api_err:
                 print(f"Gemini API fallback error: {api_err}")
             return None
+        _story_memory_lock = asyncio.Lock()
 
-        async def process_episode_vlm(ep):
+        streaming_enabled = bool(task.payload.get("streaming_pipeline", True))
+        streaming_consumer = None
+        if streaming_enabled:
+            from streaming_pipeline import StreamingPipelineConsumer
+            streaming_consumer = StreamingPipelineConsumer(context)
+            streaming_consumer.start()
+            await context.log("Stage 5: Đã kích hoạt Streaming Pipeline Consumer (xử lý gối đầu TTS & Render trên GPU).", "info")
+
+        async def process_episode_vlm(ep, worker=None):
             nonlocal completed_eps_count
             vlm_name = "Gemini"
             vlm_url = "https://gemini.google.com/app"
@@ -1396,6 +1405,8 @@ class Stage5_GeminiAutomation(BaseStage):
                 except Exception:
                     pass
                 await context.complete_episode(ep)
+                if streaming_consumer:
+                    await streaming_consumer.enqueue_episode(ep)
                 completed_eps_count += 1
                 await context.update_stage_progress(self.name, (completed_eps_count / total_eps) * 100.0)
                 return True
@@ -1429,10 +1440,20 @@ class Stage5_GeminiAutomation(BaseStage):
                 response_text = ""
                 attempt_deadline = time.monotonic() + timeout
                 try:
-                    local_br, local_br_ctx, local_ctx_id, local_nm, should_close_ctx = await asyncio.wait_for(
-                        get_local_context(),
-                        timeout=max(0.1, attempt_deadline - time.monotonic()),
-                    )
+                    if worker is not None and worker.context and not worker.context.pages[0].is_closed():
+                        local_br = worker.browser
+                        local_br_ctx = worker.context
+                        local_ctx_id = f"worker_{worker.index + 1}"
+                        from app import NavigationManager
+                        local_nm = NavigationManager(context)
+                        local_nm.context = local_br_ctx
+                        local_nm.browser = local_br
+                        should_close_ctx = False
+                    else:
+                        local_br, local_br_ctx, local_ctx_id, local_nm, should_close_ctx = await asyncio.wait_for(
+                            get_local_context(),
+                            timeout=max(0.1, attempt_deadline - time.monotonic()),
+                        )
                 except asyncio.TimeoutError:
                     await context.log(
                         f"Tập {ep}: Hết thời gian {timeout}s khi khởi tạo browser (thử {attempt}/{max_retries}).",
@@ -1927,19 +1948,20 @@ class Stage5_GeminiAutomation(BaseStage):
                     os.replace(recap_temp_path, recap_json_path)
                     cache.commit(stage="gemini", fingerprint=fingerprint, outputs=[raw_response_path, recap_json_path])
 
-                    # Update Rolling Story Memory for subsequent episodes
+                    # Update Rolling Story Memory for subsequent episodes (Thread-Safe)
                     try:
-                        from story_memory import StoryMemory
-                        memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
-                        memory.add_episode_recap(ep, normalized_data, language=language)
-                        memory.save(download_dir)
-                        mc_log = f" (Nhân vật chính: {memory.protagonist_name}" if memory.protagonist_name else ""
-                        if mc_log:
-                            if memory.protagonist_gender and memory.protagonist_gender != "auto":
-                                mc_log += f", Giới tính: {memory.protagonist_gender})"
-                            else:
-                                mc_log += ")"
-                        await context.log(f"Tập {ep}: Đã cập nhật Rolling Story Memory{mc_log} (nối tiếp ngữ cảnh cho các tập tiếp theo).", "info", episode=ep)
+                        async with _story_memory_lock:
+                            from story_memory import StoryMemory
+                            memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
+                            memory.add_episode_recap(ep, normalized_data, language=language)
+                            memory.save(download_dir)
+                            mc_log = f" (Nhân vật chính: {memory.protagonist_name}" if memory.protagonist_name else ""
+                            if mc_log:
+                                if memory.protagonist_gender and memory.protagonist_gender != "auto":
+                                    mc_log += f", Giới tính: {memory.protagonist_gender})"
+                                else:
+                                    mc_log += ")"
+                            await context.log(f"Tập {ep}: Đã cập nhật Rolling Story Memory{mc_log} (nối tiếp ngữ cảnh cho các tập tiếp theo).", "info", episode=ep)
                     except Exception as mem_err:
                         await context.log(f"Cảnh báo: Không thể cập nhật StoryMemory cho tập {ep}: {mem_err}", "warning", episode=ep)
 
@@ -1952,6 +1974,8 @@ class Stage5_GeminiAutomation(BaseStage):
                     )
                     success = True
                     await context.complete_episode(ep)
+                    if streaming_consumer:
+                        await streaming_consumer.enqueue_episode(ep)
 
                     # Giữ browser context sống liên tục giữa các tập (Persistent In-Tab Session)
                     # Không đóng Chrome để tránh mất 25-35s khởi động lại
@@ -2118,19 +2142,54 @@ class Stage5_GeminiAutomation(BaseStage):
             await context.update_stage_progress(self.name, (valid_count / (to_ep - from_ep + 1)) * 100.0)
             return success
 
-        # Process episodes sequentially
-        await context.log(f"Stage 5: Bắt đầu xử lý tuần tự từng chap bằng {vlm_provider.capitalize()}.", "info")
+        concurrency = int(task.payload.get("concurrency", 1))
+        from app import ChromeProfilePoolManager, load_config
+        cfg = load_config()
+        available_profiles = cfg.get("chrome_profiles", [])
+        num_workers = min(concurrency, len(available_profiles))
 
-        for ep in episodes_to_process:
-            if context.cancel_token.is_cancelled():
-                break
-            try:
-                await process_episode_vlm(ep)
-            except Exception as e:
-                await context.log(f"Lỗi không mong muốn trong tiến trình chạy tập {ep}: {e}", "error")
+        if num_workers > 1 and len(episodes_to_process) > 1:
+            await context.log(f"Stage 5: Kích hoạt xử lý song song với {num_workers} Chrome Profiles...", "info")
+            pool = ChromeProfilePoolManager.get_instance()
+            await pool.initialize(headless=False, custom_profiles=available_profiles[:num_workers], context_logger=context)
+
+            # Arc-based partitioning: splits episodes into continuous sequential chunks
+            # Each worker runs its slice sequentially, preserving 100% story memory continuity
+            k, m = divmod(len(episodes_to_process), num_workers)
+            chunks = [episodes_to_process[i*k + min(i, m):(i+1)*k + min(i+1, m)] for i in range(num_workers)]
+
+            async def run_worker_chunk(worker, chunk_eps):
+                for ep in chunk_eps:
+                    if context.cancel_token.is_cancelled():
+                        break
+                    try:
+                        await process_episode_vlm(ep, worker=worker)
+                    except Exception as e:
+                        await context.log(f"[Worker {worker.index+1}] Lỗi khi chạy tập {ep}: {e}", "error")
+
+            worker_tasks = [
+                run_worker_chunk(pool.workers[i], chunks[i])
+                for i in range(min(num_workers, len(pool.workers)))
+                if chunks[i]
+            ]
+            await asyncio.gather(*worker_tasks)
+        else:
+            await context.log(f"Stage 5: Bắt đầu xử lý tuần tự từng chap bằng {vlm_provider.capitalize()}.", "info")
+            for ep in episodes_to_process:
+                if context.cancel_token.is_cancelled():
+                    break
+                try:
+                    await process_episode_vlm(ep)
+                except Exception as e:
+                    await context.log(f"Lỗi không mong muốn trong tiến trình chạy tập {ep}: {e}", "error")
 
         # Playwright persistent Chrome Profile context handles storage state saving natively
         pass
+
+        if streaming_consumer:
+            await context.log("Stage 5: Đang đợi Streaming Pipeline hoàn tất các tập còn lại trong hàng đợi...", "info")
+            await streaming_consumer.wait_all()
+            await context.log("Stage 5: Streaming Pipeline đã xử lý xong toàn bộ các tập.", "success")
 
         all_passed = True
         for ep in range(from_ep, to_ep + 1):
