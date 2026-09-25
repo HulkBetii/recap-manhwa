@@ -2081,8 +2081,38 @@ def parse_gemini_recap_text(text: str) -> list:
         if extracted_json:
             try:
                 temp_data = json.loads(extracted_json)
+                if isinstance(temp_data, dict):
+                    for key in ["segments", "episodes", "recap", "data", "storyboard"]:
+                        if key in temp_data and isinstance(temp_data[key], list):
+                            temp_data = temp_data[key]
+                            break
                 if isinstance(temp_data, list) and len(temp_data) > 0:
-                    parsed_list = temp_data
+                    normalized_items = []
+                    for item in temp_data:
+                        if isinstance(item, dict):
+                            speech = item.get("speech") or item.get("narration") or item.get("text") or item.get("script") or ""
+                            speech = str(speech).rstrip("#").strip()
+                            imgs = item.get("images")
+                            if not imgs:
+                                page_val = item.get("page_range") or item.get("page") or item.get("pages") or item.get("panel")
+                                if page_val is not None:
+                                    p_str = str(page_val).strip()
+                                    if "-" in p_str or "~" in p_str:
+                                        p_parts = re.split(r"[-~]", p_str)
+                                        try:
+                                            p_start, p_end = int(re.sub(r"\D", "", p_parts[0])), int(re.sub(r"\D", "", p_parts[1]))
+                                            pages_range = list(range(p_start, p_end + 1))
+                                            imgs = [{"page": p, "priority": round(1.0 / len(pages_range), 4)} for p in pages_range]
+                                        except Exception:
+                                            imgs = _parse_gemini_image_specs(p_str)
+                                    else:
+                                        imgs = _parse_gemini_image_specs(p_str)
+                            if speech and imgs:
+                                normalized_items.append({"speech": speech, "images": imgs})
+                    if normalized_items:
+                        parsed_list = normalized_items
+                    else:
+                        parsed_list = temp_data
             except Exception:
                 pass
 
