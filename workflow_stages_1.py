@@ -1536,6 +1536,11 @@ class Stage5_GeminiAutomation(BaseStage):
                         await asyncio.sleep(2.0)
                     else:
                         # Fast in-tab reset without reloading page
+                        try:
+                            await dismiss_gemini_modals(page)
+                            await page.evaluate("document.querySelectorAll('.cdk-overlay-backdrop').forEach(e => e.remove())")
+                        except Exception:
+                            pass
                         for ncs in [
                             "[data-test-id='new-chat-button']",
                             "button[aria-label*='New chat']",
@@ -1544,9 +1549,15 @@ class Stage5_GeminiAutomation(BaseStage):
                         ]:
                             nc_btn = page.locator(ncs).first
                             if await nc_btn.count() > 0 and await nc_btn.is_visible():
-                                await nc_btn.click()
-                                await asyncio.sleep(0.5)
-                                break
+                                is_dis = await nc_btn.get_attribute("aria-disabled")
+                                if is_dis == "true":
+                                    break
+                                try:
+                                    await nc_btn.click(force=True, timeout=2000)
+                                    await asyncio.sleep(0.5)
+                                    break
+                                except Exception:
+                                    pass
                     
                     # Ensure target model (3.8 Flash) is selected and check rate-limit status on this page before prompting
                     try:

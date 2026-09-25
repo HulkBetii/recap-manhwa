@@ -1171,9 +1171,15 @@ class ChromeProfileWorker:
     async def reset_chat(self):
         """Làm sạch phiên trò chuyện Gemini Web UI trong ~0.5s mà không tắt Chrome."""
         page = await self.get_page()
-        if not page:
+        if not page or page.is_closed():
             return
         try:
+            try:
+                await page.keyboard.press("Escape")
+                await page.evaluate("document.querySelectorAll('.cdk-overlay-backdrop, .cdk-overlay-container').forEach(e => e.remove())")
+            except Exception:
+                pass
+
             if "gemini.google.com" in page.url:
                 for sel in [
                     "[data-test-id='new-chat-button']",
@@ -1183,13 +1189,19 @@ class ChromeProfileWorker:
                 ]:
                     loc = page.locator(sel).first
                     if await loc.count() > 0 and await loc.is_visible():
-                        await loc.click()
-                        await asyncio.sleep(0.5)
-                        return
+                        is_dis = await loc.get_attribute("aria-disabled")
+                        if is_dis == "true":
+                            return
+                        try:
+                            await loc.click(force=True, timeout=2000)
+                            await asyncio.sleep(0.5)
+                            return
+                        except Exception:
+                            pass
         except Exception:
             pass
         try:
-            await page.goto("https://gemini.google.com/app", timeout=45000)
+            await page.goto("https://gemini.google.com/app", wait_until="domcontentloaded", timeout=15000)
             await asyncio.sleep(1.0)
         except Exception:
             pass

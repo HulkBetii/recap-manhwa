@@ -63,7 +63,7 @@ class StreamingPipelineConsumer:
         from workflow_stages_2 import load_recap_dicts
         narration_txt_path = os.path.join(ep_dir, "narration.txt")
         narr_fingerprint = stage_fingerprint(task, "narration", ep, input_paths=[recap_json_path])
-        if not (cache.is_current("narration", narr_fingerprint, [narration_txt_path]) and os.path.isfile(narration_txt_path)):
+        if not (cache.is_current(stage="narration", fingerprint=narr_fingerprint, outputs=[narration_txt_path]) and os.path.isfile(narration_txt_path)):
             segments = load_recap_dicts(recap_json_path)
             speech_list = [seg.get("speech", "").strip() for seg in segments if seg.get("speech", "").strip()]
             aggregated_narration = " ".join(speech_list)
@@ -82,7 +82,7 @@ class StreamingPipelineConsumer:
 
         from workflow_stages_2 import validate_nonempty_file, validate_srt_file
         tts_valid = (
-            cache.is_current("tts", tts_fingerprint, [audio_path, srt_path, tts_cache_path])
+            cache.is_current(stage="tts", fingerprint=tts_fingerprint, outputs=[audio_path, srt_path, tts_cache_path])
             and validate_nonempty_file(audio_path)
             and validate_srt_file(srt_path)
         )
@@ -119,7 +119,7 @@ class StreamingPipelineConsumer:
 
         # 3. Stage 9 - Subtitle Normalization
         sub_fingerprint = stage_fingerprint(task, "subtitles", ep, input_paths=[recap_json_path, audio_path])
-        if not (cache.is_current("subtitles", sub_fingerprint, [srt_path]) and validate_srt_file(srt_path)):
+        if not (cache.is_current(stage="subtitles", fingerprint=sub_fingerprint, outputs=[srt_path]) and validate_srt_file(srt_path)):
             from app import find_ffmpeg
             from workflow_stages_2 import get_video_duration, normalize_whisper_subtitles, format_srt_time, wrap_srt_text
             ffmpeg_exe = find_ffmpeg()
@@ -143,7 +143,7 @@ class StreamingPipelineConsumer:
         images_dir = os.path.join(ep_dir, "images_pdf") if os.path.isdir(os.path.join(ep_dir, "images_pdf")) else os.path.join(ep_dir, "images")
         video_fingerprint = stage_fingerprint(task, "video", ep, input_paths=[recap_json_path, audio_path, srt_path, images_dir])
 
-        if not (cache.is_current("video", video_fingerprint, [output_video_path]) and validate_mp4_file(output_video_path)):
+        if not (cache.is_current(stage="video", fingerprint=video_fingerprint, outputs=[output_video_path]) and validate_mp4_file(output_video_path)):
             await self.context.log(f"[Streaming Ep {ep}] Đang render video 1080p NVENC...", "info", episode=ep)
             stage10 = Stage10_EpisodeVideoRendering()
             # Run Stage 10 for this episode
