@@ -1143,6 +1143,155 @@ async def reset_shared_browser_context():
     except Exception:
         pass
 
+class ChromeProfileWorker:
+    def __init__(self, profile_path: str, index: int):
+        self.profile_path = profile_path
+        self.index = index
+        self.browser = None
+        self.context = None
+        self.page = None
+        self.is_busy = False
+        self.is_limited = False
+        self.lock = asyncio.Lock()
+        self.last_used_time = 0.0
+
+    async def get_page(self):
+        if self.page and not self.page.is_closed():
+            return self.page
+        if self.context:
+            pages = self.context.pages
+            if pages and not pages[0].is_closed():
+                self.page = pages[0]
+            else:
+                self.page = await self.context.new_page()
+            return self.page
+        return None
+
+    async def reset_chat(self):
+        """Làm sạch phiên trò chuyện Gemini Web UI trong ~0.5s mà không tắt Chrome."""
+        page = await self.get_page()
+        if not page:
+            return
+        try:
+            if "gemini.google.com" in page.url:
+                for sel in [
+                    "[data-test-id='new-chat-button']",
+                    "button[aria-label*='New chat']",
+                    "button[aria-label*='Cuộc trò chuyện mới']",
+                    "a[href='/app']"
+                ]:
+                    loc = page.locator(sel).first
+                    if await loc.count() > 0 and await loc.is_visible():
+                        await loc.click()
+                        await asyncio.sleep(0.5)
+                        return
+        except Exception:
+            pass
+        try:
+            await page.goto("https://gemini.google.com/app", timeout=45000)
+            await asyncio.sleep(1.0)
+        except Exception:
+            pass
+
+    async def close(self):
+        if self.page:
+            try: await self.page.close()
+            except Exception: pass
+            self.page = None
+        if self.context:
+            try: await self.context.close()
+            except Exception: pass
+            self.context = None
+        if self.browser:
+            try: await self.browser.close()
+            except Exception: pass
+            self.browser = None
+
+
+class ChromeProfilePoolManager:
+    _instance = None
+
+    def __init__(self):
+        self.workers: List[ChromeProfileWorker] = []
+        self._playwright = None
+        self._initialized = False
+        self._init_lock = asyncio.Lock()
+
+    @classmethod
+    def get_instance(cls) -> "ChromeProfilePoolManager":
+        if cls._instance is None:
+            cls._instance = ChromeProfilePoolManager()
+        return cls._instance
+
+    async def initialize(self, headless=False, custom_profiles=None, context_logger=None) -> int:
+        async with self._init_lock:
+            if self._initialized and self.workers:
+                return len(self.workers)
+            from playwright.async_api import async_playwright
+            if self._playwright is None:
+                self._playwright = await async_playwright().start()
+
+            config = load_config()
+            profile_paths = custom_profiles or config.get("chrome_profiles", [])
+            if not profile_paths:
+                default_p = os.getenv("CHROME_PROFILE_PATH") or r"C:\Data\Profile 1"
+                profile_paths = [default_p]
+
+            self.workers = []
+            for idx, p_path in enumerate(profile_paths):
+                worker = ChromeProfileWorker(p_path, idx)
+                try:
+                    msg = f"Đang khởi tạo Profile Worker {idx+1}/{len(profile_paths)}: {p_path}..."
+                    if context_logger:
+                        await context_logger.log(msg, "info")
+                    else:
+                        print(msg)
+                    br, ctx = await get_browser_context(
+                        self._playwright,
+                        headless=headless,
+                        start_maximized=True,
+                        custom_profile_path=p_path
+                    )
+                    worker.browser = br
+                    worker.context = ctx
+                    worker.page = await worker.get_page()
+                    self.workers.append(worker)
+                except Exception as e:
+                    err_msg = f"Cảnh báo: Không thể khởi chạy profile {p_path}: {e}"
+                    if context_logger:
+                        await context_logger.log(err_msg, "warning")
+                    else:
+                        print(err_msg)
+
+            self._initialized = True
+            return len(self.workers)
+
+    async def acquire_worker(self) -> Optional[ChromeProfileWorker]:
+        """Lấy một worker đang rảnh và không bị rate limit."""
+        for worker in self.workers:
+            if not worker.is_busy and not worker.is_limited:
+                worker.is_busy = True
+                return worker
+        return None
+
+    def release_worker(self, worker: ChromeProfileWorker):
+        if worker:
+            worker.is_busy = False
+
+    async def close_all(self):
+        async with self._init_lock:
+            for worker in self.workers:
+                await worker.close()
+            self.workers = []
+            if self._playwright:
+                try:
+                    await self._playwright.stop()
+                except Exception:
+                    pass
+                self._playwright = None
+            self._initialized = False
+
+
 async def get_shared_browser_context(headless=False, start_maximized=False, temp_suffix="", custom_profile_path=None):
     global _shared_playwright, _shared_context, _shared_browser, _shared_headless, _shared_context_lock, _shared_profile_path
     from playwright.async_api import async_playwright
