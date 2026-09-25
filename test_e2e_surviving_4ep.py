@@ -112,7 +112,7 @@ async def run_e2e():
             recap_json = os.path.join(ep_dir, "recap.json")
             audio_mp3 = os.path.join(ep_dir, "audio.mp3")
             transcript_srt = os.path.join(ep_dir, "transcript.srt")
-            video_mp4 = os.path.join(ep_dir, f"video_{ep}.mp4")
+            video_mp4 = os.path.join(ep_dir, f"video_{ep}.mp4") if os.path.exists(os.path.join(ep_dir, f"video_{ep}.mp4")) else os.path.join(ep_dir, "video.mp4")
 
             has_recap = os.path.exists(recap_json) and os.path.getsize(recap_json) > 0
             has_audio = os.path.exists(audio_mp3) and os.path.getsize(audio_mp3) > 0
@@ -126,14 +126,18 @@ async def run_e2e():
             print(f"      recap.json   : {'OK' if has_recap else 'MISSING'}")
             print(f"      audio.mp3    : {'OK' if has_audio else 'MISSING'}")
             print(f"      transcript.srt: {'OK' if has_srt else 'MISSING'}")
-            print(f"      video_{ep}.mp4 : {'OK' if has_video else 'MISSING'} ({dur:.1f}s, {size_mb} MB)")
+            print(f"      video.mp4    : {'OK' if has_video else 'MISSING'} ({dur:.1f}s, {size_mb} MB)")
 
         # Final assembled video
         final_video_path = task.artifacts.get("final_video_path", "")
-        if not final_video_path:
-            final_video_path = os.path.join(download_dir, "output", f"full_ep_{from_ep}_to_{to_ep}.mp4")
+        if not final_video_path or not os.path.exists(final_video_path):
+            output_dir = os.path.join(download_dir, "output")
+            if os.path.exists(output_dir):
+                mp4_candidates = [os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.lower().endswith(".mp4")]
+                if mp4_candidates:
+                    final_video_path = mp4_candidates[0]
 
-        if os.path.exists(final_video_path):
+        if final_video_path and os.path.exists(final_video_path):
             final_dur = get_video_duration(final_video_path, ffmpeg_exe)
             final_size_mb = round(os.path.getsize(final_video_path) / (1024 * 1024), 2)
             print(f"\n🎬 Final Assembled Video: {final_video_path}")

@@ -1565,11 +1565,11 @@ class Stage5_GeminiAutomation(BaseStage):
                         target_vlm_model = task.payload.get("vlm_model", "3.8 Flash")
                         status = await check_gemini_login_and_limit_status(page, context, target_model=target_vlm_model)
                         if status == "limited":
-                            raise Exception(f"Tài khoản đang bị giới hạn model {target_vlm_model}.")
+                            await context.log(f"Cảnh báo: Model {target_vlm_model} đang bị giới hạn, tiếp tục với model mặc định của Gemini Web UI...", "warning", episode=ep)
                         elif status == "needs_login":
                             raise Exception(f"Tài khoản chưa đăng nhập Gemini. Tự động xoay vòng sang profile đã đăng nhập khác...")
                     except Exception as select_err:
-                        if "giới hạn" in str(select_err) or "đăng nhập" in str(select_err):
+                        if "đăng nhập" in str(select_err):
                             raise select_err
                         await context.log(f"Cảnh báo: Không thể kiểm tra/chọn model {target_vlm_model}: {select_err}", "warning", episode=ep)
                         

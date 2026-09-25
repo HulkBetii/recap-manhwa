@@ -190,7 +190,7 @@ class Stage8_LocalTTS(BaseStage):
 
             audio_path = os.path.join(ep_dir, "audio.mp3")
             srt_path = os.path.join(ep_dir, "transcript.srt")
-            cache_path = os.path.join(ep_dir, "tts_config.json")
+            cache_path = os.path.join(ep_dir, "tts_cache.json") if os.path.exists(os.path.join(ep_dir, "tts_cache.json")) else os.path.join(ep_dir, "tts_config.json")
             cache = EpisodeStageCache(ep_dir)
             fingerprint = stage_fingerprint(task, "tts", ep, input_paths=[narration_txt_path, ref_audio_path])
             if cache.is_current(
