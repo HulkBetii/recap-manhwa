@@ -147,5 +147,40 @@ def test_parse_gemini_image_specs_weighted_priority():
     assert math.isclose(specs[1]["priority"], 0.25, abs_tol=1e-3)
 
 
+def test_master_prompt_bilingual_five_golden_rules_and_contrast():
+    # 1. English Master Prompt
+    prompt_en = generate_gemini_prompt("Solo Leveling", 1, 40, "en")
+    assert "5 GOLDEN RULES FOR US RECAP STORYTELLING" in prompt_en
+    assert "PERSONALITY FIRST" in prompt_en
+    assert "RHYTHM VARIATION" in prompt_en
+    assert "CONTRAST JUXTAPOSITION" in prompt_en
+    assert "SHOW DON'T TELL" in prompt_en
+    assert "AUDIENCE PULSE CHECK" in prompt_en
+    assert "STYLE REFERENCE — BEFORE vs AFTER" in prompt_en
+    assert "ANTI-AI CLICHÉ FILTER" in prompt_en
+    assert "HERO SUBJECT ALIGNMENT" in prompt_en or "DIRECT VISUAL MATCHING" in prompt_en
 
+    # 2. Vietnamese Master Prompt
+    prompt_vi = generate_gemini_prompt("Solo Leveling", 1, 40, "vi")
+    assert "5 QUY TẮC VÀNG CHO GIỌNG KỂ TIẾNG VIỆT" in prompt_vi
+    assert "CÓ GÓC NHÌN, CÓ Ý KIẾN" in prompt_vi
+    assert "BIẾN TẤU NHỊP CÂU" in prompt_vi
+    assert "ĐỐI LẬP TƯƠNG PHẢN" in prompt_vi
+    assert "MÔ TẢ CỤ THỂ, KHÔNG GIẢI THÍCH" in prompt_vi
+    assert "GIỮ CHÂN KHÁN GIẢ" in prompt_vi
+    assert "PHONG CÁCH THAM CHIẾU — TRƯỚC VÀ SAU" in prompt_vi
+    assert "BỘ LỌC CHỐNG VĂN MẪU AI" in prompt_vi
+    assert "KHỚP ĐÚNG CHỦ THỂ HÌNH ẢNH" in prompt_vi or "DIRECT VISUAL MATCHING" in prompt_vi
+
+
+def test_english_master_prompt_has_couch_companion_and_action_slang():
+    prompt_en = generate_gemini_prompt("Omniscient Reader", 1, 35, "en")
+    assert "ACTION SLANG & HIGH-VELOCITY ACTIVE VERBS LEXICON" in prompt_en
+    assert "drops him cold" in prompt_en
+    assert "folds him in half" in prompt_en
+    assert "sends him straight to the lobby" in prompt_en
+    assert "hands them a massive L" in prompt_en
+    assert "Couch Companion Persona" in prompt_en
+    assert "Get this" in prompt_en or "Look at that" in prompt_en
+    assert "Outside / Rivals?" in prompt_en
 

@@ -80,24 +80,30 @@ def save_wav_built_in(audio_data: np.ndarray, sample_rate: int, output_path: str
 
 def convert_wav_to_mp3(wav_path: str, mp3_path: str):
     """
-    Converts a WAV file to MP3 format using FFmpeg.
+    Converts a WAV file to MP3 format using FFmpeg with fallback audio codecs.
     """
     ffmpeg_exe = find_ffmpeg()
-    cmd = [
-        ffmpeg_exe, "-y", "-i", wav_path,
-        "-codec:a", "libmp3lame", "-qscale:a", "2",
-        mp3_path
-    ]
     startupinfo = None
     if sys.platform == 'win32':
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
-    if result.returncode != 0:
-        err_msg = result.stderr.decode('utf-8', errors='ignore')
-        logger.error(f"FFmpeg conversion failed: {err_msg}")
-        raise Exception(f"FFmpeg conversion failed: {err_msg}")
+    codecs_to_try = [
+        ["-codec:a", "libmp3lame", "-qscale:a", "2"],
+        ["-codec:a", "mp3_mf", "-b:a", "192k"],
+        ["-codec:a", "mp3", "-b:a", "192k"]
+    ]
+    
+    last_err = ""
+    for codec_args in codecs_to_try:
+        cmd = [ffmpeg_exe, "-y", "-i", wav_path] + codec_args + [mp3_path]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
+        if result.returncode == 0:
+            return
+        last_err = result.stderr.decode('utf-8', errors='ignore')
+    
+    logger.error(f"FFmpeg conversion failed: {last_err}")
+    raise Exception(f"FFmpeg conversion failed: {last_err}")
 
 def format_timestamp(seconds: float) -> str:
     """
@@ -149,15 +155,40 @@ def generate_transcript(audio_path: str, srt_path: str):
     """
     m_type, model = get_whisper_model()
     logger.info(f"Transcribing audio file '{audio_path}' using {m_type}...")
-    with _whisper_lock:
-        if m_type == "faster_whisper":
-            segments_gen, _ = model.transcribe(audio_path, word_timestamps=True)
-            segments = [{"start": s.start, "end": s.end, "text": s.text} for s in segments_gen]
-        else:
-            result = model.transcribe(audio_path, word_timestamps=True)
-            segments = result["segments"]
-    write_srt(segments, srt_path)
-    logger.info(f"Successfully generated transcript SRT at '{srt_path}'")
+    
+    target_audio = audio_path
+    temp_transcribe_wav = None
+    if not audio_path.lower().endswith(".wav"):
+        try:
+            ffmpeg_exe = find_ffmpeg()
+            temp_transcribe_wav = audio_path + ".transcribe.wav"
+            cmd = [ffmpeg_exe, "-y", "-i", audio_path, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", temp_transcribe_wav]
+            startupinfo = None
+            if sys.platform == 'win32':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
+            if os.path.exists(temp_transcribe_wav) and os.path.getsize(temp_transcribe_wav) > 0:
+                target_audio = temp_transcribe_wav
+        except Exception:
+            target_audio = audio_path
+
+    try:
+        with _whisper_lock:
+            if m_type == "faster_whisper":
+                segments_gen, _ = model.transcribe(target_audio, word_timestamps=True)
+                segments = [{"start": s.start, "end": s.end, "text": s.text} for s in segments_gen]
+            else:
+                result = model.transcribe(target_audio, word_timestamps=True)
+                segments = result["segments"]
+        write_srt(segments, srt_path)
+        logger.info(f"Successfully generated transcript SRT at '{srt_path}'")
+    finally:
+        if temp_transcribe_wav and os.path.exists(temp_transcribe_wav):
+            try:
+                os.remove(temp_transcribe_wav)
+            except Exception:
+                pass
 
 _ref_audio_transcriptions = {}
 
@@ -786,6 +817,9 @@ async def generate_tts(
         temp_wav_path = output_audio_path + ".temp.wav"
         await asyncio.to_thread(save_wav_built_in, audio_data, 24000, temp_wav_path)
         
+        # Generate SRT transcript using Whisper in thread pool directly from clean WAV
+        await asyncio.to_thread(generate_transcript, temp_wav_path, output_srt_path)
+        
         # Convert WAV to MP3 using FFmpeg
         await asyncio.to_thread(convert_wav_to_mp3, temp_wav_path, output_audio_path)
         
@@ -794,9 +828,6 @@ async def generate_tts(
             os.remove(temp_wav_path)
         except Exception:
             pass
-        
-        # Generate SRT transcript using Whisper in thread pool
-        await asyncio.to_thread(generate_transcript, output_audio_path, output_srt_path)
         
         return True
     except Exception as e:

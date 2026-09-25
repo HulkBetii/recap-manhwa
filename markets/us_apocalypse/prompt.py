@@ -29,13 +29,24 @@ def get_us_apocalypse_prompt(
             glossary = "No glossary provided."
 
     if ep == 1:
-        intro_rule = """
+        ip_guidance = []
+        if previous_context:
+            p_name = str(previous_context.get("protagonist_name", "")).strip()
+            if p_name and len(p_name) > 2 and p_name.upper() not in ["MC", "HERO", "GUY", "BOY", "GIRL"]:
+                ip_guidance.append(f'- CONFIRMED PROTAGONIST NAME: "{p_name}" (You MUST explicitly introduce "{p_name}" in Segment 1 or 2!).')
+            u_hook = previous_context.get("unique_hook") or previous_context.get("setting")
+            if u_hook:
+                ip_guidance.append(f'- IP CONTEXT & HOOK ELEMENT: "{u_hook}" (Weave this specific apocalypse crisis into the opening hook!).')
+        
+        ip_guidance_text = ("\n" + "\n".join(ip_guidance)) if ip_guidance else ""
+
+        intro_rule = f"""
 EPISODE 1 HIGH-RETENTION HOOK (0-15s GOLDEN HOOK RULE):
 The very first output line MUST be an explosive, high-retention opening hook that grabs the viewer's undivided attention and prevents immediate drop-off.
 - PROTAGONIST NAME IDENTIFICATION & ANCHORING (CRITICAL):
   * Identify the protagonist's actual name from the comic pages (e.g. dialogue, character status window, subtitles, or title, such as 'Paran', 'Jinwoo', etc.).
   * The opening hook (Segment 1 or 2, 0-15s) MUST explicitly introduce the protagonist by their actual name so the audience immediately bonds with the main character.
-  * NEVER leave the audience guessing who the protagonist is.
+  * NEVER leave the audience guessing who the protagonist is.{ip_guidance_text}
 - Hook Formula: [Shocking Crisis / Insane Prepper Paradox] + [Protagonist Name] + [Hidden Spatial Ability / Ruthless Retaliation / High Stakes Reveal]
 - Examples of Top US Apocalypse Hooks:
   * "Everyone called Paran a lunatic for spending billions hoarding 100,000 tons of food—until the global ice age hit and the world froze to minus one hundred degrees."
@@ -90,6 +101,9 @@ Start immediately in media res with the ongoing high-stakes action or cliffhange
 """
 
     pt = point_score_threshold
+    _seg_lo = max(22, total_pages // 2)
+    _seg_hi = max(_seg_lo + 5, min(total_pages, max(_seg_lo + 5, int(total_pages * 0.65))))
+    _min_coverage_page = max(1, total_pages - 8)
 
     return f"""
 ROLE:
@@ -214,8 +228,11 @@ APOCALYPSE & MANHWA TERMINOLOGY (Weave Naturally):
 - Regressor / Second Chance / Foresight / Awakened Hunter / S-Rank / System Window
 
 FORMAT & DENSITY:
-- Approximately {max(22, total_pages // 2)}-{min(45, total_pages)} high-value segments (minimum = ceil(total_pages / 2)).
+- Approximately {_seg_lo}-{_seg_hi} high-value segments (minimum = ceil(total_pages / 2)).
 - Each segment: 1-2 punchy sentences (MAX 18 WORDS per segment. Split longer narration into separate segments!).
+- STORY ARC & FULL CHAPTER COVERAGE MANDATE (CRITICAL):
+  * You MUST cover the ENTIRE chapter from the beginning through to at least page {_min_coverage_page}.
+  * Do NOT stop halfway or cluster all segments in early pages. Distribute segments proportionally across the full chapter up to the climactic closing scenes on the final pages!
 - ANTI-GAP RULE: Never skip more than 4 consecutive pages without a segment covering that range.
 - Glossary: {glossary}
 

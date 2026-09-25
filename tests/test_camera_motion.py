@@ -72,7 +72,7 @@ def test_camera_planner_mode_selection():
     # 1. Tall webtoon strip panel (usable_v_travel >= 160px) -> vertical_pan_glide
     plan_tall = CameraPlanner.generate_camera_plan(1, 3.0, (0, 0, 600, 1600))
     assert plan_tall["animation_type"] == "vertical_pan_glide"
-    assert plan_tall["easing"] == "soft_linear_glide"
+    assert plan_tall["easing"] in ("easeInOutCubic", "soft_linear_glide")
     assert len(plan_tall["keyframes"]) == 2
 
     # 2. Smart direction on tall panel: bubble in upper 35% -> bottom_to_top

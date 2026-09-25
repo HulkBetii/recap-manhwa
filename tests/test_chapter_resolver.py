@@ -107,3 +107,19 @@ def test_assert_and_guard_chapter_url():
     assert "CRITICAL CHAPTER INTEGRITY ERROR" in str(excinfo.value)
     assert "Requested episode 2" in str(excinfo.value)
     assert "610" in str(excinfo.value)
+
+
+def test_resolve_english_comic_title():
+    from chapter_resolver import resolve_english_comic_title
+    
+    # Test Naver TitleId & Korean Title
+    assert resolve_english_comic_title("좀비묵시록 82-08") == "Zombie Revelation 82-08"
+    assert resolve_english_comic_title("", url="https://comic.naver.com/webtoon/list?titleId=814742") == "Zombie Revelation 82-08"
+    assert resolve_english_comic_title("나 혼자만 레벨업") == "Solo Leveling"
+    assert resolve_english_comic_title("전지적 독자 시점") == "Omniscient Reader's Viewpoint"
+    assert resolve_english_comic_title("멸망 이후의 세계") == "The World After the Fall"
+    
+    # Test Clean English Title
+    assert resolve_english_comic_title("Solo Leveling") == "Solo Leveling"
+    assert resolve_english_comic_title("The World After the Fall") == "The World After the Fall"
+

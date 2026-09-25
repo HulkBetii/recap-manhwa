@@ -44,8 +44,18 @@ class KoreaApocalypseMarket(BaseMarketProfile):
         comic_title: str,
         from_ep: int,
         to_ep: int,
+        chapters: Optional[list] = None,
+        story_memory: Optional[dict] = None,
+        download_dir: Optional[str] = None,
+        **kwargs,
     ) -> dict:
-        return generate_korea_apocalypse_metadata(comic_title, from_ep, to_ep)
+        return generate_korea_apocalypse_metadata(
+            comic_title, from_ep, to_ep,
+            chapters=chapters,
+            story_memory=story_memory,
+            download_dir=download_dir,
+            **kwargs,
+        )
 
 
 KOREA_APOCALYPSE_MARKET = KoreaApocalypseMarket()

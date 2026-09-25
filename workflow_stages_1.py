@@ -115,7 +115,9 @@ class Stage0_ProjectInit(BaseStage):
         url = context.task.comic_url
         parsed = urllib.parse.urlparse(url)
         comic_title = "Comic"
-        if "comic.naver.com" in parsed.netloc.lower():
+        if getattr(context.task, "comic_title", None) and context.task.comic_title not in ("", "Comic", "Manhwa"):
+            comic_title = context.task.comic_title
+        elif "comic.naver.com" in parsed.netloc.lower():
             query = urllib.parse.parse_qs(parsed.query)
             t_id = query.get("titleId", [""])[0] or query.get("title_no", [""])[0]
             comic_title = f"Naver_{t_id}" if t_id else "Naver_Webtoon"
@@ -131,9 +133,10 @@ class Stage0_ProjectInit(BaseStage):
                 if slug == 'list' and len(parts) >= 2: slug = parts[-2]
                 elif slug == 'viewer' and len(parts) >= 3: slug = parts[-3]
                 elif len(parts) >= 2 and parts[-1] in ('viewer', 'list'): slug = parts[-2]
-                comic_title = slug.replace("-", " ").title()
-        
         from app import sanitize_title
+        from chapter_resolver import resolve_english_comic_title
+        comic_title = resolve_english_comic_title(comic_title, url=url)
+        context.task.comic_title = comic_title
         sanitized_title = sanitize_title(comic_title)
         
         project_dir = os.path.dirname(os.path.abspath(__file__))
@@ -459,6 +462,13 @@ class Stage1_ComicParsing(BaseStage):
                 pass
             title_text = title_text.split("|")[0].strip()
             title_text = title_text.split("Chapter")[0].strip()
+            
+            from chapter_resolver import resolve_english_comic_title
+            en_title = resolve_english_comic_title(title_text, url=task.comic_url)
+            if en_title and en_title != title_text:
+                await context.log(f"Đã tự động chuyển đổi tên gốc '{title_text}' sang tên chuẩn tiếng Anh: '{en_title}'", "info")
+                title_text = en_title
+                
             sanitized_title = sanitize_title(title_text)
             
             await context.log(f"Comic official title: {title_text}", "info")
@@ -473,19 +483,26 @@ class Stage1_ComicParsing(BaseStage):
             if old_folder_name != new_folder_name and os.path.exists(download_dir):
                 try:
                     if os.path.exists(new_download_dir):
-                        # Destination directory already exists. Merge contents instead of nesting.
+                        # Destination directory already exists. Safely merge contents without deleting existing data
                         for item in os.listdir(download_dir):
                             s = os.path.join(download_dir, item)
                             d = os.path.join(new_download_dir, item)
                             if os.path.isdir(s):
-                                if os.path.exists(d):
-                                    shutil.rmtree(d)
-                                shutil.move(s, d)
+                                if not os.path.exists(d):
+                                    shutil.move(s, d)
+                                else:
+                                    for sub_item in os.listdir(s):
+                                        sub_s = os.path.join(s, sub_item)
+                                        sub_d = os.path.join(d, sub_item)
+                                        if not os.path.exists(sub_d):
+                                            shutil.move(sub_s, sub_d)
                             else:
-                                if os.path.exists(d):
-                                    os.remove(d)
-                                shutil.copy2(s, d)
-                        shutil.rmtree(download_dir)
+                                if not os.path.exists(d):
+                                    shutil.copy2(s, d)
+                        try:
+                            shutil.rmtree(download_dir)
+                        except Exception:
+                            pass
                     else:
                         shutil.move(download_dir, new_download_dir)
                     await context.log(f"Đã đổi tên thư mục sang {new_folder_name}", "info")
@@ -636,7 +653,10 @@ class Stage2_AsyncImageCrawling(BaseStage):
                 ep_images_dir = os.path.join(download_dir, f"episode_{ep}", "images")
                 cache = EpisodeStageCache(ep_dir)
                 fingerprint = stage_fingerprint(task, "image_crawl", ep, extra=task.artifacts.get("chapter_slugs", []))
-                if cache.is_current(
+                if (os.path.isdir(ep_images_dir) and any(
+                    name.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+                    for name in os.listdir(ep_images_dir)
+                )) or cache.is_current(
                     stage="image_crawl",
                     fingerprint=fingerprint,
                     outputs=[ep_images_dir],
@@ -1116,7 +1136,7 @@ class Stage4_PDFGeneration(BaseStage):
             images_pdf_dir = os.path.join(ep_dir, "images_pdf")
             cache = EpisodeStageCache(ep_dir)
             fingerprint = stage_fingerprint(task, "pdf", ep, input_paths=[images_pdf_dir])
-            if cache.is_current(
+            if (os.path.isfile(pdf_path) and validate_pdf_file(pdf_path)) or cache.is_current(
                 stage="pdf",
                 fingerprint=fingerprint,
                 outputs=[pdf_path],
@@ -1290,6 +1310,15 @@ class Stage5_GeminiAutomation(BaseStage):
                     await context.log(f"Tập {ep}: Đã đồng bộ ngữ cảnh từ Tập {ep-1} (Cliffhanger: \"{previous_context.get('closing_cliffhanger', '')[:60]}...\"{name_part}{gender_part})", "info", episode=ep)
             except Exception as mem_err:
                 await context.log(f"Cảnh báo: Không thể tải StoryMemory cho tập {ep}: {mem_err}", "warning", episode=ep)
+
+            # Merge any explicit IP context from payload (e.g. protagonist_name, unique_hook, setting)
+            payload_ip_ctx = task.payload.get("ip_context")
+            if isinstance(payload_ip_ctx, dict):
+                if previous_context is None:
+                    previous_context = {}
+                for k, v in payload_ip_ctx.items():
+                    if k not in previous_context or not previous_context[k]:
+                        previous_context[k] = v
 
             prompt_content = generate_gemini_prompt(
                 comic_title,
@@ -1833,8 +1862,8 @@ class Stage5_GeminiAutomation(BaseStage):
                                 break
                         else:
                             no_text_seconds += 3
-                            if no_text_seconds >= 120:
-                                error_reason = "Gemini không phản hồi văn bản sau 120 giây (VLM hung/timeout)."
+                            if no_text_seconds >= 240:
+                                error_reason = "Gemini không phản hồi văn bản sau 240 giây (VLM hung/timeout)."
                                 break
 
                     if error_reason:
@@ -2275,12 +2304,13 @@ class Stage2b_IntelligentRepagination(BaseStage):
         to_ep = task.to_episode
         download_dir = task.artifacts.get("download_dir")
         
-        # Pre-initialize EasyOCR reader on main thread
-        from tools.text_remover.comic_text_remover import get_easyocr_reader
-        try:
-            get_easyocr_reader(['en'])
-        except Exception:
-            pass
+        # Pre-initialize EasyOCR reader on main thread only if OCR or text removal is requested
+        if task.payload.get("repage_use_ocr", False) or task.payload.get("remove_text", False):
+            try:
+                from tools.text_remover.comic_text_remover import get_easyocr_reader
+                get_easyocr_reader(['en'])
+            except Exception:
+                pass
         
         # Configurations (Optimized for Sub-panel Segmentation)
         min_height = task.payload.get("repage_min_height", 350)
@@ -2547,6 +2577,14 @@ class Stage2b_IntelligentRepagination(BaseStage):
             if not os.path.exists(images_dir):
                 await context.fail_episode(ep, "Không tìm thấy thư mục ảnh gốc.")
                 return False
+
+            if os.path.isdir(images_pdf_dir) and any(
+                f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))
+                for f in os.listdir(images_pdf_dir)
+            ):
+                await context.log(f"Tập {ep}: Phân trang đã tồn tại trước đó. Bỏ qua.", "info")
+                await context.complete_episode(ep)
+                return True
                 
             # Read original images
             files = sorted([f for f in os.listdir(images_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])

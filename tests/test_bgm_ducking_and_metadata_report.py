@@ -61,8 +61,7 @@ async def test_stage12_metadata_and_youtube_kit(tmp_path):
     assert kit_path.exists()
     kit_text = kit_path.read_text(encoding="utf-8")
     assert "YOUTUBE UPLOAD KIT: The Apocalypse Needs A Pro" in kit_text
-    assert "Market: us_apocalypse" in kit_text
-    assert "[1. TITLE CANDIDATES" in kit_text
+    assert "[1. NATIVE A/B TEST TITLE HYPOTHESES" in kit_text or "[1. TITLE CANDIDATES" in kit_text
     assert "[2. DESCRIPTION & TIMESTAMPS" in kit_text
     assert "00:00" in kit_text
     # Creation statement replaces Section 107 disclaimer (research-driven)

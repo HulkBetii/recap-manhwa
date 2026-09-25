@@ -947,11 +947,29 @@ def apply_motion_blur(img_np, dx: float, dy: float):
         for i in range(blur_size):
             kernel[i, i] = 1.0
 
-    kernel /= kernel.sum()
+    kernel = kernel / max(1e-6, float(kernel.sum()))
     return cv2.filter2D(img_np, -1, kernel)
 
 
-import random
+ACTION_IMPACT_KEYWORDS = {
+    # English action/impact keywords
+    "explosion", "explode", "exploded", "blast", "blasted", "gunfire", "bullet", "bullets",
+    "shot", "shoots", "fired", "rifle", "slam", "slams", "slammed", "tackle", "tackled",
+    "slash", "slashes", "slashed", "strike", "strikes", "crush", "crushes", "crushed",
+    "detonate", "detonates", "detonated", "obliterate", "obliterates", "roars", "screams",
+    "rip through", "rips through", "drops him", "folds him", "wipes", "shatters", "charge",
+    # Vietnamese action/impact keywords
+    "đo ván", "quét sạch", "xử đẹp", "tiễn lên đường", "nổ súng", "bắn phá", "bắn tỉa",
+    "xé xác", "chém đứt", "đè bẹp", "thổi bay", "lao thẳng", "va chạm", "rung chuyển",
+    "gầm rú", "hạ gục", "hủy diệt", "phát nổ", "oanh tạc", "chấn động"
+}
+
+def detect_action_impact(text: str) -> bool:
+    if not text:
+        return False
+    t_lower = text.lower()
+    return any(kw in t_lower for kw in ACTION_IMPACT_KEYWORDS)
+
 
 class CameraPlanner:
     @classmethod
@@ -966,6 +984,7 @@ class CameraPlanner:
         bubble_centroid: tuple = None,
         bubble_coverage_ratio: float = 0.0,
         shot_index: int = 0,
+        speech_text: str = "",
     ) -> dict:
         """
         Generates a continuous, smooth cinematic camera plan for webtoon storytelling.
@@ -973,8 +992,10 @@ class CameraPlanner:
           for all portrait and tall panels (aspect_ratio < 1.15).
         - Wide panels (aspect_ratio >= 1.15): Smooth continuous Horizontal Pan.
         - 2D Bubble Repulsion: Repels camera focal point away from speech bubble regions in both X and Y.
+        - Visual Impact Shake: Optical damped harmonic oscillation on frames with action verbs.
         - Zero-Clamping Freeze: Interpolation glides continuously across the full shot duration without stopping.
         """
+        has_impact_shake = detect_action_impact(speech_text)
         cb_x, cb_y, W_c, H_c = bounds
         center_x = W_c / 2.0
         center_y = H_c / 2.0
@@ -1055,14 +1076,15 @@ class CameraPlanner:
                 "transition": transition,
                 "bubble_centroid": bubble_centroid,
                 "bubble_coverage_ratio": bubble_coverage_ratio,
+                "has_impact_shake": has_impact_shake,
             }
 
         # Measure usable vertical travel distance for vertical pan
-        # Webtoon vertical strips (aspect_ratio < 0.68) have ample vertical sliding headroom
+        # Webtoon vertical strips (aspect_ratio < 0.72) have ample vertical sliding headroom
         h_cam_ref = W_c / 0.68
-        if aspect_ratio < 0.68:
-            # Auto-Upgrade Motion for Ultra-Tall Panels (aspect_ratio < 0.50): guarantee vertical glide
-            if aspect_ratio < 0.50:
+        if aspect_ratio < 0.72:
+            # Auto-Upgrade Motion for Tall Panels (aspect_ratio < 0.55): guarantee vertical glide
+            if aspect_ratio < 0.55:
                 usable_v_travel = max(180.0, H_c - min(H_c, h_cam_ref))
             else:
                 usable_v_travel = max(0.0, H_c - min(H_c, h_cam_ref))
@@ -1074,13 +1096,14 @@ class CameraPlanner:
         y_max_valid = float(max(y_min_valid, H_c - h_cam_ref * 0.5))
         total_valid_span = max(0.0, y_max_valid - y_min_valid)
 
-        # Mode B: Vertical Pan Glide for Vertical Panels (usable_v_travel >= 160px and total_valid_span >= 30px)
+        # Mode B: Vertical Pan Glide for Vertical Panels (usable_v_travel >= 120px and total_valid_span >= 25px)
         # Cap speed so pan is smooth and continuous
-        max_travel_by_speed = max(20.0, float(duration) * 100.0)
+        max_travel_by_speed = max(20.0, float(duration) * 110.0)
         actual_span = min(total_valid_span, max_travel_by_speed)
 
-        if (usable_v_travel >= 160.0 or aspect_ratio < 0.50) and actual_span >= 30.0:
+        if (usable_v_travel >= 120.0 or aspect_ratio < 0.55) and actual_span >= 25.0:
             animation_type = "vertical_pan_glide"
+            easing = "easeInOutCubic"
             
             # Smart Direction Selection:
             # 1. Bubble position guidance (avoid starting right on top of text)
@@ -1144,6 +1167,7 @@ class CameraPlanner:
                 "transition": transition,
                 "bubble_centroid": bubble_centroid,
                 "bubble_coverage_ratio": bubble_coverage_ratio,
+                "has_impact_shake": has_impact_shake,
             }
 
         # Mode C: Standard / Square / Landscape Panels (usable_v_travel < 160px)
@@ -1168,6 +1192,7 @@ class CameraPlanner:
                 "transition": transition,
                 "bubble_centroid": bubble_centroid,
                 "bubble_coverage_ratio": bubble_coverage_ratio,
+                "has_impact_shake": has_impact_shake,
             }
 
         # Action Punch Zoom for dynamic cadence on standard panels:
@@ -1206,6 +1231,7 @@ class CameraPlanner:
             "transition": transition,
             "bubble_centroid": bubble_centroid,
             "bubble_coverage_ratio": bubble_coverage_ratio,
+            "has_impact_shake": has_impact_shake,
         }
 
 
@@ -1399,6 +1425,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             page_displays = []
             current_time = 0.0
             recent_displayed_pages = []
+            global_used_donors = set()
             for s_idx, seg in enumerate(segments):
                 end_time = timings[s_idx]["end"] if s_idx < len(timings) else current_time + 3.0
                 segment_duration = end_time - current_time
@@ -1478,8 +1505,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 candidate = bad_page_idx + delta
                                 if 0 <= candidate < len(image_files):
                                     cand_page = candidate + 1
-                                    # Strict Deduplication: Do NOT pick any page that was displayed in the last 2 shots
-                                    if cand_page in recent_displayed_pages[-2:]:
+                                    # Strict Deduplication: Do NOT pick any page that was displayed in the last 2 shots or already used as a donor elsewhere
+                                    if cand_page in recent_displayed_pages[-2:] or cand_page in global_used_donors:
                                         continue
                                     im_path = os.path.join(images_blur_dir, image_files[candidate])
                                     if not os.path.exists(im_path):
@@ -1506,12 +1533,15 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                         pass
                             if best_composite >= 50:
                                 chosen_page = best_idx + 1
+                                global_used_donors.add(chosen_page)
                                 seg_images = [{"page": chosen_page, "priority": 1.0}]
                                 print(f"  [Stage10] Replaced low-quality/junk/bubble page {bad_page_idx + 1} with character page {chosen_page} (composite={best_composite:.1f})")
                             else:
                                 # Fallback: drop any explicitly meaningless panels from seg_images if better candidates exist
-                                non_meaningless = [c[0] for c in scored_candidates if not c[4] and c[1] >= 40 and int(c[0]["page"]) not in recent_displayed_pages[-2:]]
+                                non_meaningless = [c[0] for c in scored_candidates if not c[4] and c[1] >= 40 and int(c[0]["page"]) not in recent_displayed_pages[-2:] and int(c[0]["page"]) not in global_used_donors]
                                 if non_meaningless:
+                                    chosen_fallback = int(non_meaningless[0]["page"])
+                                    global_used_donors.add(chosen_fallback)
                                     seg_images = [non_meaningless[0]]
                                 elif best_item:
                                     seg_images = [{"page": best_item[0]["page"], "priority": 1.0}]
@@ -1526,7 +1556,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         cand_idx = orig_page_idx + delta
                         if 0 <= cand_idx < len(image_files):
                             cand_page_num = cand_idx + 1
-                            if cand_page_num in recent_displayed_pages[-2:] or cand_page_num == (orig_page_idx + 1):
+                            if cand_page_num in recent_displayed_pages[-2:] or cand_page_num == (orig_page_idx + 1) or cand_page_num in global_used_donors:
                                 continue
                             im_path = os.path.join(images_blur_dir, image_files[cand_idx])
                             if not os.path.exists(im_path):
@@ -1548,10 +1578,13 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         if segment_duration >= 9.0 and len(best_donors) >= 2:
                             d1 = best_donors[0][0] + 1
                             d2 = best_donors[1][0] + 1
+                            global_used_donors.add(d1)
+                            global_used_donors.add(d2)
                             seq = sorted([orig_page, d1, d2])
                             seg_images = [{"page": p, "priority": 1.0/3.0} for p in seq]
                         else:
                             d1 = best_donors[0][0] + 1
+                            global_used_donors.add(d1)
                             seq = sorted([orig_page, d1])
                             seg_images = [{"page": p, "priority": 0.5} for p in seq]
 
@@ -1605,7 +1638,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         "duration": img_dur,
                         "start_time": current_time,
                         "end_time": current_time + img_dur,
-                        "segment_index": s_idx
+                        "segment_index": s_idx,
+                        "speech": seg.get("speech", "")
                     })
                     recent_displayed_pages.append(page)
                     current_time += img_dur
@@ -1616,6 +1650,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 if merged_page_displays and merged_page_displays[-1]["image_file"] == pd["image_file"]:
                     merged_page_displays[-1]["duration"] += pd["duration"]
                     merged_page_displays[-1]["end_time"] = merged_page_displays[-1]["start_time"] + merged_page_displays[-1]["duration"]
+                    merged_page_displays[-1]["speech"] = (merged_page_displays[-1].get("speech", "") + " " + pd.get("speech", "")).strip()
                 else:
                     merged_page_displays.append(pd)
 
@@ -1628,6 +1663,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     cleaned_page_displays[-1]["end_time"] = (
                         cleaned_page_displays[-1]["start_time"] + cleaned_page_displays[-1]["duration"]
                     )
+                    cleaned_page_displays[-1]["speech"] = (cleaned_page_displays[-1].get("speech", "") + " " + pd.get("speech", "")).strip()
                 else:
                     cleaned_page_displays.append(pd)
 
@@ -1636,6 +1672,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 first = cleaned_page_displays.pop(0)
                 cleaned_page_displays[0]["duration"] += first["duration"]
                 cleaned_page_displays[0]["start_time"] = first["start_time"]
+                cleaned_page_displays[0]["speech"] = (first.get("speech", "") + " " + cleaned_page_displays[0].get("speech", "")).strip()
 
             # Secondary pass: re-merge if duration absorption created consecutive identical images
             final_page_displays = []
@@ -1645,6 +1682,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     final_page_displays[-1]["end_time"] = (
                         final_page_displays[-1]["start_time"] + final_page_displays[-1]["duration"]
                     )
+                    final_page_displays[-1]["speech"] = (final_page_displays[-1].get("speech", "") + " " + pd.get("speech", "")).strip()
                 else:
                     final_page_displays.append(pd)
             page_displays = final_page_displays
@@ -1732,7 +1770,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     focal_point=focal_point, transition=trans,
                     skin_ratio=skin_ratio, bubble_centroid=bubble_centroid,
                     bubble_coverage_ratio=bubble_coverage_ratio,
-                    shot_index=idx
+                    shot_index=idx,
+                    speech_text=pd.get("speech", "")
                 )
                 plans.append(plan)
                 
@@ -1749,6 +1788,15 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 card_x, card_y, card_w, card_h, aspect_card = card_dims
                 x_focal, y_focal, scale = interpolate_camera_plan(plan, t_local)
                 scale = max(1.0, float(scale))
+
+                # Visual Impact Shake (100% Optical Pixel/Affine Matrix Shake - Zero Audio Distortion):
+                # When action keywords are detected, apply subtle damped harmonic oscillation in the first 0.42s
+                if plan.get("has_impact_shake", False) and t_local < 0.42:
+                    shake_amp = 8.0 * float(np.exp(-7.0 * t_local))
+                    shake_x = shake_amp * float(np.cos(30.0 * t_local))
+                    shake_y = shake_amp * float(np.sin(36.0 * t_local))
+                    x_focal += shake_x
+                    y_focal += shake_y
 
                 # True Adaptive Safe-Zone Framing (v1.8.0):
                 # Tall webtoon strips with ample sliding travel (usable_v >= 160): w_base = W_c and h_base = W_c / aspect_card
@@ -1891,16 +1939,16 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             # Selective Inpainting for Episode Pages:
             # Only remove text/bubbles if explicitly requested in task payload (remove_text=True)
             images_inpainted_dir = os.path.join(ep_dir, "images_inpainted")
-            os.makedirs(images_inpainted_dir, exist_ok=True)
             unique_display_files = sorted(list(set(pd["image_file"] for pd in page_displays)))
             do_remove_text = bool(task.payload.get("remove_text", False))
-            for f_name in unique_display_files:
-                inp_dst = os.path.join(images_inpainted_dir, f_name)
-                src_p = os.path.join(images_blur_dir, f_name)
-                if not os.path.exists(src_p):
-                    src_p = os.path.join(images_pdf_dir, f_name)
-                if os.path.exists(src_p):
-                    if do_remove_text:
+            if do_remove_text:
+                os.makedirs(images_inpainted_dir, exist_ok=True)
+                for f_name in unique_display_files:
+                    inp_dst = os.path.join(images_inpainted_dir, f_name)
+                    src_p = os.path.join(images_blur_dir, f_name)
+                    if not os.path.exists(src_p):
+                        src_p = os.path.join(images_pdf_dir, f_name)
+                    if os.path.exists(src_p):
                         cached_d = bounds_cache.get(f_name, {})
                         bubble_cov = cached_d.get("bubble_coverage_ratio", 0.0) if isinstance(cached_d, dict) else 0.0
                         if bubble_cov >= 0.12:
@@ -1911,9 +1959,6 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 shutil.copy2(src_p, inp_dst)
                         else:
                             shutil.copy2(src_p, inp_dst)
-                    else:
-                        shutil.copy2(src_p, inp_dst)
-
 
             def get_img(img_file, t):
                 if img_file not in loaded_images:
@@ -1929,11 +1974,17 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             if k in cached_backgrounds:
                                 del cached_backgrounds[k]
 
-                    inpainted_path = os.path.join(images_inpainted_dir, img_file)
-                    if os.path.exists(inpainted_path):
-                        img_path = inpainted_path
+                    if do_remove_text:
+                        inpainted_path = os.path.join(images_inpainted_dir, img_file)
+                        if os.path.exists(inpainted_path):
+                            img_path = inpainted_path
+                        else:
+                            img_path = os.path.join(images_blur_dir, img_file)
                     else:
                         img_path = os.path.join(images_blur_dir, img_file)
+                        if not os.path.exists(img_path):
+                            img_path = os.path.join(images_pdf_dir, img_file)
+
                     with Image.open(img_path) as pil_im:
                         if pil_im.mode != "RGB":
                             pil_im = pil_im.convert("RGB")
@@ -1977,8 +2028,11 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             # Precompute luminance map for adaptive lighting transition smoothing
             lum_map = {}
             for f_name in unique_display_files:
-                src_p = os.path.join(images_inpainted_dir, f_name)
-                if not os.path.exists(src_p):
+                if do_remove_text:
+                    src_p = os.path.join(images_inpainted_dir, f_name)
+                    if not os.path.exists(src_p):
+                        src_p = os.path.join(images_blur_dir, f_name)
+                else:
                     src_p = os.path.join(images_blur_dir, f_name)
                 if not os.path.exists(src_p):
                     src_p = os.path.join(images_pdf_dir, f_name)
@@ -2652,9 +2706,12 @@ class Stage11_FinalVideoAssembly(BaseStage):
                 "-movflags", "faststart",
                 temp_final_video_path
             ]
-            proc = await asyncio.create_subprocess_exec(*cmd, cwd=download_dir, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            stdout, stderr = await proc.communicate()
-            if proc.returncode != 0:
+            try:
+                proc = await asyncio.create_subprocess_exec(*cmd, cwd=download_dir, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                stdout, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    shutil.copy2(single_video, temp_final_video_path)
+            except Exception:
                 shutil.copy2(single_video, temp_final_video_path)
             await context.log(f"Chỉ có 1 tập, đóng gói hoàn thiện {final_video_name} (faststart).", "success")
             
@@ -2798,7 +2855,27 @@ class Stage12_MetadataReports(BaseStage):
                 logger.warning(f"Failed to generate market YouTube metadata: {e}")
         
         yt_meta = metadata.get("youtube_metadata")
+        compliance_audit = None
         if yt_meta:
+            compliance_audit = yt_meta.get("compliance_flags")
+            if not compliance_audit:
+                desc = yt_meta.get("description", "")
+                desc_bytes = len(desc.encode("utf-8"))
+                tags = yt_meta.get("tags", [])
+                primary_t = yt_meta.get("title", "")
+                chapters = yt_meta.get("narrative_chapters", task.artifacts.get("chapters", []))
+                compliance_audit = {
+                    "title_length_chars": len(primary_t),
+                    "title_length_ok": len(primary_t) <= 100,
+                    "description_utf8_bytes": desc_bytes,
+                    "description_bytes_ok": desc_bytes <= 5000,
+                    "tag_count": len(tags) if isinstance(tags, list) else 0,
+                    "tag_count_ok": len(tags) <= 15 if isinstance(tags, list) else True,
+                    "first_chapter_is_zero": bool(chapters and chapters[0].get("timestamp") in ("00:00", "0:00")),
+                    "ypp_originality_statement_present": any(k in desc.lower() for k in ["original scripted narration", "original commentary", "오리지널 2차 창작", "オリジナル解説"]),
+                }
+            metadata["compliance_audit"] = compliance_audit
+
             kit_path = os.path.join(output_dir, "youtube_upload_kit.txt")
             folder_name = task.artifacts.get("download_folder_name")
             if yt_meta.get("formatted_kit"):
@@ -2810,8 +2887,16 @@ class Stage12_MetadataReports(BaseStage):
                     f"Episodes: {task.from_episode} - {task.to_episode} | Market: {market_id}",
                     "=" * 80,
                     "",
-                    "[1. TITLE CANDIDATES (Pick one for YouTube Title)]",
+                    "[1. TITLE CANDIDATES & A/B TEST OPTIONS]",
                 ]
+                variants = yt_meta.get("title_variants", {})
+                if variants:
+                    kit_lines.extend([
+                        f"★ Hypothesis A: {variants.get('variant_a_conflict', '')}",
+                        f"★ Hypothesis B: {variants.get('variant_b_paradox', '')}",
+                        f"★ Hypothesis C: {variants.get('variant_c_scale', '')}",
+                        "",
+                    ])
                 for i, opt in enumerate(yt_meta.get("title_options", [yt_meta.get("title", "")]), 1):
                     kit_lines.append(f"{i}. {opt}")
                 
@@ -2829,7 +2914,7 @@ class Stage12_MetadataReports(BaseStage):
                     "[2. DESCRIPTION & TIMESTAMPS (Copy & paste into YouTube Description)]",
                     yt_meta.get("description", ""),
                     "",
-                    "[3. PINNED COMMENT (BÌNH LUẬN GHIM NGẮN GỌN - Copy & paste to Pin)]",
+                    "[3. PINNED COMMENT (Copy & paste to Pin)]",
                     pinned_comm,
                     "",
                     "[4. TAGS (Copy & paste directly into YouTube Studio Tag Box)]",
@@ -2857,7 +2942,8 @@ class Stage12_MetadataReports(BaseStage):
             "stages": task.stages,
             "completed_episodes_count": task.completed_count,
             "failed_episodes_count": task.failed_count,
-            "error_message": task.error_message
+            "error_message": task.error_message,
+            "compliance_audit": compliance_audit
         }
         
         report_path = os.path.join(output_dir, "processing_report.json")
@@ -2866,7 +2952,7 @@ class Stage12_MetadataReports(BaseStage):
             json.dump(report, rf, ensure_ascii=False, indent=2)
         os.replace(report_temp_path, report_path)
 
-        await context.log("Đã tạo tệp metadata.json và processing_report.json.", "success")
+        await context.log("Đã tạo tệp metadata.json và processing_report.json (kèm kiểm định tuân thủ).", "success")
         await context.update_stage_progress(self.name, 100.0)
         return True
 

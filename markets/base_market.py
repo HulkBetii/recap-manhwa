@@ -32,12 +32,32 @@ class BaseMarketProfile:
         from_ep: int,
         to_ep: int,
         chapters: Optional[list] = None,
+        story_memory: Optional[dict] = None,
+        download_dir: Optional[str] = None,
         **kwargs,
     ) -> dict:
+        ep_range = f"Ep {from_ep}~{to_ep}" if from_ep != to_ep else f"Ep {from_ep}"
+        default_title = f"{comic_title} [{ep_range}] | Manhwa Recap"
+        desc = f"English manhwa recap of {comic_title} ({ep_range}).\n\nOriginal narration and commentary.\n\n#ManhwaRecap #WebtoonRecap"
         return {
-            'title': f'[{self.name}] {comic_title} Ep {from_ep}~{to_ep}',
-            'description': f'Recap of {comic_title} from episode {from_ep} to {to_ep}.',
-            'tags': [],
+            'title': default_title,
+            'title_variants': {
+                'variant_a_conflict': default_title,
+                'variant_b_paradox': default_title,
+                'variant_c_scale': default_title,
+            },
+            'description': desc,
+            'tags': ['manhwa recap', comic_title.lower(), f"{comic_title.lower()} recap"],
+            'pinned_comment': f"📌 {comic_title} ({ep_range})\n\n👉 Like & Subscribe for more recaps!",
+            'narrative_chapters': chapters or [{'timestamp': '00:00', 'title': f'Chapter {from_ep}', 'episode': from_ep}],
+            'thumbnail_concepts': [],
+            'compliance_flags': {
+                'title_length_ok': len(default_title) <= 100,
+                'desc_bytes_ok': len(desc.encode('utf-8')) <= 5000,
+                'tag_count_ok': True,
+                'hashtag_count_ok': True,
+                'first_chapter_is_zero': True,
+            }
         }
 
     def to_dict(self) -> dict:

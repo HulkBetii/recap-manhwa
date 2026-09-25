@@ -35,6 +35,23 @@ TITLE_FORMULA_TEMPLATES = {
         "Everyone Picked {obvious_class}, But His '{trash_class}' Controls All {resource} | Manhwa Recap",
         "His '{trash_class}' Was WORTHLESS Until the {disaster} Made It STRONGEST | Manhwa Recap",
     ],
+    "kingdom_building": [
+        "Exiled to {danger_zone}, His 100% DROP RATE Builds an UNSTOPPABLE Empire | Manhwa Recap",
+        "Starving Lords Fight for Scraps, But He Controls the KING of Loot | Manhwa Recap",
+        "They Left Him with NOTHING, But His Domain Snowballed Into a KINGDOM | Manhwa Recap",
+    ],
+    "murim_vengeance": [
+        "His Danjeon Was SHATTERED by Elders, Until He Awakened the HEAVENLY DEMON Art | Manhwa Recap",
+        "Betrayed by His Sect, He Mastered FORBIDDEN Cultivation to DESTROY Them All | Manhwa Recap",
+    ],
+    "academy_humiliation": [
+        "Academy Mocked His '{trash_class}' Until His Combat Power HUMILIATES the Rank 1 | Manhwa Recap",
+        "When The F-RANK Trainee Reveals His Hidden SSS-Power and SHOCKS the Elites | Manhwa Recap",
+    ],
+    "undead_evolution": [
+        "He Started With ONE Weak Skeleton—Now Undead Armies BOW to Him | Manhwa Recap",
+        "The WEAKEST Necromancer Can Steal Stats and Level INFINITELY | Manhwa Recap",
+    ],
     "regression_return": [
         "He DIES in the {disaster} and Returns {time_before} Before Everyone Else | Manhwa Recap",
         "BETRAYED at Level {level}, He REGRESSED {time_span} to DESTROY Them All | Manhwa Recap",
@@ -640,20 +657,145 @@ def _extract_story_beats(
     return beats
 
 
+def verify_and_adjust_claims(
+    beats: Dict[str, str],
+    download_dir: Optional[str] = None,
+    from_ep: int = 1,
+    to_ep: int = 1,
+) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """
+    Verifies extreme title claims against covered episode transcript/recap
+    to prevent YouTube's 'Expectation Mismatch / Deceptive Clickbait' retention penalties.
+    
+    If the current batch is early in the story (e.g. Ep 1-2) and no late-game keywords
+    exist in the transcript, adjusts extreme claims to reflect the actual awakening stage.
+    """
+    audit: Dict[str, Any] = {
+        "is_early_stage": to_ep <= 2,
+        "transcript_checked": False,
+        "adjusted_fields": [],
+    }
+
+    speech_text = ""
+    if download_dir and os.path.isdir(download_dir):
+        for ep in range(from_ep, to_ep + 1):
+            recap_file = os.path.join(download_dir, f"episode_{ep}", "recap.json")
+            if os.path.isfile(recap_file):
+                try:
+                    with open(recap_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, list):
+                        speech_text += " " + " ".join(
+                            seg.get("speech", "") for seg in data if isinstance(seg, dict)
+                        )
+                        audit["transcript_checked"] = True
+                except Exception:
+                    pass
+
+    speech_lower = speech_text.lower()
+    adjusted_beats = dict(beats)
+
+    if to_ep <= 2:
+        if not any(k in speech_lower for k in ["ruler", "emperor", "monarch", "max level", "level 99", "godly"]):
+            if "title" in adjusted_beats and "ruler" in adjusted_beats["title"].lower():
+                adjusted_beats["title"] = "an SSS-Rank Survivor"
+                audit["adjusted_fields"].append("title")
+        if not any(k in speech_lower for k in ["infinite", "million", "endless", "50,000"]):
+            if adjusted_beats.get("advantage") == "an INFINITE Dimensional Warehouse":
+                adjusted_beats["advantage"] = "a Hidden Dimensional Storage"
+                audit["adjusted_fields"].append("advantage")
+
+    return adjusted_beats, audit
+
+
 def _select_title_families(archetype: str) -> List[str]:
     """Returns the ordered list of title formula families best suited for the archetype."""
     family_map = {
         "zombie_apocalypse": ["resource_monopoly", "preparation_advantage", "lone_survivor", "betrayal_revenge"],
         "bunker_prepper": ["preparation_advantage", "resource_monopoly", "climate_disaster", "lone_survivor"],
         "tower_anti_regression": ["betrayal_revenge", "lone_survivor", "system_awakening"],
-        "hunter_gate": ["betrayal_revenge", "system_awakening", "lone_survivor"],
-        "game_system_reality": ["system_awakening", "class_reversal", "lone_survivor"],
+        "hunter_gate": ["academy_humiliation", "betrayal_revenge", "system_awakening", "lone_survivor"],
+        "game_system_reality": ["system_awakening", "class_reversal", "undead_evolution", "lone_survivor"],
         "regression_prep": ["regression_return", "preparation_advantage", "resource_monopoly"],
-        "farming_kingdom": ["class_reversal", "resource_monopoly", "lone_survivor"],
-        "murim_apocalypse": ["betrayal_revenge", "lone_survivor", "system_awakening"],
+        "farming_kingdom": ["kingdom_building", "class_reversal", "resource_monopoly", "lone_survivor"],
+        "murim_apocalypse": ["murim_vengeance", "betrayal_revenge", "lone_survivor", "system_awakening"],
         "general_apocalypse": ["resource_monopoly", "lone_survivor", "betrayal_revenge", "system_awakening"],
     }
     return family_map.get(archetype, family_map["general_apocalypse"])
+
+
+def generate_ab_title_variants(
+    comic_title: str,
+    archetype: str,
+    beats: Dict[str, str],
+    from_ep: int = 1,
+    to_ep: int = 1,
+) -> Dict[str, str]:
+    """
+    Generates 3 distinct hypotheses for YouTube's native Title/Thumbnail A/B Testing:
+    - variant_a_conflict: Conflict / Betrayal / Humiliation / Retaliation Hook
+    - variant_b_paradox: Paradox / Disadvantage vs Resource Monopoly Hook
+    - variant_c_scale: Scale / Kingdom / System Progression Hook
+    """
+    ep_range = f"Ep {from_ep}~{to_ep}" if from_ep != to_ep else f"Ep {from_ep}"
+    safe_beats = SafeFormatDict(beats)
+
+    # 1. Variant A (Conflict / Retaliation Hook)
+    conflict_templates = [
+        "When The WEAKEST Trainee Reveals His SSS-Rank Power And HUMILIATES Everyone | Manhwa Recap",
+        "He Was BETRAYED by {betrayer}, But Awakened {advantage} | Manhwa Recap",
+        "His '{trash_class}' Was WORTHLESS Until the {disaster} Made It STRONGEST | Manhwa Recap",
+        "His Danjeon Was SHATTERED by Elders, Until He Awakened the HEAVENLY DEMON Art | Manhwa Recap",
+        "Academy Mocked His '{trash_class}' Until His Combat Power HUMILIATES the Rank 1 | Manhwa Recap",
+    ]
+    var_a = ""
+    for tmpl in conflict_templates:
+        filled = tmpl.format_map(safe_beats)
+        if "{" not in filled:
+            var_a = format_recap_title(filled)
+            break
+    if not var_a:
+        var_a = format_recap_title(f"He Was Betrayed But Awakened God-Tier Power [{ep_range}]")
+
+    # 2. Variant B (Paradox / Resource Monopoly Hook)
+    paradox_templates = [
+        "Everyone Is {suffering}, But He Has {advantage} After the {disaster} | Manhwa Recap",
+        "{disaster} Hit and EVERYONE Lost {scarce_thing}, But He Had {advantage} | Manhwa Recap",
+        "The World Ran Out of {scarce_thing}, But He Controls the ONLY {advantage} | Manhwa Recap",
+        "They Called Him INSANE for {prep_action}, Until the {disaster} Hit | Manhwa Recap",
+        "The World Reaches {extreme_temp}, But His {shelter} Has {resource} | Manhwa Recap",
+    ]
+    var_b = ""
+    for tmpl in paradox_templates:
+        filled = tmpl.format_map(safe_beats)
+        if "{" not in filled:
+            var_b = format_recap_title(filled)
+            break
+    if not var_b:
+        var_b = format_recap_title(f"Everyone Panicked During {beats.get('disaster', 'the Apocalypse')}, But He Had Unlimited Resources [{ep_range}]")
+
+    # 3. Variant C (Scale / Kingdom / System Progression Hook)
+    scale_templates = [
+        "Exiled to {danger_zone}, His 100% DROP RATE Builds an UNSTOPPABLE Empire | Manhwa Recap",
+        "Starving Lords Fight for Scraps, But He Controls the KING of Loot | Manhwa Recap",
+        "He Started With ONE Weak Skeleton—Now Undead Armies BOW to Him | Manhwa Recap",
+        "He Awakened a BROKEN {system_name} That Turns {weak_thing} Into {strong_thing} | Manhwa Recap",
+        "He DIES in the {disaster} and Returns {time_before} Before Everyone Else | Manhwa Recap",
+    ]
+    var_c = ""
+    for tmpl in scale_templates:
+        filled = tmpl.format_map(safe_beats)
+        if "{" not in filled:
+            var_c = format_recap_title(filled)
+            break
+    if not var_c:
+        var_c = format_recap_title(f"From Zero to Top #1: Conquering {beats.get('disaster', 'the Apocalypse')} [{ep_range}]")
+
+    return {
+        "variant_a_conflict": var_a,
+        "variant_b_paradox": var_b,
+        "variant_c_scale": var_c,
+    }
 
 
 def generate_dynamic_titles(
@@ -663,18 +805,18 @@ def generate_dynamic_titles(
     download_dir: Optional[str] = None,
     from_ep: int = 1,
     to_ep: int = 1,
-) -> List[str]:
+) -> Tuple[List[str], Dict[str, str], Dict[str, Any]]:
     """
-    Generates data-driven title options by extracting actual story beats
-    and filling validated title formula templates.
+    Generates data-driven title options by extracting actual story beats,
+    verifying claims, and filling validated title formula templates.
 
-    Research basis:
-    - Target 80-95 chars (deep-research-report.md: mean ~91, median ~93)
-    - Selective CAPS for 2-6 power words only
-    - Pronouns > IP names for Browse/Suggested discovery
-    - Structure: [Disadvantage/Threat] + [OP Resolution] | Manhwa Recap
+    Returns:
+    - List of top 5 title options
+    - Dict of 3 distinct A/B test variants
+    - Dict of claim verification audit
     """
-    beats = _extract_story_beats(comic_title, archetype, story_memory, download_dir, from_ep, to_ep)
+    raw_beats = _extract_story_beats(comic_title, archetype, story_memory, download_dir, from_ep, to_ep)
+    beats, claim_audit = verify_and_adjust_claims(raw_beats, download_dir, from_ep, to_ep)
     families = _select_title_families(archetype)
 
     titles = []
@@ -682,9 +824,7 @@ def generate_dynamic_titles(
         templates = TITLE_FORMULA_TEMPLATES.get(family_key, [])
         for template in templates:
             try:
-                # Fill template with beats, using .get() via format_map
                 filled = template.format_map(SafeFormatDict(beats))
-                # Skip if any unfilled placeholders remain
                 if "{" in filled:
                     continue
                 formatted = format_recap_title(filled)
@@ -696,7 +836,7 @@ def generate_dynamic_titles(
         if len(titles) >= 5:
             break
 
-    # Ensure at least 5 options — pad with ep_range-specific generic titles
+    # Ensure at least 5 options
     ep_range = f"Ep {from_ep}~{to_ep}" if from_ep != to_ep else f"Ep {from_ep}"
     fallback_titles = [
         f"He Survived {beats.get('disaster', 'the Apocalypse')} While EVERYONE Else Fell [{ep_range}] | Manhwa Recap",
@@ -710,7 +850,9 @@ def generate_dynamic_titles(
         if formatted not in titles:
             titles.append(formatted)
 
-    return titles[:5]
+    ab_variants = generate_ab_title_variants(comic_title, archetype, beats, from_ep, to_ep)
+
+    return titles[:5], ab_variants, claim_audit
 
 
 class SafeFormatDict(dict):
@@ -1059,8 +1201,8 @@ def generate_us_apocalypse_metadata(
     image_refs = find_character_image_references(download_dir, image_references)
     beats = _extract_story_beats(comic_title, archetype, story_memory, download_dir, from_ep, to_ep)
 
-    # ── 1. DYNAMIC TITLES ──────────────────────────────────────────────────
-    title_options = generate_dynamic_titles(
+    # ── 1. DYNAMIC TITLES & A/B TEST VARIANTS ──────────────────────────────
+    title_options, title_variants, claim_audit = generate_dynamic_titles(
         comic_title, archetype, story_memory, download_dir, from_ep, to_ep
     )
     primary_title = title_options[0] if title_options else format_recap_title(f"{comic_title} [{ep_range}]")
@@ -1112,7 +1254,7 @@ def generate_us_apocalypse_metadata(
         "",
     ])
 
-    # Tier 6: Hashtags (minimal, natural)
+    # Tier 6: Hashtags (strictly 3-5 tags, far below 60 limit)
     clean_tag = re.sub(r"[^a-zA-Z0-9]", "", comic_title.lower())
     hashtags = [
         f"#{clean_tag}" if clean_tag else "#manhwarecap",
@@ -1132,10 +1274,28 @@ def generate_us_apocalypse_metadata(
         hashtags.append("#gamemanhwa")
     elif archetype == "farming_kingdom":
         hashtags.append("#farmingmanhwa")
+    elif archetype == "murim_apocalypse":
+        hashtags.append("#murimmanhwa")
 
-    desc_lines.append(" ".join(hashtags))
+    # Deduplicate while preserving order, max 5
+    seen_ht = set()
+    final_hashtags = []
+    for ht in hashtags:
+        if ht.lower() not in seen_ht and len(final_hashtags) < 5:
+            seen_ht.add(ht.lower())
+            final_hashtags.append(ht)
 
-    # ── 4. TAGS — Radical simplification ───────────────────────────────────
+    desc_lines.append(" ".join(final_hashtags))
+    desc_text = "\n".join(desc_lines)
+
+    # Enforce UTF-8 byte boundary (< 5000 bytes API hard limit)
+    desc_bytes = len(desc_text.encode("utf-8"))
+    if desc_bytes > 4500:
+        desc_lines = desc_lines[:15] + ["", desc_lines[-1]]
+        desc_text = "\n".join(desc_lines)
+        desc_bytes = len(desc_text.encode("utf-8"))
+
+    # ── 4. TAGS — Radical simplification (5-8 tags, < 500 chars) ───────────
     tags = build_minimal_tags(comic_title, archetype)
 
     # ── 5. THUMBNAIL CONCEPTS — Resource Contrast model ────────────────────
@@ -1156,17 +1316,40 @@ def generate_us_apocalypse_metadata(
         "👉 Like & Subscribe for more full-arc manhwa recaps!"
     )
 
-    # ── 7. SURVIVAL DASHBOARD DATA ─────────────────────────────────────────
-    survival_dashboard = generate_survival_dashboard_data(archetype, from_ep, to_ep, story_memory)
+    # ── 8. COMPLIANCE FLAGS & AUDIT ────────────────────────────────────────
+    compliance_flags = {
+        "title_length_chars": len(primary_title),
+        "title_length_ok": len(primary_title) <= 100,
+        "title_first_40_chars_hook": bool(re.search(r"^(He|When|They|Exiled|Everyone|Betrayed|Academy|Starving|His)", primary_title, re.IGNORECASE)),
+        "description_utf8_bytes": desc_bytes,
+        "description_bytes_ok": desc_bytes <= 5000,
+        "tag_count": len(tags),
+        "tag_count_ok": 5 <= len(tags) <= 15,
+        "tag_total_chars": sum(len(t) for t in tags) + (len(tags) - 1) * 2,
+        "tag_chars_ok": (sum(len(t) for t in tags) + (len(tags) - 1) * 2) <= 500,
+        "hashtag_count": len(final_hashtags),
+        "hashtag_count_ok": len(final_hashtags) <= 5,
+        "first_chapter_is_zero": bool(narrative_chapters and narrative_chapters[0].get("timestamp") in ("00:00", "0:00")),
+        "ypp_originality_statement_present": "original scripted narration" in desc_text.lower(),
+        "claim_audit": claim_audit,
+    }
 
-    # ── 8. FORMATTED KIT STRING ────────────────────────────────────────────
+    # ── 9. FORMATTED KIT STRING ────────────────────────────────────────────
     kit_lines = [
         "=" * 80,
         f"YOUTUBE UPLOAD KIT: {comic_title}",
         f"Episodes: {from_ep} - {to_ep} | Market: us_apocalypse | Archetype: {archetype.upper()}",
         "=" * 80,
         "",
-        "[1. TITLE CANDIDATES (Pick one for YouTube Title)]",
+        "[1. NATIVE A/B TEST TITLE HYPOTHESES (Paste 3 options into YouTube A/B Tester)]",
+        f"★ Hypothesis A (Conflict / Retaliation Hook):",
+        f"  {title_variants.get('variant_a_conflict', primary_title)}",
+        f"★ Hypothesis B (Paradox / Resource Monopoly Hook):",
+        f"  {title_variants.get('variant_b_paradox', primary_title)}",
+        f"★ Hypothesis C (Scale / Kingdom Progression Hook):",
+        f"  {title_variants.get('variant_c_scale', primary_title)}",
+        "",
+        "--- Top 5 Ranked Title Candidates ---",
     ]
     for i, t in enumerate(title_options, 1):
         prefix = "★ " if i == 1 else "  "
@@ -1175,7 +1358,7 @@ def generate_us_apocalypse_metadata(
     kit_lines.extend([
         "",
         "[2. DESCRIPTION & TIMESTAMPS (Copy & paste into YouTube Description)]",
-        "\n".join(desc_lines),
+        desc_text,
         "",
         "[3. PINNED COMMENT (Copy & paste to Pin)]",
         pinned_comment_text,
@@ -1226,6 +1409,14 @@ def generate_us_apocalypse_metadata(
         f"  Party Size: {survival_dashboard['party_size']}",
         "",
         "=" * 80,
+        "[7. 2026 ALGORITHM COMPLIANCE AUDIT SUMMARY]",
+        f"  • Title Length: {compliance_flags['title_length_chars']} chars (Limit <= 100) -> {'PASS' if compliance_flags['title_length_ok'] else 'FAIL'}",
+        f"  • Description Size: {compliance_flags['description_utf8_bytes']} bytes (Limit <= 5000 bytes) -> {'PASS' if compliance_flags['description_bytes_ok'] else 'FAIL'}",
+        f"  • Tag Count: {compliance_flags['tag_count']} tags, {compliance_flags['tag_total_chars']} chars (Limit <= 500 chars) -> {'PASS' if compliance_flags['tag_chars_ok'] else 'FAIL'}",
+        f"  • Hashtag Count: {compliance_flags['hashtag_count']} tags (Limit < 60) -> {'PASS' if compliance_flags['hashtag_count_ok'] else 'FAIL'}",
+        f"  • Chapter 00:00 Present: {'PASS' if compliance_flags['first_chapter_is_zero'] else 'FAIL'}",
+        f"  • YPP Originality Statement: {'PASS' if compliance_flags['ypp_originality_statement_present'] else 'FAIL'}",
+        "=" * 80,
     ])
 
     formatted_kit = "\n".join(kit_lines)
@@ -1233,12 +1424,14 @@ def generate_us_apocalypse_metadata(
     return {
         "title": primary_title,
         "title_options": title_options,
-        "description": "\n".join(desc_lines),
+        "title_variants": title_variants,
+        "description": desc_text,
         "pinned_comment": pinned_comment_text,
         "tags": tags,
         "narrative_chapters": narrative_chapters,
         "thumbnail_concepts": thumbnail_concepts,
         "engagement_question": engagement_q,
         "survival_dashboard": survival_dashboard,
+        "compliance_flags": compliance_flags,
         "formatted_kit": formatted_kit,
     }

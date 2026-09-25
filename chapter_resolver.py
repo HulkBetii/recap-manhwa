@@ -125,5 +125,88 @@ def assert_and_guard_chapter_url(
                 f"Pipeline aborted immediately to prevent downloading wrong chapter!"
             )
             raise ValueError(err_msg)
-
     return viewer_url
+
+
+KNOWN_WEBTOON_TITLE_MAP = {
+    # Naver Webtoon TitleId / Korean Title Mappings
+    "814742": "Zombie Revelation 82-08",
+    "좀비묵시록 82-08": "Zombie Revelation 82-08",
+    "좀비묵시록": "Zombie Revelation",
+    "나 혼자만 레벨업": "Solo Leveling",
+    "전지적 독자 시점": "Omniscient Reader's Viewpoint",
+    "멸망 이후의 세계": "The World After the Fall",
+    "화산귀환": "Return of the Blossoming Blade",
+    "나노 마신": "Nano Machine",
+    "신과함께 돌아온 기사왕님": "The Knight King Who Returned with a God",
+    "재벌집 막내아들": "Reborn Rich",
+    "싸움독학": "Viral Hit",
+    "외모지상주의": "Lookism",
+    "퀘스트지상주의": "Quest Supremacy",
+    "김부장": "Manager Kim",
+    "촉법소년": "Juvenile Offender",
+    "인생존망": "My Life as a Loser",
+    "신의 탑": "Tower of God",
+    "갓 오브 하이스쿨": "The God of High School",
+    "노블레스": "Noblesse",
+    "호랑이형님": "Tiger Brother",
+    "입학용병": "Mercenary Enrollment",
+    "템빨": "Overgeared",
+    "두 번 사는 랭커": "Second Life Ranker",
+    "SSS급 죽어야 사는 헌터": "SSS-Class Revival Hunter",
+    "만렙뉴비": "Solo Max-Level Newbie",
+    "도굴왕": "Tomb Raider King",
+    "튜토리얼 탑의 고인물": "The Advanced Player of the Tutorial Tower",
+    "비선실세 레이디가 되었습니다": "I Became the Male Lead's Adopted Daughter",
+    "마이크 없이 살아남자": "Surviving The Apocalypse",
+}
+
+
+def resolve_english_comic_title(title: str, url: str = "") -> str:
+    """
+    Tự động chuẩn hóa và tìm tên chuẩn tiếng Anh cho truyện tranh,
+    đặc biệt khi nguồn đầu vào là tiếng Hàn (Naver, Kakao), tiếng Nhật hoặc tiếng Trung.
+    """
+    if not title and not url:
+        return "Manhwa Recap"
+
+    # 1. Tra cứu theo titleId từ URL Naver nếu có
+    if url and "comic.naver.com" in url:
+        parsed = urllib.parse.urlparse(url)
+        qs = urllib.parse.parse_qs(parsed.query)
+        t_id = qs.get("titleId", [""])[0] or qs.get("title_no", [""])[0]
+        if t_id and t_id in KNOWN_WEBTOON_TITLE_MAP:
+            return KNOWN_WEBTOON_TITLE_MAP[t_id]
+
+    clean_title = (title or "").strip()
+
+    # 2. Tra cứu trực tiếp từ bảng mapping
+    if clean_title in KNOWN_WEBTOON_TITLE_MAP:
+        return KNOWN_WEBTOON_TITLE_MAP[clean_title]
+
+    # Tra cứu case-insensitive & partial match
+    for k_name, en_name in KNOWN_WEBTOON_TITLE_MAP.items():
+        if k_name.lower() == clean_title.lower() or (len(k_name) > 3 and k_name in clean_title):
+            return en_name
+
+    # 3. Kiểm tra xem tiêu đề có chứa ký tự tiếng Hàn (Hangul) hay không
+    has_hangul = bool(re.search(r"[\uac00-\ud7a3]", clean_title))
+    has_cjk = bool(re.search(r"[\u3040-\u30ff\u4e00-\u9faf]", clean_title))
+
+    if not has_hangul and not has_cjk:
+        # Đã là tiếng Anh hoặc chữ Latin chuẩn
+        return clean_title
+
+    # 4. Nếu là tiếng Hàn/CJK và chưa có trong mapping:
+    # Thử trích xuất từ URL slug nếu URL chứa slug tiếng Anh
+    if url:
+        parsed = urllib.parse.urlparse(url)
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        for part in path_parts:
+            if part not in ["webtoon", "list", "detail", "manga", "series", "title", "viewer", "read"]:
+                slug_clean = part.replace("-", " ").replace("_", " ").title()
+                if not re.search(r"[\uac00-\ud7a3\u3040-\u30ff\u4e00-\u9faf]", slug_clean) and len(slug_clean) > 2:
+                    return slug_clean
+
+    return clean_title
+

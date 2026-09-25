@@ -39,4 +39,7 @@ review_*/
 review_samples/
 audit_results_*.json
 scratch_*.jpg
+frame_*.jpg
+naver_*.json
+youtube_upload_kit_full_series.*
 

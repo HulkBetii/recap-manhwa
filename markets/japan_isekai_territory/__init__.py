@@ -44,8 +44,18 @@ class JapanIsekaiTerritoryMarket(BaseMarketProfile):
         comic_title: str,
         from_ep: int,
         to_ep: int,
+        chapters: Optional[list] = None,
+        story_memory: Optional[dict] = None,
+        download_dir: Optional[str] = None,
+        **kwargs,
     ) -> dict:
-        return generate_japan_isekai_metadata(comic_title, from_ep, to_ep)
+        return generate_japan_isekai_metadata(
+            comic_title, from_ep, to_ep,
+            chapters=chapters,
+            story_memory=story_memory,
+            download_dir=download_dir,
+            **kwargs,
+        )
 
 
 JAPAN_ISEKAI_TERRITORY_MARKET = JapanIsekaiTerritoryMarket()
