@@ -999,6 +999,7 @@ class CameraPlanner:
         bubble_coverage_ratio: float = 0.0,
         shot_index: int = 0,
         speech_text: str = "",
+        is_establishing_shot: bool = False,
     ) -> dict:
         """
         Generates a continuous, smooth cinematic camera plan for webtoon storytelling.
@@ -1056,7 +1057,10 @@ class CameraPlanner:
         else:
             focal_y = float(np.clip(focal_y, 0.18 * H_c, 0.82 * H_c))
 
-        easing = "soft_linear_glide"
+        # Default easing for Mode C (Ken Burns zoom + drift): easeInOutCubic gives organic,
+        # cinematographer feel. Mode A (horizontal pan) and Mode B (vertical glide) override
+        # this with their own easing values; only Mode C falls through to this default.
+        easing = "easeInOutCubic"
 
         # Mode A: Landscape / Wide Panels (aspect_ratio >= 1.70) -> Smooth Cinematic Horizontal Pan
         # (Allows natural scanning across wide manga spreads, landscape battle scenes, and wide room shots)
@@ -1210,36 +1214,37 @@ class CameraPlanner:
             }
 
         # Ken Burns 2D: simultaneous zoom + horizontal drift for natural cinema feel.
-        # Drift magnitude: ±4% of panel width, direction alternates every shot index.
+        # Drift magnitude: ±6% for establishing shots (scenic panoramas need wider roam),
+        # ±4% for character panels (face stays centered). Direction alternates per shot index.
         # Clamped within [15%, 85%] safe zone to prevent edge overshoots on narrow panels.
-        drift_factor = 0.04
+        drift_factor = 0.06 if is_establishing_shot else 0.04
         raw_drift = float(W_c) * drift_factor * (1.0 if shot_index % 2 == 0 else -1.0)
         x_drift_end = float(np.clip(focal_x + raw_drift, 0.15 * W_c, 0.85 * W_c))
         x_drift_rev = float(np.clip(focal_x - raw_drift, 0.15 * W_c, 0.85 * W_c))
 
-        # Action Punch Zoom: hard zoom in + horizontal drift (high-energy shot cadence)
-        if shot_index % 4 == 2 and duration <= 6.0:
-            animation_type = "action_punch_zoom"
-            direction = "punch_in"
-            keyframes = [
-                {"time": 0.0,      "x": focal_x,     "y": focal_y, "scale": 1.00, "progress": 0.0},
-                {"time": duration, "x": x_drift_end, "y": focal_y, "scale": 1.12, "progress": 1.0}
-            ]
-        # Ken Burns 2D: zoom in + drift right (even shots)
-        elif shot_index % 2 == 0:
+        # Shot distribution: % 3 gives equal 33%/33%/33% across Zoom-In, Zoom-Out, Action Punch.
+        # Previous %4/%2 gave skewed 25%/50%/25% (Zoom-Out dominant) — felt like constant retreating.
+        # Action Punch no longer capped at dur<=6.0 — all durations get the high-energy treatment.
+        if shot_index % 3 == 0:
             animation_type = "focal_zoom_in"
             direction = "zoom_in"
             keyframes = [
                 {"time": 0.0,      "x": focal_x,     "y": focal_y, "scale": 1.00, "progress": 0.0},
                 {"time": duration, "x": x_drift_end, "y": focal_y, "scale": 1.10, "progress": 1.0}
             ]
-        # Ken Burns 2D: zoom out + counter-drift left (odd shots)
-        else:
+        elif shot_index % 3 == 1:
             animation_type = "focal_zoom_out"
             direction = "zoom_out"
             keyframes = [
                 {"time": 0.0,      "x": focal_x,     "y": focal_y, "scale": 1.10, "progress": 0.0},
                 {"time": duration, "x": x_drift_rev, "y": focal_y, "scale": 1.00, "progress": 1.0}
+            ]
+        else:
+            animation_type = "action_punch_zoom"
+            direction = "punch_in"
+            keyframes = [
+                {"time": 0.0,      "x": focal_x,     "y": focal_y, "scale": 1.00, "progress": 0.0},
+                {"time": duration, "x": x_drift_end, "y": focal_y, "scale": 1.12, "progress": 1.0}
             ]
 
         return {
@@ -1835,14 +1840,25 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 
                 is_last_page = (idx == len(page_displays) - 1)
                 trans = "dip_to_black" if is_last_page else "cross_fade"
-                
+
+                # Determine if this is an establishing (scenic) shot for wider Ken Burns drift (6%).
+                # Primary: read from bounds_cache if VisualSemanticScorer stored it earlier.
+                # Fallback heuristic: no face skin (skin_ratio < 0.04) + low bubble (< 0.35)
+                # + occupied panel — reliable proxy for subway/cityscape/environment panels.
+                cached_entry = bounds_cache.get(img_file)
+                if isinstance(cached_entry, dict) and "is_establishing_shot" in cached_entry:
+                    is_establishing_shot = bool(cached_entry["is_establishing_shot"])
+                else:
+                    is_establishing_shot = (skin_ratio < 0.04 and bubble_coverage_ratio < 0.35)
+
                 plan = CameraPlanner.generate_camera_plan(
                     pd["page"], pd["duration"], bounds,
                     focal_point=focal_point, transition=trans,
                     skin_ratio=skin_ratio, bubble_centroid=bubble_centroid,
                     bubble_coverage_ratio=bubble_coverage_ratio,
                     shot_index=idx,
-                    speech_text=pd.get("speech", "")
+                    speech_text=pd.get("speech", ""),
+                    is_establishing_shot=is_establishing_shot,
                 )
                 plans.append(plan)
                 
