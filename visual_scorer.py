@@ -330,6 +330,22 @@ class VisualSemanticScorer:
         is_limbs_no_face = bool(num_faces == 0 and skin_ratio > 0.35 and visual_detail < 25.0 and action_context < 25.0)
         is_bubble_no_face = bool(num_faces == 0 and bubble_coverage_ratio > 0.40 and character_presence < 30.0 and visual_detail < 35.0)
 
+        # Establishing Shot Detection: Visually rich scenic panels without characters
+        # (ruined cityscapes, battlefield panoramas, subway interiors, environmental storytelling).
+        # These panels have high semantic occupancy + high edge/gradient detail but low character_presence
+        # because YuNet finds no face and skin-tone is absent. They carry important narrative context
+        # and must NOT be filtered by the char_p < 25 threshold.
+        is_establishing_shot = bool(
+            num_faces == 0
+            and semantic_similarity >= 62.0   # rich non-background content required
+            and visual_detail >= 52.0          # high edge / gradient complexity required
+            and occupancy_ratio >= 0.45        # panel must be >45% occupied
+            and not is_empty_box
+            and not is_mostly_bubble
+            and not is_solid_or_gutter
+            and not is_tiny_slice
+        )
+
         is_meaningless = bool(
             is_bubble
             or is_empty_box
@@ -340,6 +356,11 @@ class VisualSemanticScorer:
             or is_limbs_no_face
             or is_bubble_no_face
         )
+
+        # Establishing shots override meaningless flag: they are semantically valid
+        # even without characters (e.g. "The ruins stretched for miles").
+        if is_establishing_shot:
+            is_meaningless = False
 
         # ==================================================================
         # Final Score Combination
@@ -371,6 +392,7 @@ class VisualSemanticScorer:
             "image_quality": round(image_quality, 2),
             "bubble_coverage_ratio": round(bubble_coverage_ratio, 3),
             "is_meaningless": is_meaningless,
+            "is_establishing_shot": is_establishing_shot,
             "final_score": final_score,
         }
 

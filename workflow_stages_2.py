@@ -1208,30 +1208,37 @@ class CameraPlanner:
                 "has_impact_shake": has_impact_shake,
             }
 
-        # Action Punch Zoom for dynamic cadence on standard panels:
-        # Scale 1.00 -> 1.12 with continuous soft_linear_glide (never freezes before cut)
+        # Ken Burns 2D: simultaneous zoom + horizontal drift for natural cinema feel.
+        # Drift magnitude: ±4% of panel width, direction alternates every shot index.
+        # Clamped within [15%, 85%] safe zone to prevent edge overshoots on narrow panels.
+        drift_factor = 0.04
+        raw_drift = float(W_c) * drift_factor * (1.0 if shot_index % 2 == 0 else -1.0)
+        x_drift_end = float(np.clip(focal_x + raw_drift, 0.15 * W_c, 0.85 * W_c))
+        x_drift_rev = float(np.clip(focal_x - raw_drift, 0.15 * W_c, 0.85 * W_c))
+
+        # Action Punch Zoom: hard zoom in + horizontal drift (high-energy shot cadence)
         if shot_index % 4 == 2 and duration <= 6.0:
             animation_type = "action_punch_zoom"
             direction = "punch_in"
             keyframes = [
-                {"time": 0.0, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 0.0},
-                {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.12, "progress": 1.0}
+                {"time": 0.0,      "x": focal_x,     "y": focal_y, "scale": 1.00, "progress": 0.0},
+                {"time": duration, "x": x_drift_end, "y": focal_y, "scale": 1.12, "progress": 1.0}
             ]
-        # Smooth Ken Burns Focus Zoom In / Zoom Out luân phiên (Scale 1.00 <-> 1.10)
-        # Keeps 100% of panel artwork visible at all times with gentle, cinematic continuous motion
+        # Ken Burns 2D: zoom in + drift right (even shots)
         elif shot_index % 2 == 0:
             animation_type = "focal_zoom_in"
             direction = "zoom_in"
             keyframes = [
-                {"time": 0.0, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 0.0},
-                {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.10, "progress": 1.0}
+                {"time": 0.0,      "x": focal_x,     "y": focal_y, "scale": 1.00, "progress": 0.0},
+                {"time": duration, "x": x_drift_end, "y": focal_y, "scale": 1.10, "progress": 1.0}
             ]
+        # Ken Burns 2D: zoom out + counter-drift left (odd shots)
         else:
             animation_type = "focal_zoom_out"
             direction = "zoom_out"
             keyframes = [
-                {"time": 0.0, "x": focal_x, "y": focal_y, "scale": 1.10, "progress": 0.0},
-                {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 1.0}
+                {"time": 0.0,      "x": focal_x,     "y": focal_y, "scale": 1.10, "progress": 0.0},
+                {"time": duration, "x": x_drift_rev, "y": focal_y, "scale": 1.00, "progress": 1.0}
             ]
 
         return {
@@ -1470,7 +1477,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                     or sc < 50
                                     or (bubble_cov > 0.35 and char_p < 50.0)
                                     or bubble_cov > 0.52
-                                    or char_p < 25.0
+                                    or (char_p < 25.0 and not bd.get("is_establishing_shot", False))
                                 )
                             except Exception:
                                 sc, char_p, is_bad = 70, 50.0, False
@@ -1480,7 +1487,11 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     if valid_art:
                         # Check if explicit non-equal priorities were provided by prompt
                         raw_priorities = [float(item[0].get("priority", 1.0)) for item in valid_art]
-                        has_explicit_weights = len(set(raw_priorities)) > 1 or any(p != 1.0 for p in raw_priorities)
+                        # Treat uniformly-equal priorities (e.g. [0.5, 0.5], [1.0, 1.0], [0.33, 0.33, 0.34]) as
+                        # "no explicit weighting" so visual composite re-scoring can pick the hero panel.
+                        # Use max-min range to handle near-equal thirds (0.34 vs 0.33 difference = 0.01).
+                        all_equal = (max(raw_priorities) - min(raw_priorities)) < 0.02
+                        has_explicit_weights = (len(set(raw_priorities)) > 1) and not all_equal
                         
                         if len(valid_art) == 2 and not has_explicit_weights:
                             # Auto Semantic Weighting for 2-panel sequences:
@@ -1559,17 +1570,26 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 elif best_item:
                                     seg_images = [{"page": best_item[0]["page"], "priority": 1.0}]
 
-                # Long-Duration Multi-Image Auto-Donor Injection (v1.9.0):
-                # If segment duration >= 4.8s and only 1 image is assigned, inject high-scoring adjacent donor(s)
-                # to split the shot into 2-3 dynamic sub-shots (achieving 2.5s-4.5s golden pacing).
+                # Long-Duration Multi-Image Auto-Donor Injection (v2.0.0):
+                # Two-pass search strategy:
+                #   Pass 1 (quality-first): ±3 pages, sc >= 45, composite >= 45.0
+                #   Pass 2 (wider fallback): ±8 pages, sc >= 40, composite >= 38.0
+                # Pass 2 only runs when Pass 1 yields no candidates, ensuring quality
+                # donors are preferred while still covering episodes with sparse panels (e.g. Ep5/10).
                 if seg_images and len(seg_images) == 1 and segment_duration >= 4.8:
                     orig_page_idx = int(seg_images[0]["page"]) - 1
-                    best_donors = []
-                    for delta in [1, -1, 2, -2, 3, -3]:
-                        cand_idx = orig_page_idx + delta
-                        if 0 <= cand_idx < len(image_files):
+
+                    def _find_long_dur_donors(deltas, sc_floor, composite_floor):
+                        """Scan candidate pages; return sorted (cand_idx, composite) list."""
+                        donors = []
+                        for delta in deltas:
+                            cand_idx = orig_page_idx + delta
+                            if not (0 <= cand_idx < len(image_files)):
+                                continue
                             cand_page_num = cand_idx + 1
-                            if cand_page_num in recent_displayed_pages[-2:] or cand_page_num == (orig_page_idx + 1) or cand_page_num in global_used_donors:
+                            if (cand_page_num in recent_displayed_pages[-2:]
+                                    or cand_page_num == (orig_page_idx + 1)
+                                    or cand_page_num in global_used_donors):
                                 continue
                             im_path = os.path.join(images_blur_dir, image_files[cand_idx])
                             if not os.path.exists(im_path):
@@ -1579,14 +1599,32 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
                                 char_p = bd.get("character_presence", 0.0)
                                 bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
-                                is_bad = bd.get("is_meaningless", False) or sc < 45 or bubble_cov > 0.45
+                                is_bad = bd.get("is_meaningless", False) or sc < sc_floor or bubble_cov > 0.45
                                 if not is_bad:
                                     composite = sc * 0.60 + char_p * 0.40
-                                    best_donors.append((cand_idx, composite))
+                                    if composite >= composite_floor:
+                                        donors.append((cand_idx, composite))
                             except Exception:
                                 pass
-                    best_donors.sort(key=lambda x: x[1], reverse=True)
-                    if best_donors and best_donors[0][1] >= 45.0:
+                        donors.sort(key=lambda x: x[1], reverse=True)
+                        return donors
+
+                    # Pass 1: strict quality (original behavior)
+                    best_donors = _find_long_dur_donors([1, -1, 2, -2, 3, -3],
+                                                        sc_floor=45, composite_floor=45.0)
+
+                    # Pass 2: wider search only if Pass 1 yielded nothing
+                    if not best_donors:
+                        best_donors = _find_long_dur_donors([4, -4, 5, -5, 6, -6, 7, -7, 8, -8],
+                                                            sc_floor=40, composite_floor=38.0)
+                        if best_donors:
+                            print(f"  [Stage10] LongDur Pass2 donor Seg{s_idx} "
+                                  f"pg{orig_page_idx+1} composite={best_donors[0][1]:.1f}")
+                        else:
+                            print(f"  [Stage10] LongDur Seg{s_idx} pg{orig_page_idx+1} "
+                                  f"dur={segment_duration:.1f}s: no donor in ±8 pages")
+
+                    if best_donors:
                         orig_page = orig_page_idx + 1
                         if segment_duration >= 9.0 and len(best_donors) >= 2:
                             d1 = best_donors[0][0] + 1
@@ -2059,7 +2097,45 @@ class Stage10_EpisodeVideoRendering(BaseStage):
 
             active_idx = 0
             active_sub_idx = 0
-            
+
+            # Episode Intro Title Card (v2.1.0):
+            # Render 2.0s of fade-in frames from black with series + episode text
+            # before the main panel frame loop. PIL text on black canvas, no external fonts.
+            INTRO_DURATION = 2.0
+            INTRO_FADE_SECS = 1.2
+            intro_fps_frames = int(INTRO_DURATION * fps)
+            intro_fade_frames = max(1, int(INTRO_FADE_SECS * fps))
+            comic_title_intro = str(kwargs.get("comic_title", "") or "").upper()
+            episode_num_intro = kwargs.get("episode_num", "")
+
+            if comic_title_intro or episode_num_intro:
+                from PIL import Image as _IntroImg, ImageDraw as _IntroDraw
+                for _fi in range(intro_fps_frames):
+                    if pipe_broken:
+                        break
+                    _alpha = min(1.0, _fi / intro_fade_frames)
+                    _br = int(255 * _alpha)
+                    _br_dim = int(_br * 0.55)
+                    _canvas = np.zeros((1080, 1920, 3), dtype=np.uint8)
+                    _pil_c = _IntroImg.fromarray(_canvas)
+                    _draw = _IntroDraw.Draw(_pil_c)
+                    _col = (_br, _br, _br)
+                    _col_dim = (_br_dim, _br_dim, _br_dim)
+                    if comic_title_intro:
+                        _draw.text((960, 480), comic_title_intro,
+                                   fill=_col, anchor="mm")
+                    _draw.text((960, 516), "\u2500" * 22,
+                               fill=_col_dim, anchor="mm")
+                    if episode_num_intro:
+                        _draw.text((960, 552), f"Episode {episode_num_intro}",
+                                   fill=_col, anchor="mm")
+                    _intro_frame = np.array(_pil_c)
+                    try:
+                        proc.stdin.write(_intro_frame.tobytes())
+                    except (BrokenPipeError, ConnectionAbortedError, OSError):
+                        pipe_broken = True
+                        break
+
             try:
                 for f_idx in range(num_frames):
                     if pipe_broken:
@@ -2369,7 +2445,9 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path,
                     subtitles_enabled, "transcript.srt", fps,
                     min_panel_duration, hard_floor_duration,
-                    force_render=force_render
+                    force_render=force_render,
+                    comic_title=task.comic_title,
+                    episode_num=ep,
                 )
             except Exception as render_error:
                 if not can_recover_ffmpeg_pipe_output(render_error, temp_video_path):
