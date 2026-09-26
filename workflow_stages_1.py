@@ -1531,47 +1531,24 @@ class Stage5_GeminiAutomation(BaseStage):
                     else:
                         page = await local_br_ctx.new_page()
 
-                    if "gemini.google.com" not in page.url:
+                    # Always ensure pristine Gemini app session via direct navigation to /app
+                    try:
+                        await page.goto(vlm_url, wait_until="domcontentloaded", timeout=20000)
+                        await asyncio.sleep(2.0)
+                    except Exception:
                         await local_nm.safe_goto(page, vlm_url, reason=f"Load {vlm_name} ep {ep}", caller=f"Ep_{ep}")
                         await asyncio.sleep(2.0)
-                    else:
-                        # Fast in-tab reset without reloading page
-                        try:
-                            await dismiss_gemini_modals(page)
-                            await page.evaluate("document.querySelectorAll('.cdk-overlay-backdrop').forEach(e => e.remove())")
-                        except Exception:
-                            pass
-                        for ncs in [
-                            "[data-test-id='new-chat-button']",
-                            "button[aria-label*='New chat']",
-                            "button[aria-label*='Cuộc trò chuyện mới']",
-                            "a[href='/app']"
-                        ]:
-                            nc_btn = page.locator(ncs).first
-                            if await nc_btn.count() > 0 and await nc_btn.is_visible():
-                                is_dis = await nc_btn.get_attribute("aria-disabled")
-                                if is_dis == "true":
-                                    break
-                                try:
-                                    await nc_btn.click(force=True, timeout=2000)
-                                    await asyncio.sleep(0.5)
-                                    break
-                                except Exception:
-                                    pass
                     
-                    # Ensure target model (3.8 Flash) is selected and check rate-limit status on this page before prompting
+                    # Ensure page is authenticated and clear any dangling dialogs (preserve .cdk-overlay-container)
                     try:
-                        from app import check_gemini_login_and_limit_status
-                        target_vlm_model = task.payload.get("vlm_model", "3.8 Flash")
-                        status = await check_gemini_login_and_limit_status(page, context, target_model=target_vlm_model)
-                        if status == "limited":
-                            await context.log(f"Cảnh báo: Model {target_vlm_model} đang bị giới hạn, tiếp tục với model mặc định của Gemini Web UI...", "warning", episode=ep)
-                        elif status == "needs_login":
-                            raise Exception(f"Tài khoản chưa đăng nhập Gemini. Tự động xoay vòng sang profile đã đăng nhập khác...")
-                    except Exception as select_err:
-                        if "đăng nhập" in str(select_err):
-                            raise select_err
-                        await context.log(f"Cảnh báo: Không thể kiểm tra/chọn model {target_vlm_model}: {select_err}", "warning", episode=ep)
+                        await page.keyboard.press("Escape")
+                        await page.evaluate("document.querySelectorAll('.cdk-overlay-backdrop, mat-dialog-container').forEach(e => e.remove())")
+                        if "accounts.google.com/InteractiveLogin" in page.url or "accounts.google.com/v3/signin" in page.url:
+                            raise Exception("Tài khoản chưa đăng nhập Gemini. Cần đăng nhập tài khoản Google.")
+                    except Exception as overlay_err:
+                        if "chưa đăng nhập" in str(overlay_err):
+                            raise overlay_err
+                        await context.log(f"Cảnh báo dọn dẹp overlay: {overlay_err}", "warning", episode=ep)
                         
                     nav_time = round(time.time() - nav_start, 1)
 
@@ -1586,74 +1563,56 @@ class Stage5_GeminiAutomation(BaseStage):
                     if not textbox:
                         raise Exception("Không tìm thấy input textbox.")
 
-                    # STEP 2: Upload PDF
-                    # STEP 2: Upload PDF
+                    # Ensure editor and previous attachments are clean
+                    try:
+                        await page.evaluate("""() => {
+                            const el = document.querySelector("div[contenteditable='true']") || document.querySelector("rich-textarea p");
+                            if (el) el.innerText = '';
+                            document.querySelectorAll('gem-attachment').forEach(e => e.remove());
+                        }""")
+                    except Exception:
+                        pass
+
+                    # STEP 2: Upload PDF (Click '+' attach button, target PDF file input)
                     upload_start = time.time()
                     await context.log(f"[Page {page_id}] Tập {ep}: Bắt đầu tải lên PDF...", "info", episode=ep)
                     
-                    upload_success = False
                     try:
                         await dismiss_gemini_modals(page)
-                        attach_button = None
-                        attach_selectors = [
-                            "button[data-testid='file-uploader']",
-                            "button[aria-label='Upload & tools']",
-                            "button[aria-label*='Attach']",
-                            "button[aria-label*='attach']",
-                            "button[aria-label*='Đính kèm']",
-                            "button[aria-label*='đính kèm']",
-                            "button[aria-label*='Upload']",
-                            "button:has-text('+')",
-                        ]
-                        for sel in attach_selectors:
-                            loc = page.locator(sel).first
-                            if await loc.count() > 0 and await loc.is_visible():
-                                attach_button = loc
-                                break
-                        
-                        if attach_button:
+                        attach_btn = page.locator("button[aria-label='Upload & tools'], button[data-testid='file-uploader'], button:has-text('+')").first
+                        if await attach_btn.count() > 0 and await attach_btn.is_visible():
                             try:
-                                await attach_button.click(force=True, timeout=2500)
+                                await attach_btn.click(timeout=3000)
                             except Exception:
-                                pass
-                            await asyncio.sleep(1.0)
+                                await attach_btn.click(force=True)
+                            await asyncio.sleep(0.6)
                         
-                        file_input = page.locator("input[type='file'][accept*='.pdf'], input.hidden-file-input, input[type='file']").first
-                        if await file_input.count() > 0:
-                            await file_input.set_input_files(pdf_path)
-                            upload_success = True
+                        pdf_input = page.locator("input[type='file'][accept*='pdf'], input[type='file']:not([accept*='image'])").first
+                        if await pdf_input.count() == 0:
+                            pdf_input = page.locator("input[type='file']").first
+                        
+                        if await pdf_input.count() > 0:
+                            await pdf_input.set_input_files(pdf_path)
                             await context.log(f"[Page {page_id}] Tập {ep}: Đã tải lên PDF bằng file input thành công.", "info", episode=ep)
+                        else:
+                            raise Exception("Không tìm thấy input[type='file'] trên giao diện Gemini.")
                     except Exception as upload_err:
-                        await context.log(f"[Page {page_id}] Thử tải lên bằng file input thất bại: {upload_err}. Thử fallback...", "warning", episode=ep)
-
-                    if not upload_success:
-                        with open(pdf_path, "rb") as pdf_file:
-                            pdf_base64 = base64.b64encode(pdf_file.read()).decode("utf-8")
-                        await page.evaluate(js_paste_pdf, {
-                            "xpath": textbox_xpath,
-                            "base64Data": pdf_base64,
-                            "fileName": os.path.basename(pdf_path),
-                            "mimeType": "application/pdf"
-                        })
-                        await context.log(f"[Page {page_id}] Tập {ep}: Đã tải lên PDF bằng Clipboard Fallback.", "info", episode=ep)
-                    
-                    await asyncio.sleep(2.0)
-                    upload_time = round(time.time() - upload_start, 1)
+                        raise Exception(f"Tải lên PDF thất bại: {upload_err}")
 
                     # STEP 3: Wait for PDF attachment chip & upload completion
                     await context.log(f"[Page {page_id}] Tập {ep}: Đang kiểm tra trạng thái tải lên của PDF...", "info", episode=ep)
                     attachment_appeared = False
-                    for _ in range(15):
+                    for _ in range(25):
                         if context.cancel_token.is_cancelled():
                             break
-                        chip = page.locator("gem-attachment, .attachment-container, [data-testid*='attachment'], [class*='file-card'], div:has-text('.pdf')").first
+                        chip = page.locator("gem-attachment, [data-testid*='attachment'], .attachment-container, [class*='file-card']").first
                         if await chip.count() > 0:
                             attachment_appeared = True
                             break
                         await asyncio.sleep(1)
 
                     if not attachment_appeared:
-                        await context.log(f"[Page {page_id}] Tập {ep}: Cảnh báo: Chưa phát hiện thẻ attachment sau 15s. Tiếp tục kiểm tra spinner...", "warning", episode=ep)
+                        raise Exception(f"Tập {ep}: Chưa phát hiện thẻ attachment PDF sau 25s. Huỷ lần thử để thử lại sạch sẽ.")
 
                     loader_check_sec = 0
                     while loader_check_sec < 90:
@@ -1671,51 +1630,69 @@ class Stage5_GeminiAutomation(BaseStage):
                             pass
                         break
 
-                    await context.log(f"[Page {page_id}] Tập {ep}: PDF đã tải xong (trạng thái loading biến mất).", "success", episode=ep)
-                    await asyncio.sleep(2.0)
+                    upload_time = round(time.time() - upload_start, 1)
+                    await context.log(f"[Page {page_id}] Tập {ep}: PDF đã tải xong ({upload_time}s).", "success", episode=ep)
+                    await asyncio.sleep(0.5)
 
-                    # STEP 4: Paste Prompt
-                    await textbox.click(force=True)
-                    await textbox.fill(prompt_content)
+                    # STEP 4: Insert Prompt using robust contenteditable insertion (preserving attached PDF chip)
+                    editor = page.locator("div[contenteditable='true'], rich-textarea p, textarea").first
+                    await editor.click(force=True)
+                    await asyncio.sleep(0.5)
+                    await page.evaluate("""(text) => {
+                        const root = document.querySelector("div[contenteditable='true']") || document.querySelector("rich-textarea");
+                        if (root) {
+                            let p = root.querySelector("p");
+                            if (!p) {
+                                p = document.createElement("p");
+                                root.appendChild(p);
+                            }
+                            p.focus();
+                            document.execCommand('insertText', false, text);
+                            if (!p.textContent || !p.textContent.trim()) {
+                                p.textContent = text;
+                                p.dispatchEvent(new Event('input', { bubbles: true }));
+                            }
+                        }
+                    }""", prompt_content)
+                    await asyncio.sleep(0.8)
+
+                    # Verify prompt editor has content without clearing attachments
+                    editor_text = ""
                     try:
-                        await textbox.press_sequentially(" ")
-                        await textbox.press("Backspace")
+                        editor_text = await page.evaluate("""() => {
+                            const root = document.querySelector("div[contenteditable='true']") || document.querySelector("rich-textarea");
+                            return root ? (root.innerText || root.textContent || '') : '';
+                        }""")
                     except Exception:
                         pass
-                    await asyncio.sleep(2.0)
-
-                    # STEP 4: Send Prompt
-                    editor_text = ""
-                    for locator_sel in ["rich-textarea", "div[contenteditable='true']"]:
-                        try:
-                            loc = page.locator(locator_sel).first
-                            if await loc.count() > 0:
-                                txt = await loc.inner_text()
-                                if txt and txt.strip():
-                                    editor_text = txt
-                                    break
-                        except Exception:
-                            pass
-                    if not editor_text:
-                        try:
-                            editor_text = await textbox.input_value()
-                        except Exception:
-                            try:
-                                editor_text = await textbox.inner_text()
-                            except Exception:
-                                editor_text = ""
+                    
                     if not editor_text or not editor_text.strip():
                         raise Exception("Xác thực thất bại: Prompt editor bị trống.")
 
                     # STEP 5: Click Send/Submit!
+                    try:
+                        await page.keyboard.press("Escape")
+                        await page.evaluate("document.querySelectorAll('.cdk-overlay-backdrop, mat-dialog-container').forEach(e => e.remove())")
+                    except Exception:
+                        pass
+
                     send_button = None
                     button_found = False
+                    direct_send_selectors = [
+                        "button[aria-label*='Send']",
+                        "button[aria-label*='Gửi']",
+                        "button[data-testid='send-button']",
+                        "button.send-button",
+                        "div[data-test-id='send-button-container'] button",
+                        "button#composer-submit-button",
+                    ] + send_selectors
+
                     for wait_sec in range(30):  # Chờ tối đa 30 giây để file processing xong và nút Gửi được bật
                         if context.cancel_token.is_cancelled():
                             break
                         
                         target_btn = None
-                        for sel in send_selectors:
+                        for sel in direct_send_selectors:
                             try:
                                 loc = page.locator(sel).first
                                 if await loc.count() > 0 and await loc.is_visible():
@@ -1736,13 +1713,37 @@ class Stage5_GeminiAutomation(BaseStage):
                         await asyncio.sleep(1)
 
                     if send_button:
-                        await send_button.click(force=True)
+                        # Try normal click first for complete event dispatch, with fallback to force
+                        try:
+                            await send_button.click(timeout=3000)
+                        except Exception:
+                            await send_button.click(force=True)
+                        
+                        # Direct JS event dispatch guarantee
+                        try:
+                            await page.evaluate("""() => {
+                                const btn = document.querySelector("button[aria-label*='Send'], button[aria-label*='Gửi'], button[data-testid='send-button'], button.send-button");
+                                if (btn) {
+                                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                                }
+                            }""")
+                        except Exception:
+                            pass
+
                         await context.log(f"[Page {page_id}] Tập {ep}: Đã click nút Gửi.", "success", episode=ep)
                     elif button_found:
                         raise Exception("Nút Gửi vẫn bị tắt (disabled) sau 30 giây chờ xử lý tệp. Bỏ qua để thử lại.")
                     else:
-                        await textbox.press("Control+Enter")
-                        await context.log(f"[Page {page_id}] Tập {ep}: Không tìm thấy nút Gửi, gửi prompt bằng Control+Enter.", "success", episode=ep)
+                        await context.log(f"[Page {page_id}] Tập {ep}: Không tìm thấy nút Gửi qua selector, dispatch phím Enter.", "warning", episode=ep)
+                    
+                    # Keyboard send guarantee: dispatch Control+Enter on editor
+                    await asyncio.sleep(0.3)
+                    try:
+                        if await editor.count() > 0:
+                            await editor.focus()
+                            await page.keyboard.press("Control+Enter")
+                    except Exception:
+                        pass
                     
                     gen_start = time.time()
                     response_text = ""
@@ -2045,6 +2046,11 @@ class Stage5_GeminiAutomation(BaseStage):
                         f"[{local_ctx_id}] [Page {page_id}] Lỗi xử lý tập {ep} (Thử {attempt}/{max_retries}): {e}",
                         "warning", episode=ep
                     )
+                    try:
+                        if page and not page.is_closed():
+                            await page.screenshot(path=f"debug_ep_{ep}_attempt_{attempt}.png")
+                    except Exception:
+                        pass
 
                     failure_text = f"{e}\n{response_text}"
                     should_retry_with_safe_pdf = should_use_safety_fallback(
@@ -2208,6 +2214,11 @@ class Stage5_GeminiAutomation(BaseStage):
 
         if num_workers > 1 and len(episodes_to_process) > 1:
             await context.log(f"Stage 5: Kích hoạt xử lý song song với {num_workers} Chrome Profiles...", "info")
+            try:
+                from app import reset_shared_browser_context
+                await reset_shared_browser_context()
+            except Exception:
+                pass
             pool = ChromeProfilePoolManager.get_instance()
             await pool.initialize(headless=False, custom_profiles=available_profiles[:num_workers], context_logger=context)
 
@@ -2797,7 +2808,7 @@ class Stage2b_IntelligentRepagination(BaseStage):
             def run_detection_and_stitch():
                 from concurrent.futures import ThreadPoolExecutor
                 
-                with ThreadPoolExecutor() as executor:
+                with ThreadPoolExecutor(max_workers=4) as executor:
                     slice_results = list(executor.map(process_single_slice, image_paths))
                     
                 total_height = 0
@@ -3214,14 +3225,20 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 except Exception:
                     pass
                     
-                # Parallel WebP page writes
+                # Thread-safe WebP page writes (Pillow + max_workers=4 prevents Windows heap corruption)
                 from concurrent.futures import ThreadPoolExecutor
+                from PIL import Image
                 def save_webp(task_tuple):
                     path, img = task_tuple
-                    safe_cv2_imwrite(path, img, [cv2.IMWRITE_WEBP_QUALITY, 80])
+                    try:
+                        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        im = Image.fromarray(rgb)
+                        im.save(path, "WEBP", quality=80)
+                    except Exception:
+                        safe_cv2_imwrite(path, img, [cv2.IMWRITE_WEBP_QUALITY, 80])
                     
-                with ThreadPoolExecutor() as executor:
-                    executor.map(save_webp, write_tasks)
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    list(executor.map(save_webp, write_tasks))
                     
                 return skipped_count
                 

@@ -20,6 +20,9 @@ import numpy as np
 from PIL import Image
 
 
+import threading
+
+
 class VisualSemanticScorer:
     """
     Computes deterministic Visual Semantic Score (0-100) for manhwa/comic pages:
@@ -39,6 +42,7 @@ class VisualSemanticScorer:
 
     _detector = None
     _detector_initialized = False
+    _detector_lock = threading.Lock()
     _model_path = os.path.join(os.path.dirname(__file__), "models", "face_detection_yunet_2023mar.onnx")
 
     @classmethod
@@ -73,14 +77,15 @@ class VisualSemanticScorer:
         if img_bgr is None or img_bgr.size == 0:
             return []
         h, w = img_bgr.shape[:2]
-        detector = cls._get_detector(w, h)
-        if detector is None:
-            return []
-        try:
-            _, faces = detector.detect(img_bgr)
-            return list(faces) if faces is not None else []
-        except Exception:
-            return []
+        with cls._detector_lock:
+            detector = cls._get_detector(w, h)
+            if detector is None:
+                return []
+            try:
+                _, faces = detector.detect(img_bgr)
+                return list(faces) if faces is not None else []
+            except Exception:
+                return []
 
     @classmethod
     def calculate_score(
