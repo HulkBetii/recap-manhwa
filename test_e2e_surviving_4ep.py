@@ -112,7 +112,7 @@ async def run_e2e():
             recap_json = os.path.join(ep_dir, "recap.json")
             audio_mp3 = os.path.join(ep_dir, "audio.mp3")
             transcript_srt = os.path.join(ep_dir, "transcript.srt")
-            video_mp4 = os.path.join(ep_dir, f"video_{ep}.mp4") if os.path.exists(os.path.join(ep_dir, f"video_{ep}.mp4")) else os.path.join(ep_dir, "video.mp4")
+            video_mp4 = os.path.join(ep_dir, "video.mp4")
 
             has_recap = os.path.exists(recap_json) and os.path.getsize(recap_json) > 0
             has_audio = os.path.exists(audio_mp3) and os.path.getsize(audio_mp3) > 0

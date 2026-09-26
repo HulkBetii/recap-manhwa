@@ -513,6 +513,36 @@ class WorkflowManager:
                         "success",
                     )
                     continue
+
+                streaming_stages_outputs = {
+                    "Stage 7 - Narration Aggregation": "narration.txt",
+                    "Stage 8 - Local TTS": "audio.mp3",
+                    "Stage 9 - Subtitle Normalization": "transcript.srt",
+                    "Stage 10 - Episode Video Rendering": task.payload.get("video_filename", "video.mp4"),
+                }
+                streaming_enabled = bool(task.payload.get("streaming_pipeline", True))
+                download_dir = task.artifacts.get("download_dir")
+                if streaming_enabled and download_dir and stage.name in streaming_stages_outputs:
+                    target_file = streaming_stages_outputs[stage.name]
+                    from_ep = task.from_episode
+                    to_ep = task.to_episode
+                    all_completed = all(
+                        os.path.isfile(os.path.join(download_dir, f"episode_{ep}", target_file))
+                        and os.path.getsize(os.path.join(download_dir, f"episode_{ep}", target_file)) > 0
+                        for ep in range(from_ep, to_ep + 1)
+                    )
+                    if all_completed:
+                        if stage.name == "Stage 10 - Episode Video Rendering":
+                            folder_name = task.artifacts.get("download_folder_name")
+                            for ep in range(from_ep, to_ep + 1):
+                                task.artifacts.setdefault("final_videos", {})[str(ep)] = f"/downloads/{folder_name}/episode_{ep}/{target_file}"
+                        for s in task.stages:
+                            if s["name"] == stage.name:
+                                s["status"] = StageState.SUCCESS
+                                s["progress"] = 100.0
+                        await context.log(f"Giai đoạn '{stage.name}' đã hoàn thành qua Streaming Pipeline.", "success")
+                        await self.save_and_broadcast("StageCompleted", task)
+                        continue
                 
                 task.current_stage = stage.name
                 for s in task.stages:

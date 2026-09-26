@@ -2188,6 +2188,8 @@ class Stage5_GeminiAutomation(BaseStage):
                                 await context.log(f"Tập {ep}: Tier-2 Fallback Gemini API thành công! Đã tạo recap.json.", "success", episode=ep)
                                 success = True
                                 await context.complete_episode(ep)
+                                if streaming_consumer:
+                                    await streaming_consumer.enqueue_episode(ep)
                     except Exception as api_exc:
                         await context.log(f"Tập {ep}: Tier-2 Fallback API thất bại: {api_exc}", "error", episode=ep)
 
