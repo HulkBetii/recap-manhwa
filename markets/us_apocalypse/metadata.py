@@ -276,6 +276,9 @@ def extract_episode_theme(recap_path: str, ep: int, comic_title: str = "") -> st
         (["tower", "floor", "nightmare", "climb"], "The Tower Trials & Endless Ascent"),
         (["bunker", "shelter", "subterranean"], "Bunker Fortification & Survival Prep"),
         (["dungeon", "gate", "awakening"], "Calamity Gate & Solo Awakening"),
+        (["cannon", "bluff", "scavenger", "corridor"], "Corridor Standoff & The Cannon Bluff"),
+        (["grenade", "lever", "safety", "threat"], "Armed Confrontation & High-Stakes Lever"),
+        (["stalker", "rain", "outpost", "shadow"], "Midnight Rain & Shadow Stalker"),
     ]
 
     lower_speech = full_speech.lower()
@@ -286,7 +289,8 @@ def extract_episode_theme(recap_path: str, ep: int, comic_title: str = "") -> st
     # Fallback: clean action phrase
     first_sent = re.split(r"[.!?]", full_speech)[0].strip()
     first_sent = re.sub(r"^(while|as|spotting|even with|with|after)\s+[^,]+,\s*", "", first_sent, flags=re.IGNORECASE)
-    first_sent = re.sub(r"^(south|he|they|she|the hero|the survivor)\s+(watches|scrambles|lunges|braces|realizes|slices|slams|freezes|frantically|doesn\'t waste|doesn\'t hesitate)\s+[^,\.]*?(?:as|when|that|to)?\s*", "", first_sent, flags=re.IGNORECASE)
+    first_sent = re.sub(r"^(south|he|they|she|the hero|the survivor|[a-z]+-?[a-z]*)\s+(watches|scrambles|lunges|braces|realizes|slices|slams|freezes|frantically|doesn\'t waste|doesn\'t hesitate|locks|lets|steps|dashes)\s+[^,\.]*?(?:as|when|that|to)?\s*", "", first_sent, flags=re.IGNORECASE)
+    first_sent = re.sub(r"[,:;]+$", "", first_sent).strip()
     words = first_sent.split()
     if 2 <= len(words) <= 7:
         clean_theme = " ".join(words).title()
@@ -294,7 +298,9 @@ def extract_episode_theme(recap_path: str, ep: int, comic_title: str = "") -> st
         clean_theme = " ".join(words[:6]).title()
     else:
         clean_theme = f"Chapter {ep}"
-    clean_theme = re.sub(r"[^a-zA-Z0-9\s\-–—\':,]", "", clean_theme).strip()
+    clean_theme = re.sub(r"[^a-zA-Z0-9\s\-–—\':]", "", clean_theme).strip()
+    # Strip dangling trailing prepositions/articles/conjunctions
+    clean_theme = re.sub(r"\s+(?:On|At|To|In|Of|For|With|From|As|By|The|A|An|And|Or|So|Than)$", "", clean_theme, flags=re.IGNORECASE).strip()
     return clean_theme if len(clean_theme) > 3 else f"Chapter {ep}"
 
 
@@ -466,6 +472,7 @@ def build_narrative_story_chapters(
         num_arcs = 1
 
     result = []
+    used_themes = set()
     for k in range(num_arcs):
         start_idx = round(k * total_eps / num_arcs)
         end_idx = min(total_eps - 1, round((k + 1) * total_eps / num_arcs) - 1)
@@ -489,8 +496,15 @@ def build_narrative_story_chapters(
             if custom_theme and (custom_theme.lower().startswith("chapter") or custom_theme.lower().startswith("episode")):
                 custom_theme = None
 
-        chosen_theme = custom_theme if custom_theme else base_theme
+        chosen_theme = custom_theme if (custom_theme and custom_theme not in used_themes) else base_theme
+        if chosen_theme in used_themes:
+            # Pick first unused theme from progression list
+            for cand in prog_list:
+                if cand not in used_themes:
+                    chosen_theme = cand
+                    break
 
+        used_themes.add(chosen_theme)
         ep_label = f"Ep {start_ep}" if start_ep == end_ep else f"Ep {start_ep}–{end_ep}"
         title = f"{chosen_theme} ({ep_label})"
 
