@@ -34,6 +34,19 @@ from moderation_utils import (
 logger = logging.getLogger(__name__)
 
 
+def safe_cv2_imread(file_path: str, flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
+    """Unicode-safe cv2.imread for Windows environments."""
+    if not file_path or not os.path.exists(file_path):
+        return None
+    try:
+        return cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), flags)
+    except Exception:
+        try:
+            return cv2.imread(file_path, flags)
+        except Exception:
+            return None
+
+
 def is_ffmpeg_pipe_closed_error(error: BaseException) -> bool:
     return (
         isinstance(error, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError))
@@ -1448,7 +1461,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             if not os.path.exists(im_path):
                                 im_path = os.path.join(images_pdf_dir, image_files[p_idx])
                             try:
-                                im_bgr = cv2.imread(im_path)
+                                im_bgr = safe_cv2_imread(im_path)
                                 sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
                                 bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
                                 char_p = bd.get("character_presence", 0.0)
@@ -1512,7 +1525,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                     if not os.path.exists(im_path):
                                         im_path = os.path.join(images_pdf_dir, image_files[candidate])
                                     try:
-                                        im_bgr = cv2.imread(im_path)
+                                        im_bgr = safe_cv2_imread(im_path)
                                         sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
                                         char_p = bd.get("character_presence", 0.0)
                                         bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
@@ -1562,7 +1575,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             if not os.path.exists(im_path):
                                 im_path = os.path.join(images_pdf_dir, image_files[cand_idx])
                             try:
-                                im_bgr = cv2.imread(im_path)
+                                im_bgr = safe_cv2_imread(im_path)
                                 sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
                                 char_p = bd.get("character_presence", 0.0)
                                 bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
@@ -1601,7 +1614,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             if not os.path.exists(im_p):
                                 im_p = os.path.join(images_pdf_dir, image_files[p_num])
                             try:
-                                im_mat = cv2.imread(im_p)
+                                im_mat = safe_cv2_imread(im_p)
                                 sc, bd = VisualSemanticScorer.calculate_score(im_mat)
                                 char_p = bd.get("character_presence", 0.0)
                                 bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
@@ -2038,7 +2051,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     src_p = os.path.join(images_pdf_dir, f_name)
                 if os.path.exists(src_p):
                     try:
-                        im_test = cv2.imread(src_p, cv2.IMREAD_GRAYSCALE)
+                        im_test = safe_cv2_imread(src_p, cv2.IMREAD_GRAYSCALE)
                         if im_test is not None:
                             lum_map[f_name] = float(np.mean(im_test))
                     except Exception:
