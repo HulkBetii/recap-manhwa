@@ -1571,13 +1571,17 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 elif best_item:
                                     seg_images = [{"page": best_item[0]["page"], "priority": 1.0}]
 
-                # Long-Duration Multi-Image Auto-Donor Injection (v2.0.0):
+                # Long-Duration Multi-Image Auto-Donor Injection (v2.1.0):
                 # Two-pass search strategy:
                 #   Pass 1 (quality-first): ±3 pages, sc >= 45, composite >= 45.0
                 #   Pass 2 (wider fallback): ±8 pages, sc >= 40, composite >= 38.0
-                # Pass 2 only runs when Pass 1 yields no candidates, ensuring quality
-                # donors are preferred while still covering episodes with sparse panels (e.g. Ep5/10).
-                if seg_images and len(seg_images) == 1 and segment_duration >= 4.8:
+                # Threshold lowered from 4.8s → 4.0s (MIN_SUB_DURATION=2.0s × 2 shots)
+                # to capture clone_andrew TTS segments averaging 3.8–4.2s.
+                # Injected images are tagged _is_donor=True so the pacing guardrail
+                # can apply a lenient 2.0s sub-floor instead of 3.5s.
+                MIN_SUB_DURATION = 2.0   # minimum sub-shot duration for donor cutaways
+                INJECT_FLOOR = 2 * MIN_SUB_DURATION  # 4.0s trigger
+                if seg_images and len(seg_images) == 1 and segment_duration >= INJECT_FLOOR:
                     orig_page_idx = int(seg_images[0]["page"]) - 1
 
                     def _find_long_dur_donors(deltas, sc_floor, composite_floor):
@@ -1600,7 +1604,15 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
                                 char_p = bd.get("character_presence", 0.0)
                                 bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
-                                is_bad = bd.get("is_meaningless", False) or sc < sc_floor or bubble_cov > 0.45
+                                # "Talking face" panels (clear face + char_p high) are valid donors
+                                # even if bubble_cov > 0.45. Hard cap: bubble > 0.60 is always bad.
+                                has_clear_face = char_p >= 55.0 and not bd.get("is_meaningless", False)
+                                is_bad = (
+                                    bd.get("is_meaningless", False)
+                                    or sc < sc_floor
+                                    or (bubble_cov > 0.45 and not has_clear_face)
+                                    or bubble_cov > 0.60
+                                )
                                 if not is_bad:
                                     composite = sc * 0.60 + char_p * 0.40
                                     if composite >= composite_floor:
@@ -1633,17 +1645,24 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             global_used_donors.add(d1)
                             global_used_donors.add(d2)
                             seq = sorted([orig_page, d1, d2])
-                            seg_images = [{"page": p, "priority": 1.0/3.0} for p in seq]
+                            seg_images = [{"page": p, "priority": 1.0/3.0, "_is_donor": True} for p in seq]
                         else:
                             d1 = best_donors[0][0] + 1
                             global_used_donors.add(d1)
                             seq = sorted([orig_page, d1])
-                            seg_images = [{"page": p, "priority": 0.5} for p in seq]
+                            seg_images = [{"page": p, "priority": 0.5, "_is_donor": True} for p in seq]
 
-                # Cinematic Pacing Guardrail & Dynamic Hero Image Selector (Industry Standard >= 3.5s):
-                # If a segment is too short for multiple images, keep only the highest-scoring Hero Image(s).
-                if seg_images and len(seg_images) > 1 and (segment_duration / len(seg_images)) < min_panel_duration:
-                    max_allowed = max(1, int(segment_duration // min_panel_duration))
+                # Cinematic Pacing Guardrail & Dynamic Hero Image Selector:
+                # For normal multi-image segments: min sub-shot = min_panel_duration (3.5s).
+                # For donor-injected sequences: min sub-shot = MIN_SUB_DURATION (2.0s) — these
+                # are cinematic cutaway shots and don't need the full 3.5s display window.
+                _is_donor_sequence = (
+                    seg_images and len(seg_images) > 1
+                    and all(img.get("_is_donor") for img in seg_images)
+                )
+                _effective_floor = 2.0 if _is_donor_sequence else min_panel_duration
+                if seg_images and len(seg_images) > 1 and (segment_duration / len(seg_images)) < _effective_floor:
+                    max_allowed = max(1, int(segment_duration // _effective_floor))
 
                     def candidate_hero_score(img_dict):
                         p_num = int(img_dict.get("page", 1)) - 1

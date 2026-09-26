@@ -319,7 +319,9 @@ class VisualSemanticScorer:
             or (h < 400 and (void_ratio > 0.65 or art_color_ratio < 0.20) and skin_ratio < 0.02)
         )
         is_mostly_bubble = (
-            (bubble_coverage_ratio > 0.40 and skin_ratio < 0.03)
+            # First condition: pure text-only panels (no face, no skin) with heavy bubble coverage.
+            # num_faces == 0 guard ensures "talking head" panels are never marked as bubble-junk.
+            (bubble_coverage_ratio > 0.40 and skin_ratio < 0.03 and num_faces == 0)
             or (bubble_coverage_ratio > 0.35 and character_presence < 25.0)
             or (bubble_coverage_ratio > 0.55 and visual_detail < 30.0)
         )
