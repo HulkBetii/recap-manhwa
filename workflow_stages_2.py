@@ -2533,18 +2533,6 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             os.replace(temp_video_path, output_video_path)
             cache.commit(stage="video", fingerprint=fingerprint, outputs=[output_video_path])
 
-            # Auto-generate high-quality YouTube thumbnail from best-scoring panel
-            try:
-                _generate_episode_thumbnail(
-                    images_blur_dir=images_blur_dir,
-                    image_files=image_files,
-                    ep_dir=ep_dir,
-                    ffmpeg_exe=ffmpeg_exe,
-                    video_path=output_video_path,
-                )
-            except Exception as thumb_err:
-                await context.log(f"Tập {ep}: Lưu ý tạo thumbnail: {thumb_err}", "info")
-
             if "final_videos" not in task.artifacts:
                 task.artifacts["final_videos"] = {}
             task.artifacts["final_videos"][str(ep)] = f"/downloads/{task.artifacts.get('download_folder_name')}/episode_{ep}/{video_filename}"
@@ -2567,61 +2555,6 @@ class Stage10_EpisodeVideoRendering(BaseStage):
         tasks = [sem_render(ep) for ep in range(from_ep, to_ep + 1)]
         results = await asyncio.gather(*tasks)
         return all(results)
-
-
-def _generate_episode_thumbnail(
-    images_blur_dir: str,
-    image_files: list,
-    ep_dir: str,
-    ffmpeg_exe: str,
-    video_path: str,
-) -> Optional[str]:
-    """
-    Selects the best-scoring panel from the episode and exports a high-quality JPEG thumbnail.
-    Tries ffmpeg extraction at t=3.0s (after intro title card); falls back to highest-composite panel.
-    """
-    thumbnail_path = os.path.join(ep_dir, "thumbnail.jpg")
-    try:
-        best_score = -1.0
-        best_file_idx = 0
-        from visual_scorer import VisualSemanticScorer
-
-        for i, fname in enumerate(image_files):
-            path = os.path.join(images_blur_dir, fname)
-            img = safe_cv2_imread(path)
-            if img is None:
-                continue
-            sc, bd = VisualSemanticScorer.calculate_score(img)
-            char_p = bd.get("character_presence", 0.0)
-            composite = sc * 0.60 + char_p * 0.40
-            if composite > best_score:
-                best_score = composite
-                best_file_idx = i
-
-        # 1. Attempt extracting 1 frame at t=3.0s from rendered video
-        if ffmpeg_exe and os.path.isfile(video_path) and os.path.getsize(video_path) > 0:
-            try:
-                cmd = [
-                    ffmpeg_exe, "-y", "-ss", "3.0", "-i", video_path,
-                    "-vframes", "1", "-q:v", "2", thumbnail_path
-                ]
-                subprocess.run(cmd, capture_output=True, timeout=10)
-            except Exception:
-                pass
-
-        # 2. Fallback: Save direct clean panel image
-        if not os.path.exists(thumbnail_path) or os.path.getsize(thumbnail_path) == 0:
-            if 0 <= best_file_idx < len(image_files):
-                best_path = os.path.join(images_blur_dir, image_files[best_file_idx])
-                best_mat = safe_cv2_imread(best_path)
-                if best_mat is not None:
-                    cv2.imwrite(thumbnail_path, best_mat, [cv2.IMWRITE_JPEG_QUALITY, 95])
-
-        if os.path.exists(thumbnail_path) and os.path.getsize(thumbnail_path) > 0:
-            return thumbnail_path
-    except Exception:
-        pass
-    return None
 
 
 def get_video_duration(video_path: str, ffmpeg_exe: str) -> float:
