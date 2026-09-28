@@ -28,30 +28,75 @@ def get_us_apocalypse_prompt(
         except Exception:
             glossary = "No glossary provided."
 
+    confirmed_protagonist_name = ""
+    confirmed_protagonist_gender = "Male"
+    if previous_context:
+        p_name = str(previous_context.get("protagonist_name", "")).strip()
+        if p_name and len(p_name) > 2 and p_name.upper() not in ["MC", "HERO", "GUY", "BOY", "GIRL", "THE LONE SURVIVOR"]:
+            confirmed_protagonist_name = p_name
+        p_gender = previous_context.get("protagonist_gender")
+        if p_gender and p_gender != "auto":
+            confirmed_protagonist_gender = str(p_gender).capitalize()
+
+    example_protagonist_name = confirmed_protagonist_name or "the survivor"
+
     if ep == 1:
         ip_guidance = []
         if previous_context:
-            p_name = str(previous_context.get("protagonist_name", "")).strip()
-            if p_name and len(p_name) > 2 and p_name.upper() not in ["MC", "HERO", "GUY", "BOY", "GIRL"]:
-                ip_guidance.append(f'- CONFIRMED PROTAGONIST NAME: "{p_name}" (You MUST explicitly introduce "{p_name}" in Segment 1 or 2!).')
+            if confirmed_protagonist_name:
+                ip_guidance.append(f'- CONFIRMED PROTAGONIST NAME: "{confirmed_protagonist_name}" (You MUST explicitly introduce "{confirmed_protagonist_name}" in Segment 1 or 2!).')
             u_hook = previous_context.get("unique_hook") or previous_context.get("setting")
             if u_hook:
                 ip_guidance.append(f'- IP CONTEXT & HOOK ELEMENT: "{u_hook}" (Weave this specific apocalypse crisis into the opening hook!).')
         
         ip_guidance_text = ("\n" + "\n".join(ip_guidance)) if ip_guidance else ""
 
+        if confirmed_protagonist_name:
+            identity_box = f"""
+============================================================
+CONFIRMED PROTAGONIST IDENTITY:
+Name: {confirmed_protagonist_name}
+Gender: {confirmed_protagonist_gender}
+
+RULE:
+This identity is authoritative.
+Never replace this name using examples, visual guessing, or fictional placeholder names.
+You MUST explicitly introduce "{confirmed_protagonist_name}" in Segment 1 or 2!
+============================================================
+"""
+        else:
+            identity_box = """
+- PROTAGONIST NAME IDENTIFICATION:
+  * Identify the protagonist's actual name from the comic pages (e.g. dialogue, character status window, subtitles).
+  * Never invent or copy placeholder names from examples if no name is shown.
+"""
+
         intro_rule = f"""
 EPISODE 1 HIGH-RETENTION HOOK (0-15s GOLDEN HOOK RULE):
 The very first output line MUST be an explosive, high-retention opening hook that grabs the viewer's undivided attention and prevents immediate drop-off.
-- PROTAGONIST NAME IDENTIFICATION & ANCHORING (CRITICAL):
-  * Identify the protagonist's actual name from the comic pages (e.g. dialogue, character status window, subtitles, or title, such as 'Paran', 'Jinwoo', etc.).
-  * The opening hook (Segment 1 or 2, 0-15s) MUST explicitly introduce the protagonist by their actual name so the audience immediately bonds with the main character.
-  * NEVER leave the audience guessing who the protagonist is.{ip_guidance_text}
-- Hook Formula: [Shocking Crisis / Insane Prepper Paradox] + [Protagonist Name] + [Hidden Spatial Ability / Ruthless Retaliation / High Stakes Reveal]
+{identity_box}
+{ip_guidance_text}
+
+CHARACTER-FIRST OPENING OVERRIDE (CRITICAL FOR RETENTION):
+For Episode 1:
+The first narration segment MUST establish the protagonist's perspective.
+Even if the opening comic pages (Pages 1-5) depict only:
+- city destruction / smoke / rubble
+- panicked civilians fleeing
+- military collapse / gunfire
+- environmental disaster
+
+You MUST narrate the event through the protagonist's survival lens from Line 1!
+Required: Segment 1 or Segment 2 (0-15s) must communicate:
+1. Who is the protagonist? ({confirmed_protagonist_name or 'The protagonist'})
+2. What immediate danger exists?
+3. Why should the audience follow this person?
+
+- Hook Formula: [{confirmed_protagonist_name or 'Protagonist'}] + [Apocalypse Threat] + [Personal Survival Reaction]
 - Examples of Top US Apocalypse Hooks:
-  * "Everyone called Paran a lunatic for spending billions hoarding 100,000 tons of food—until the global ice age hit and the world froze to minus one hundred degrees."
-  * "Betrayed and left to freeze by his own family in his past life, Paran wakes up thirty days before the apocalypse with an infinite dimensional warehouse."
-  * "When the asteroid crashed and toxic spores turned humanity into mindless zombies, they laughed at Paran's survival bunker—until they were begging at his door."
+  * "Everyone called {example_protagonist_name} a lunatic for spending billions hoarding 100,000 tons of food—until the global ice age hit and the world froze to minus one hundred degrees."
+  * "Betrayed and left to freeze by his own family in his past life, {example_protagonist_name} wakes up thirty days before the apocalypse with an infinite dimensional warehouse."
+  * "When the asteroid crashed and toxic spores turned humanity into mindless zombies, they laughed at {example_protagonist_name}'s survival bunker—until they were begging at his door."
 - Zero throat-clearing: NEVER start with greetings ('Welcome', 'Today we are watching', 'Hello guys').
 - Make it punchy, cinematic, and under 25 words.
 """
@@ -279,10 +324,10 @@ FORMAT REQUIREMENTS:
 - Every line MUST end with .#
 
 SCRIPT EXAMPLE:
-1 - Everyone laughed at Paran for spending twenty years fortifying an underground bunker, but the second the doomsday sirens blare, he's the only one smiling.#
-[2:75%, 3:25%] - Panic instantly tears through the metropolis as mutated beasts rupture the pavement, but Paran doesn't even blink—he's rehearsed this moment thousands of times.#
-5 - While frantic civilians scramble for expired rations, our boy calmly leans back in his blast shelter, sipping hot coffee from his endless dimensional stockpile.#
-[8, 9] - His treacherous former crush shows up at his doorstep crying crocodile tears for shelter, but he doesn't hesitate to slam the reinforced blast door right in her face.#
-14 - A gang of cocky raiders attempts to breach his perimeter, only to be instantly dispatched by automated turrets before they can even finish their demands.#
+1 - Everyone laughed at {example_protagonist_name} for spending twenty years fortifying an underground bunker, but the second the doomsday sirens blare, he's the only one smiling.#
+[2:75%, 3:25%] - Panic instantly tears through the metropolis as mutated beasts rupture the pavement, but {example_protagonist_name} doesn't even blink—he's rehearsed this moment thousands of times.#
+5 - While frantic civilians scramble for expired rations, {example_protagonist_name} calmly leans back in the blast shelter, sipping hot coffee from an endless dimensional stockpile.#
+[8, 9] - A treacherous former acquaintance shows up at the doorstep crying crocodile tears for shelter, but {example_protagonist_name} doesn't hesitate to slam the reinforced blast door right in her face.#
+14 - A gang of cocky raiders attempts to breach the perimeter, only to be instantly dispatched by automated turrets before they can even finish their demands.#
 30 - But just as he settles in to enjoy his peace, an ominous crimson system alert flashes across his vision, warning him that the true catastrophe has only begun.#
 """

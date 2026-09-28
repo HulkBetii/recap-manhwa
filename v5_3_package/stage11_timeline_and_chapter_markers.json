@@ -1,0 +1,2582 @@
+{
+  "comic_title": "Zombie Revelation: 82-08",
+  "description": "Consolidated Stage 11 timeline segments, scene timestamps, and Stage 12 chapter markers.",
+  "master_video_outputs": {
+    "final_video_mp4": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\output\\좀비묵시록_8208_1_143_en_946016ec.mp4",
+    "final_timeline_srt": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\output\\좀비묵시록_8208_1_143_en_946016ec.srt"
+  },
+  "chapter_markers": {
+    "episodes_1_5_video_timeline": [
+      {
+        "episode": 1,
+        "timestamp": "00:00",
+        "title": "Episode 1",
+        "duration_seconds": 200.8
+      },
+      {
+        "episode": 2,
+        "timestamp": "03:20",
+        "title": "Episode 2",
+        "duration_seconds": 172.95
+      },
+      {
+        "episode": 3,
+        "timestamp": "06:13",
+        "title": "Episode 3",
+        "duration_seconds": 167.17
+      },
+      {
+        "episode": 4,
+        "timestamp": "09:00",
+        "title": "Episode 4",
+        "duration_seconds": 124.18
+      },
+      {
+        "episode": 5,
+        "timestamp": "11:05",
+        "title": "Episode 5",
+        "duration_seconds": 454.09
+      }
+    ],
+    "series_143_arc_milestones": [
+      {
+        "timestamp": "00:00",
+        "title": "The Outbreak & Grounded Survival Lens (Ep 1–14)",
+        "episode_range": "1-14",
+        "start_episode": 1,
+        "end_episode": 14
+      },
+      {
+        "timestamp": "01:32:56",
+        "title": "Tae Roars The Execution Signal (Ep 15–29)",
+        "episode_range": "15-29",
+        "start_episode": 15,
+        "end_episode": 29
+      },
+      {
+        "timestamp": "03:16:04",
+        "title": "Tae Spots Panicked Survivors Clamoring (Ep 30–43)",
+        "episode_range": "30-43",
+        "start_episode": 30,
+        "end_episode": 43
+      },
+      {
+        "timestamp": "04:39:58",
+        "title": "Tae Plants His Feet (Ep 44–57)",
+        "episode_range": "44-57",
+        "start_episode": 44,
+        "end_episode": 57
+      },
+      {
+        "timestamp": "06:01:33",
+        "title": "Tae Keeps That Frosty Gaze Locked (Ep 58–72)",
+        "episode_range": "58-72",
+        "start_episode": 58,
+        "end_episode": 72
+      },
+      {
+        "timestamp": "07:24:31",
+        "title": "Tae Stares In Utter Disbelief (Ep 73–86)",
+        "episode_range": "73-86",
+        "start_episode": 73,
+        "end_episode": 86
+      },
+      {
+        "timestamp": "08:26:02",
+        "title": "Tae Pulls The Trigger Point-Blank (Ep 87–100)",
+        "episode_range": "87-100",
+        "start_episode": 87,
+        "end_episode": 100
+      },
+      {
+        "timestamp": "09:34:00",
+        "title": "Tae Evaluates The Situation (Ep 101–114)",
+        "episode_range": "101-114",
+        "start_episode": 101,
+        "end_episode": 114
+      },
+      {
+        "timestamp": "10:40:16",
+        "title": "Security Checkpoint Lock Down (Ep 115–129)",
+        "episode_range": "115-129",
+        "start_episode": 115,
+        "end_episode": 129
+      },
+      {
+        "timestamp": "11:54:50",
+        "title": "The Final Defense Operation (Ep 130–143)",
+        "episode_range": "130-143",
+        "start_episode": 130,
+        "end_episode": 143
+      }
+    ]
+  },
+  "episodes_timeline_segments": {
+    "episode_1": {
+      "episode": 1,
+      "total_scenes": 36,
+      "video_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_1\\video.mp4",
+      "scenes": [
+        {
+          "scene_index": 1,
+          "timing": "00:00:00,000 --> 00:00:05,340",
+          "start_seconds": 0.0,
+          "end_seconds": 5.34,
+          "duration_seconds": 5.34,
+          "pages_used": [
+            1
+          ],
+          "narration_speech": "When the apocalypse turns Seoul into a feral meat grinder, Tae knows screaming won't save anyone."
+        },
+        {
+          "scene_index": 2,
+          "timing": "00:00:05,920 --> 00:00:11,980",
+          "start_seconds": 5.92,
+          "end_seconds": 11.98,
+          "duration_seconds": 6.06,
+          "pages_used": [
+            3
+          ],
+          "narration_speech": "Emergency broadcasts spew hollow reassurances while entire districts collapse into fiery, lawless chaos."
+        },
+        {
+          "scene_index": 3,
+          "timing": "00:00:13,060 --> 00:00:18,320",
+          "start_seconds": 13.06,
+          "end_seconds": 18.32,
+          "duration_seconds": 5.26,
+          "pages_used": [
+            4,
+            5
+          ],
+          "narration_speech": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+        },
+        {
+          "scene_index": 4,
+          "timing": "00:00:18,680 --> 00:00:24,340",
+          "start_seconds": 18.68,
+          "end_seconds": 24.34,
+          "duration_seconds": 5.66,
+          "pages_used": [
+            6
+          ],
+          "narration_speech": "A victim desperately fights back, but brute feral strength easily overpowers standard human resistance."
+        },
+        {
+          "scene_index": 5,
+          "timing": "00:00:25,140 --> 00:00:30,300",
+          "start_seconds": 25.14,
+          "end_seconds": 30.3,
+          "duration_seconds": 5.16,
+          "pages_used": [
+            7
+          ],
+          "narration_speech": "Bloodshot eyes and gaping jaws confirm civilization ended before lunch even arrived."
+        },
+        {
+          "scene_index": 6,
+          "timing": "00:00:30,900 --> 00:00:35,360",
+          "start_seconds": 30.9,
+          "end_seconds": 35.36,
+          "duration_seconds": 4.46,
+          "pages_used": [
+            8
+          ],
+          "narration_speech": "An endless swarm charges down the asphalt like a tidal wave of nightmare fuel."
+        },
+        {
+          "scene_index": 7,
+          "timing": "00:00:35,780 --> 00:00:40,160",
+          "start_seconds": 35.78,
+          "end_seconds": 40.16,
+          "duration_seconds": 4.38,
+          "pages_used": [
+            9
+          ],
+          "narration_speech": "State announcements urge everyone to lock their doors and wait for miracles that aren't coming."
+        },
+        {
+          "scene_index": 8,
+          "timing": "00:00:41,160 --> 00:00:46,340",
+          "start_seconds": 41.16,
+          "end_seconds": 46.34,
+          "duration_seconds": 5.18,
+          "pages_used": [
+            10,
+            11
+          ],
+          "narration_speech": "Across the shattered skyline, plumes of black smoke mark where organized resistance crumbled."
+        },
+        {
+          "scene_index": 9,
+          "timing": "00:00:47,120 --> 00:00:52,940",
+          "start_seconds": 47.12,
+          "end_seconds": 52.94,
+          "duration_seconds": 5.82,
+          "pages_used": [
+            12
+          ],
+          "narration_speech": "Military checkpoints collapse under crushing hordes faster than command can issue fresh orders."
+        },
+        {
+          "scene_index": 10,
+          "timing": "00:00:53,360 --> 00:00:58,940",
+          "start_seconds": 53.36,
+          "end_seconds": 58.94,
+          "duration_seconds": 5.58,
+          "pages_used": [
+            13,
+            14
+          ],
+          "narration_speech": "High-caliber rounds tear through the frontline beasts, yet the swarm pushes relentlessly forward."
+        },
+        {
+          "scene_index": 11,
+          "timing": "00:00:59,520 --> 00:01:04,880",
+          "start_seconds": 59.52,
+          "end_seconds": 64.88,
+          "duration_seconds": 5.36,
+          "pages_used": [
+            15
+          ],
+          "narration_speech": "Desperate squad leaders scream for headshots into radios that nobody is answering anymore."
+        },
+        {
+          "scene_index": 12,
+          "timing": "00:01:05,580 --> 00:01:10,240",
+          "start_seconds": 65.58,
+          "end_seconds": 70.24,
+          "duration_seconds": 4.66,
+          "pages_used": [
+            16
+          ],
+          "narration_speech": "Heavy fire chews up the pavement, cutting down waves without slowing the main tide."
+        },
+        {
+          "scene_index": 13,
+          "timing": "00:01:10,620 --> 00:01:14,980",
+          "start_seconds": 70.62,
+          "end_seconds": 74.98,
+          "duration_seconds": 4.36,
+          "pages_used": [
+            17
+          ],
+          "narration_speech": "Piercing shrieks rip through the cordons as more infected barrel into point-blank range."
+        },
+        {
+          "scene_index": 14,
+          "timing": "00:01:15,600 --> 00:01:20,380",
+          "start_seconds": 75.6,
+          "end_seconds": 80.38,
+          "duration_seconds": 4.78,
+          "pages_used": [
+            19
+          ],
+          "narration_speech": "Rabid monstrosities shrug off flesh wounds, driven purely by the urge to consume."
+        },
+        {
+          "scene_index": 15,
+          "timing": "00:01:21,200 --> 00:01:25,420",
+          "start_seconds": 81.2,
+          "end_seconds": 85.42,
+          "duration_seconds": 4.22,
+          "pages_used": [
+            20
+          ],
+          "narration_speech": "Tae casually sparks up a lighter, watching the chaos with ice in his veins."
+        },
+        {
+          "scene_index": 16,
+          "timing": "00:01:25,920 --> 00:01:30,280",
+          "start_seconds": 85.92,
+          "end_seconds": 90.28,
+          "duration_seconds": 4.36,
+          "pages_used": [
+            21,
+            22
+          ],
+          "narration_speech": "Golden flames flicker as he leans back against the wall, utterly unfazed by the apocalypse."
+        },
+        {
+          "scene_index": 17,
+          "timing": "00:01:31,180 --> 00:01:36,120",
+          "start_seconds": 91.18,
+          "end_seconds": 96.12,
+          "duration_seconds": 4.94,
+          "pages_used": [
+            23
+          ],
+          "narration_speech": "Outside, society drowns in madness; here, he takes a slow, steady drag."
+        },
+        {
+          "scene_index": 18,
+          "timing": "00:01:36,900 --> 00:01:41,160",
+          "start_seconds": 96.9,
+          "end_seconds": 101.16,
+          "duration_seconds": 4.26,
+          "pages_used": [
+            26
+          ],
+          "narration_speech": "Stepping out onto the bloodstained floor, he observes the carnage with pure disgust."
+        },
+        {
+          "scene_index": 19,
+          "timing": "00:01:41,400 --> 00:01:46,020",
+          "start_seconds": 101.4,
+          "end_seconds": 106.02,
+          "duration_seconds": 4.62,
+          "pages_used": [
+            27
+          ],
+          "narration_speech": "Cold, calculating eyes scan the alleyway, daring any creature to sprint forward."
+        },
+        {
+          "scene_index": 20,
+          "timing": "00:01:46,580 --> 00:01:51,060",
+          "start_seconds": 106.58,
+          "end_seconds": 111.06,
+          "duration_seconds": 4.48,
+          "pages_used": [
+            28
+          ],
+          "narration_speech": "He issues a blunt ultimatum: attack all at once, or stop wasting his time."
+        },
+        {
+          "scene_index": 21,
+          "timing": "00:01:51,700 --> 00:01:56,660",
+          "start_seconds": 111.7,
+          "end_seconds": 116.66,
+          "duration_seconds": 4.96,
+          "pages_used": [
+            29
+          ],
+          "narration_speech": "A survivor swings desperately at charging beasts, struggling to buy another precious second."
+        },
+        {
+          "scene_index": 22,
+          "timing": "00:01:56,900 --> 00:02:02,060",
+          "start_seconds": 116.9,
+          "end_seconds": 122.06,
+          "duration_seconds": 5.16,
+          "pages_used": [
+            30
+          ],
+          "narration_speech": "Teeth clenched and knuckles white, every swing is fueled by raw survival adrenaline."
+        },
+        {
+          "scene_index": 23,
+          "timing": "00:02:02,800 --> 00:02:06,800",
+          "start_seconds": 122.8,
+          "end_seconds": 126.8,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            31
+          ],
+          "narration_speech": "The blunt weapon crashes down with everything the defender has left in reserve."
+        },
+        {
+          "scene_index": 24,
+          "timing": "00:02:07,200 --> 00:02:12,020",
+          "start_seconds": 127.2,
+          "end_seconds": 132.02,
+          "duration_seconds": 4.82,
+          "pages_used": [
+            32,
+            33
+          ],
+          "narration_speech": "Bone fractures on impact, unleashing a furious blast of dust and splintered wood."
+        },
+        {
+          "scene_index": 25,
+          "timing": "00:02:12,380 --> 00:02:16,700",
+          "start_seconds": 132.38,
+          "end_seconds": 136.7,
+          "duration_seconds": 4.32,
+          "pages_used": [
+            34
+          ],
+          "narration_speech": "Swept off balance in the narrow corridor, the defender tumbles into lethal danger."
+        },
+        {
+          "scene_index": 26,
+          "timing": "00:02:17,420 --> 00:02:22,300",
+          "start_seconds": 137.42,
+          "end_seconds": 142.3,
+          "duration_seconds": 4.88,
+          "pages_used": [
+            35
+          ],
+          "narration_speech": "He scrambles backward across the floor, clutching his weapon as shadows loom above."
+        },
+        {
+          "scene_index": 27,
+          "timing": "00:02:22,700 --> 00:02:27,980",
+          "start_seconds": 142.7,
+          "end_seconds": 147.98,
+          "duration_seconds": 5.28,
+          "pages_used": [
+            37
+          ],
+          "narration_speech": "From behind the barricade, steel mesh is the only fragile barrier keeping predators out."
+        },
+        {
+          "scene_index": 28,
+          "timing": "00:02:28,400 --> 00:02:33,380",
+          "start_seconds": 148.4,
+          "end_seconds": 153.38,
+          "duration_seconds": 4.98,
+          "pages_used": [
+            38
+          ],
+          "narration_speech": "Tae and his companions peer down from the catwalk, coolly assessing the struggling stranger."
+        },
+        {
+          "scene_index": 29,
+          "timing": "00:02:34,000 --> 00:02:38,900",
+          "start_seconds": 154.0,
+          "end_seconds": 158.9,
+          "duration_seconds": 4.9,
+          "pages_used": [
+            39,
+            40
+          ],
+          "narration_speech": "Rapid gunfire rattles the hallway, punching clean through charging infected heads."
+        },
+        {
+          "scene_index": 30,
+          "timing": "00:02:39,600 --> 00:02:44,900",
+          "start_seconds": 159.6,
+          "end_seconds": 164.9,
+          "duration_seconds": 5.3,
+          "pages_used": [
+            41
+          ],
+          "narration_speech": "A ghoul collapses instantly onto the concrete, snuffed out mid-stride by lethal precision."
+        },
+        {
+          "scene_index": 31,
+          "timing": "00:02:45,280 --> 00:02:50,260",
+          "start_seconds": 165.28,
+          "end_seconds": 170.26,
+          "duration_seconds": 4.98,
+          "pages_used": [
+            42
+          ],
+          "narration_speech": "Lowering a smoking sidearm, an armed survivor secures the perimeter with ruthless focus."
+        },
+        {
+          "scene_index": 32,
+          "timing": "00:02:50,860 --> 00:02:55,300",
+          "start_seconds": 170.86,
+          "end_seconds": 175.3,
+          "duration_seconds": 4.44,
+          "pages_used": [
+            43
+          ],
+          "narration_speech": "Sweat drips down furrowed brows as the reality of endless swarms sinks deep."
+        },
+        {
+          "scene_index": 33,
+          "timing": "00:02:56,000 --> 00:03:00,780",
+          "start_seconds": 176.0,
+          "end_seconds": 180.78,
+          "duration_seconds": 4.78,
+          "pages_used": [
+            44
+          ],
+          "narration_speech": "Another twitching corpse hits the tiles, neutralized before its claws can strike flesh."
+        },
+        {
+          "scene_index": 34,
+          "timing": "00:03:01,240 --> 00:03:05,900",
+          "start_seconds": 181.24,
+          "end_seconds": 185.9,
+          "duration_seconds": 4.66,
+          "pages_used": [
+            46
+          ],
+          "narration_speech": "Scanning the bloody staircase, the gunman catches his breath and reloads without hesitation."
+        },
+        {
+          "scene_index": 35,
+          "timing": "00:03:06,800 --> 00:03:12,620",
+          "start_seconds": 186.8,
+          "end_seconds": 192.62,
+          "duration_seconds": 5.82,
+          "pages_used": [
+            47,
+            48
+          ],
+          "narration_speech": "Tae approaches with steady, measured footsteps, silently evaluating the newcomer's survival grit."
+        },
+        {
+          "scene_index": 36,
+          "timing": "00:03:13,200 --> 00:03:19,680",
+          "start_seconds": 193.2,
+          "end_seconds": 199.68,
+          "duration_seconds": 6.48,
+          "pages_used": [
+            49,
+            50
+          ],
+          "narration_speech": "Locked eyes exchange unspoken respect—because in this new world, hesitation guarantees an instant grave."
+        }
+      ]
+    },
+    "episode_2": {
+      "episode": 2,
+      "total_scenes": 32,
+      "video_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_2\\video.mp4",
+      "scenes": [
+        {
+          "scene_index": 1,
+          "timing": "00:00:00,000 --> 00:00:05,360",
+          "start_seconds": 0.0,
+          "end_seconds": 5.36,
+          "duration_seconds": 5.36,
+          "pages_used": [
+            4
+          ],
+          "narration_speech": "Tae breaks that deadlocked gaze, calmly raising his hands as intelligence agents search him."
+        },
+        {
+          "scene_index": 2,
+          "timing": "00:00:05,880 --> 00:00:10,960",
+          "start_seconds": 5.88,
+          "end_seconds": 10.96,
+          "duration_seconds": 5.08,
+          "pages_used": [
+            6
+          ],
+          "narration_speech": "Shadows slice across his face, harboring zero fear of the heavy brass waiting inside."
+        },
+        {
+          "scene_index": 3,
+          "timing": "00:00:11,740 --> 00:00:16,020",
+          "start_seconds": 11.74,
+          "end_seconds": 16.02,
+          "duration_seconds": 4.28,
+          "pages_used": [
+            8
+          ],
+          "narration_speech": "Cold sweat drips down the director's jaw before the emergency briefing even begins."
+        },
+        {
+          "scene_index": 4,
+          "timing": "00:00:16,620 --> 00:00:22,300",
+          "start_seconds": 16.62,
+          "end_seconds": 22.3,
+          "duration_seconds": 5.68,
+          "pages_used": [
+            9
+          ],
+          "narration_speech": "The chief presidential advisor watches silently, calculating every possible national disaster."
+        },
+        {
+          "scene_index": 5,
+          "timing": "00:00:22,940 --> 00:00:28,400",
+          "start_seconds": 22.94,
+          "end_seconds": 28.4,
+          "duration_seconds": 5.46,
+          "pages_used": [
+            11
+          ],
+          "narration_speech": "At the head sits the kingmaker himself, demanding absolute results from this classified meeting."
+        },
+        {
+          "scene_index": 6,
+          "timing": "00:00:29,120 --> 00:00:33,940",
+          "start_seconds": 29.12,
+          "end_seconds": 33.94,
+          "duration_seconds": 4.82,
+          "pages_used": [
+            12
+          ],
+          "narration_speech": "Facing the nation's shadow rulers would make any ordinary man fold under the pressure."
+        },
+        {
+          "scene_index": 7,
+          "timing": "00:00:34,380 --> 00:00:39,000",
+          "start_seconds": 34.38,
+          "end_seconds": 39.0,
+          "duration_seconds": 4.62,
+          "pages_used": [
+            13
+          ],
+          "narration_speech": "\"Let's begin,\" the agent announces, cutting through the suffocating tension in the room."
+        },
+        {
+          "scene_index": 8,
+          "timing": "00:00:39,580 --> 00:00:44,420",
+          "start_seconds": 39.58,
+          "end_seconds": 44.42,
+          "duration_seconds": 4.84,
+          "pages_used": [
+            15
+          ],
+          "narration_speech": "Adjusting his glasses, the presenter prepares to reveal classified doomsday footage."
+        },
+        {
+          "scene_index": 9,
+          "timing": "00:00:45,040 --> 00:00:50,620",
+          "start_seconds": 45.04,
+          "end_seconds": 50.62,
+          "duration_seconds": 5.58,
+          "pages_used": [
+            17
+          ],
+          "narration_speech": "Bodycam footage from a quarantined coastal patrol vessel flickers onto the primary display."
+        },
+        {
+          "scene_index": 10,
+          "timing": "00:00:51,220 --> 00:00:56,040",
+          "start_seconds": 51.22,
+          "end_seconds": 56.04,
+          "duration_seconds": 4.82,
+          "pages_used": [
+            19
+          ],
+          "narration_speech": "Panic instantly grips the general's face as chaotic gunfire echoes through the speakers."
+        },
+        {
+          "scene_index": 11,
+          "timing": "00:00:56,760 --> 00:01:00,760",
+          "start_seconds": 56.76,
+          "end_seconds": 60.76,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            21
+          ],
+          "narration_speech": "The shadow elites leap from their seats in sheer disbelief at the footage."
+        },
+        {
+          "scene_index": 12,
+          "timing": "00:01:01,020 --> 00:01:06,420",
+          "start_seconds": 61.02,
+          "end_seconds": 66.42,
+          "duration_seconds": 5.4,
+          "pages_used": [
+            23
+          ],
+          "narration_speech": "On-screen, a grotesque abomination confirms the arrival of Project 82-08."
+        },
+        {
+          "scene_index": 13,
+          "timing": "00:01:06,720 --> 00:01:12,840",
+          "start_seconds": 66.72,
+          "end_seconds": 72.84,
+          "duration_seconds": 6.12,
+          "pages_used": [
+            25
+          ],
+          "narration_speech": "Outside, Seoul basks in oblivious afternoon peace right outside a bustling barbecue restaurant."
+        },
+        {
+          "scene_index": 14,
+          "timing": "00:01:13,300 --> 00:01:18,620",
+          "start_seconds": 73.3,
+          "end_seconds": 78.62,
+          "duration_seconds": 5.32,
+          "pages_used": [
+            27
+          ],
+          "narration_speech": "The dining hall roars with lively laughter, completely unaware that doomsday is already knocking."
+        },
+        {
+          "scene_index": 15,
+          "timing": "00:01:19,320 --> 00:01:24,800",
+          "start_seconds": 79.32,
+          "end_seconds": 84.8,
+          "duration_seconds": 5.48,
+          "pages_used": [
+            28
+          ],
+          "narration_speech": "An urgent news bulletin flashes a massive explosion on the Russian border, ignored by everyone."
+        },
+        {
+          "scene_index": 16,
+          "timing": "00:01:25,440 --> 00:01:30,700",
+          "start_seconds": 85.44,
+          "end_seconds": 90.7,
+          "duration_seconds": 5.26,
+          "pages_used": [
+            30
+          ],
+          "narration_speech": "Tae pours drinks for his childhood crew, celebrating their buddy's mandatory military enlistment."
+        },
+        {
+          "scene_index": 17,
+          "timing": "00:01:31,140 --> 00:01:36,460",
+          "start_seconds": 91.14,
+          "end_seconds": 96.46,
+          "duration_seconds": 5.32,
+          "pages_used": [
+            32
+          ],
+          "narration_speech": "Nearby, a gang of rowdy, tattooed mobsters noisily takes over the restaurant floor."
+        },
+        {
+          "scene_index": 18,
+          "timing": "00:01:36,940 --> 00:01:40,940",
+          "start_seconds": 96.94,
+          "end_seconds": 100.94,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            33
+          ],
+          "narration_speech": "Their obnoxious shouting immediately grinds on everyone's last nerve."
+        },
+        {
+          "scene_index": 19,
+          "timing": "00:01:41,280 --> 00:01:45,900",
+          "start_seconds": 101.28,
+          "end_seconds": 105.9,
+          "duration_seconds": 4.62,
+          "pages_used": [
+            35
+          ],
+          "narration_speech": "The future recruit grins, stuffing his face before harsh army rations take over."
+        },
+        {
+          "scene_index": 20,
+          "timing": "00:01:46,400 --> 00:01:51,840",
+          "start_seconds": 106.4,
+          "end_seconds": 111.84,
+          "duration_seconds": 5.44,
+          "pages_used": [
+            36
+          ],
+          "narration_speech": "Tactical composure means picking your battles—and loud thugs aren't worth the hassle yet."
+        },
+        {
+          "scene_index": 21,
+          "timing": "00:01:51,840 --> 00:01:56,160",
+          "start_seconds": 111.84,
+          "end_seconds": 116.16,
+          "duration_seconds": 4.32,
+          "pages_used": [
+            38
+          ],
+          "narration_speech": "Good times with true brothers won't last much longer in this doomed world."
+        },
+        {
+          "scene_index": 22,
+          "timing": "00:01:56,460 --> 00:02:01,280",
+          "start_seconds": 116.46,
+          "end_seconds": 121.28,
+          "duration_seconds": 4.82,
+          "pages_used": [
+            39
+          ],
+          "narration_speech": "The crew devours the sizzling feast like ravenous beasts before reality hits."
+        },
+        {
+          "scene_index": 23,
+          "timing": "00:02:01,860 --> 00:02:06,940",
+          "start_seconds": 121.86,
+          "end_seconds": 126.94,
+          "duration_seconds": 5.08,
+          "pages_used": [
+            40
+          ],
+          "narration_speech": "Meanwhile, pop idols dance across the television screen, lighting up the lively dining hall."
+        },
+        {
+          "scene_index": 24,
+          "timing": "00:02:07,460 --> 00:02:11,780",
+          "start_seconds": 127.46,
+          "end_seconds": 131.78,
+          "duration_seconds": 4.32,
+          "pages_used": [
+            41
+          ],
+          "narration_speech": "Heated debates erupt across the table over who commands the best stage presence."
+        },
+        {
+          "scene_index": 25,
+          "timing": "00:02:12,200 --> 00:02:16,880",
+          "start_seconds": 132.2,
+          "end_seconds": 136.88,
+          "duration_seconds": 4.68,
+          "pages_used": [
+            43
+          ],
+          "narration_speech": "Tae merely laughs along, soaking in these precious final moments of civilian normalcy."
+        },
+        {
+          "scene_index": 26,
+          "timing": "00:02:17,600 --> 00:02:22,720",
+          "start_seconds": 137.6,
+          "end_seconds": 142.72,
+          "duration_seconds": 5.12,
+          "pages_used": [
+            45
+          ],
+          "narration_speech": "A radiant smile lights up the room, cherishing loyal friendship before everything burns."
+        },
+        {
+          "scene_index": 27,
+          "timing": "00:02:23,580 --> 00:02:27,640",
+          "start_seconds": 143.58,
+          "end_seconds": 147.64,
+          "duration_seconds": 4.06,
+          "pages_used": [
+            47
+          ],
+          "narration_speech": "Across the floor, a spilled drink triggers an explosive gangster tantrum."
+        },
+        {
+          "scene_index": 28,
+          "timing": "00:02:28,040 --> 00:02:33,320",
+          "start_seconds": 148.04,
+          "end_seconds": 153.32,
+          "duration_seconds": 5.28,
+          "pages_used": [
+            49
+          ],
+          "narration_speech": "A terrified waitress bows repeatedly, offering to cover every single dry cleaning fee."
+        },
+        {
+          "scene_index": 29,
+          "timing": "00:02:33,840 --> 00:02:38,440",
+          "start_seconds": 153.84,
+          "end_seconds": 158.44,
+          "duration_seconds": 4.6,
+          "pages_used": [
+            51
+          ],
+          "narration_speech": "The bald raider licks his lips with predatory entitlement, cornering the helpless worker."
+        },
+        {
+          "scene_index": 30,
+          "timing": "00:02:38,960 --> 00:02:43,520",
+          "start_seconds": 158.96,
+          "end_seconds": 163.52,
+          "duration_seconds": 4.56,
+          "pages_used": [
+            52
+          ],
+          "narration_speech": "He forcibly grabs her wrist, demanding she sit down and pay emotional damages."
+        },
+        {
+          "scene_index": 31,
+          "timing": "00:02:43,520 --> 00:02:47,520",
+          "start_seconds": 163.52,
+          "end_seconds": 167.52,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            54
+          ],
+          "narration_speech": "Tae steps in and grips the brute's wrist, daring him to push his luck."
+        },
+        {
+          "scene_index": 32,
+          "timing": "00:02:48,340 --> 00:02:52,340",
+          "start_seconds": 168.34,
+          "end_seconds": 172.34,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            56
+          ],
+          "narration_speech": "\"Back off before this gets ugly,\" he warns with chilling, deadpan calm."
+        }
+      ]
+    },
+    "episode_3": {
+      "episode": 3,
+      "total_scenes": 33,
+      "video_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_3\\video.mp4",
+      "scenes": [
+        {
+          "scene_index": 1,
+          "timing": "00:00:00,000 --> 00:00:06,000",
+          "start_seconds": 0.0,
+          "end_seconds": 6.0,
+          "duration_seconds": 6.0,
+          "pages_used": [
+            2
+          ],
+          "narration_speech": "Tae warned that disaster strikes unseen, beginning with a derelict vessel cutting through black waves."
+        },
+        {
+          "scene_index": 2,
+          "timing": "00:00:06,640 --> 00:00:11,760",
+          "start_seconds": 6.64,
+          "end_seconds": 11.76,
+          "duration_seconds": 5.12,
+          "pages_used": [
+            6
+          ],
+          "narration_speech": "The coast guard patrol spots the silent drift, completely oblivious to what's lurking aboard."
+        },
+        {
+          "scene_index": 3,
+          "timing": "00:00:12,440 --> 00:00:18,280",
+          "start_seconds": 12.44,
+          "end_seconds": 18.28,
+          "duration_seconds": 5.84,
+          "pages_used": [
+            7
+          ],
+          "narration_speech": "Protocol demands an immediate search, sending four unsuspecting men straight into the lion's den."
+        },
+        {
+          "scene_index": 4,
+          "timing": "00:00:18,700 --> 00:00:23,480",
+          "start_seconds": 18.7,
+          "end_seconds": 23.48,
+          "duration_seconds": 4.78,
+          "pages_used": [
+            10
+          ],
+          "narration_speech": "Tactical flashlights sweep over the eerie deck, reporting dead silence to command."
+        },
+        {
+          "scene_index": 5,
+          "timing": "00:00:24,320 --> 00:00:28,580",
+          "start_seconds": 24.32,
+          "end_seconds": 28.58,
+          "duration_seconds": 4.26,
+          "pages_used": [
+            14
+          ],
+          "narration_speech": "Complaining about the humid night shift, one officer casually peels off his helmet."
+        },
+        {
+          "scene_index": 6,
+          "timing": "00:00:28,580 --> 00:00:34,560",
+          "start_seconds": 28.58,
+          "end_seconds": 34.56,
+          "duration_seconds": 5.98,
+          "pages_used": [
+            18
+          ],
+          "narration_speech": "Peering down the dark cargo hatch, his casual attitude instantly vanishes into pure terror."
+        },
+        {
+          "scene_index": 7,
+          "timing": "00:00:35,040 --> 00:00:39,500",
+          "start_seconds": 35.04,
+          "end_seconds": 39.5,
+          "duration_seconds": 4.46,
+          "pages_used": [
+            20
+          ],
+          "narration_speech": "Bloodcurdling screams erupt below deck, echoing straight across the open water."
+        },
+        {
+          "scene_index": 8,
+          "timing": "00:00:40,080 --> 00:00:44,860",
+          "start_seconds": 40.08,
+          "end_seconds": 44.86,
+          "duration_seconds": 4.78,
+          "pages_used": [
+            21
+          ],
+          "narration_speech": "The backup squad rushes forward, desperately calling out into the shadowed abyss."
+        },
+        {
+          "scene_index": 9,
+          "timing": "00:00:45,400 --> 00:00:50,260",
+          "start_seconds": 45.4,
+          "end_seconds": 50.26,
+          "duration_seconds": 4.86,
+          "pages_used": [
+            22
+          ],
+          "narration_speech": "They heave their screaming comrade back up, struggling against terrifying dead weight."
+        },
+        {
+          "scene_index": 10,
+          "timing": "00:00:50,760 --> 00:00:54,760",
+          "start_seconds": 50.76,
+          "end_seconds": 54.76,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            24
+          ],
+          "narration_speech": "But the sight waiting for them freezes the entire team in total disbelief."
+        },
+        {
+          "scene_index": 11,
+          "timing": "00:00:54,760 --> 00:00:59,680",
+          "start_seconds": 54.76,
+          "end_seconds": 59.68,
+          "duration_seconds": 4.92,
+          "pages_used": [
+            26
+          ],
+          "narration_speech": "An unspeakable abomination has locked its jaws firmly onto their squad leader's face."
+        },
+        {
+          "scene_index": 12,
+          "timing": "00:01:00,400 --> 00:01:04,920",
+          "start_seconds": 60.4,
+          "end_seconds": 64.92,
+          "duration_seconds": 4.52,
+          "pages_used": [
+            27
+          ],
+          "narration_speech": "Fangs dig deep into flesh, refusing to detach no matter how hard they pull."
+        },
+        {
+          "scene_index": 13,
+          "timing": "00:01:05,360 --> 00:01:09,760",
+          "start_seconds": 65.36,
+          "end_seconds": 69.76,
+          "duration_seconds": 4.4,
+          "pages_used": [
+            28
+          ],
+          "narration_speech": "Grabbing a tactical hatchet, one furious officer winds up for a brutal strike."
+        },
+        {
+          "scene_index": 14,
+          "timing": "00:01:10,160 --> 00:01:14,160",
+          "start_seconds": 70.16,
+          "end_seconds": 74.16,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            29
+          ],
+          "narration_speech": "He buries the steel blade into the beast's skull with ruthless force."
+        },
+        {
+          "scene_index": 15,
+          "timing": "00:01:14,300 --> 00:01:18,300",
+          "start_seconds": 74.3,
+          "end_seconds": 78.3,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            30
+          ],
+          "narration_speech": "The monster crashes against the deck, seemingly dispatched for good."
+        },
+        {
+          "scene_index": 16,
+          "timing": "00:01:18,460 --> 00:01:23,620",
+          "start_seconds": 78.46,
+          "end_seconds": 83.62,
+          "duration_seconds": 5.16,
+          "pages_used": [
+            32
+          ],
+          "narration_speech": "Sergeant Kim collapses clutching his mutilated face, howling in agonizing pain."
+        },
+        {
+          "scene_index": 17,
+          "timing": "00:01:23,620 --> 00:01:28,920",
+          "start_seconds": 83.62,
+          "end_seconds": 88.92,
+          "duration_seconds": 5.3,
+          "pages_used": [
+            33
+          ],
+          "narration_speech": "Ragged breathing and torn skin—the squad scrambles frantically to stem the bleeding."
+        },
+        {
+          "scene_index": 18,
+          "timing": "00:01:29,500 --> 00:01:33,500",
+          "start_seconds": 89.5,
+          "end_seconds": 93.5,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            36
+          ],
+          "narration_speech": "But the mangled creature twitches, baring crimson teeth back at them."
+        },
+        {
+          "scene_index": 19,
+          "timing": "00:01:33,860 --> 00:01:39,120",
+          "start_seconds": 93.86,
+          "end_seconds": 99.12,
+          "duration_seconds": 5.26,
+          "pages_used": [
+            39
+          ],
+          "narration_speech": "A terrified officer freezes, staring directly into the glowing eyes of absolute insanity."
+        },
+        {
+          "scene_index": 20,
+          "timing": "00:01:39,480 --> 00:01:43,820",
+          "start_seconds": 99.48,
+          "end_seconds": 103.82,
+          "duration_seconds": 4.34,
+          "pages_used": [
+            41
+          ],
+          "narration_speech": "It unleashes an ungodly shriek, defying every law of basic human biology."
+        },
+        {
+          "scene_index": 21,
+          "timing": "00:01:44,700 --> 00:01:49,620",
+          "start_seconds": 104.7,
+          "end_seconds": 109.62,
+          "duration_seconds": 4.92,
+          "pages_used": [
+            42
+          ],
+          "narration_speech": "Twisted, muscular limbs propel the abomination forward at terrifying predatory speed."
+        },
+        {
+          "scene_index": 22,
+          "timing": "00:01:49,620 --> 00:01:53,760",
+          "start_seconds": 109.62,
+          "end_seconds": 113.76,
+          "duration_seconds": 4.14,
+          "pages_used": [
+            43
+          ],
+          "narration_speech": "It lunges straight for their throats with mindless, ravenous fury."
+        },
+        {
+          "scene_index": 23,
+          "timing": "00:01:54,280 --> 00:01:58,280",
+          "start_seconds": 114.28,
+          "end_seconds": 118.28,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            45
+          ],
+          "narration_speech": "A deafening gunshot rings out, tearing right through the ghoul's skull."
+        },
+        {
+          "scene_index": 24,
+          "timing": "00:01:58,340 --> 00:02:02,340",
+          "start_seconds": 118.34,
+          "end_seconds": 122.34,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            46
+          ],
+          "narration_speech": "The young officer stares in dazed shock at the smoking barrel."
+        },
+        {
+          "scene_index": 25,
+          "timing": "00:02:02,340 --> 00:02:06,560",
+          "start_seconds": 122.34,
+          "end_seconds": 126.56,
+          "duration_seconds": 4.22,
+          "pages_used": [
+            47
+          ],
+          "narration_speech": "The grotesque body drops motionless onto the deck plates, leaking dark fluid."
+        },
+        {
+          "scene_index": 26,
+          "timing": "00:02:06,960 --> 00:02:11,000",
+          "start_seconds": 126.96,
+          "end_seconds": 131.0,
+          "duration_seconds": 4.04,
+          "pages_used": [
+            49
+          ],
+          "narration_speech": "They check in with trembling voices, thinking the nightmare has finally ended."
+        },
+        {
+          "scene_index": 27,
+          "timing": "00:02:11,540 --> 00:02:16,660",
+          "start_seconds": 131.54,
+          "end_seconds": 136.66,
+          "duration_seconds": 5.12,
+          "pages_used": [
+            50
+          ],
+          "narration_speech": "Command receives a frantic radio report about unauthorized live rounds on deck."
+        },
+        {
+          "scene_index": 28,
+          "timing": "00:02:17,220 --> 00:02:22,120",
+          "start_seconds": 137.22,
+          "end_seconds": 142.12,
+          "duration_seconds": 4.9,
+          "pages_used": [
+            52
+          ],
+          "narration_speech": "Meanwhile, their injured sergeant continues groaning while clutching his shredded face."
+        },
+        {
+          "scene_index": 29,
+          "timing": "00:02:22,620 --> 00:02:27,020",
+          "start_seconds": 142.62,
+          "end_seconds": 147.02,
+          "duration_seconds": 4.4,
+          "pages_used": [
+            53
+          ],
+          "narration_speech": "They call for immediate medical extraction, reaching out to steady their commander."
+        },
+        {
+          "scene_index": 30,
+          "timing": "00:02:27,520 --> 00:02:32,200",
+          "start_seconds": 147.52,
+          "end_seconds": 152.2,
+          "duration_seconds": 4.68,
+          "pages_used": [
+            54
+          ],
+          "narration_speech": "But the moment their hands touch, the sergeant's glazed eyes snap open."
+        },
+        {
+          "scene_index": 31,
+          "timing": "00:02:32,560 --> 00:02:36,560",
+          "start_seconds": 152.56,
+          "end_seconds": 156.56,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            55
+          ],
+          "narration_speech": "Milky pupils roll forward as a demonic howl ruptures from his throat."
+        },
+        {
+          "scene_index": 32,
+          "timing": "00:02:36,920 --> 00:02:41,400",
+          "start_seconds": 156.92,
+          "end_seconds": 161.4,
+          "duration_seconds": 4.48,
+          "pages_used": [
+            56
+          ],
+          "narration_speech": "Body camera footage captures the exact second their trusted leader turns rabid."
+        },
+        {
+          "scene_index": 33,
+          "timing": "00:02:42,220 --> 00:02:46,800",
+          "start_seconds": 162.22,
+          "end_seconds": 166.8,
+          "duration_seconds": 4.58,
+          "pages_used": [
+            58
+          ],
+          "narration_speech": "His fangs sink deep into a crewmate, spreading the relentless contagion instantly."
+        }
+      ]
+    },
+    "episode_4": {
+      "episode": 4,
+      "total_scenes": 24,
+      "video_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_4\\video.mp4",
+      "scenes": [
+        {
+          "scene_index": 1,
+          "timing": "00:00:00,000 --> 00:00:06,240",
+          "start_seconds": 0.0,
+          "end_seconds": 6.24,
+          "duration_seconds": 6.24,
+          "pages_used": [
+            3
+          ],
+          "narration_speech": "While that feral infection rips through the ship, Tae clings to peaceful memories before hell broke loose."
+        },
+        {
+          "scene_index": 2,
+          "timing": "00:00:06,940 --> 00:00:11,360",
+          "start_seconds": 6.94,
+          "end_seconds": 11.36,
+          "duration_seconds": 4.42,
+          "pages_used": [
+            4,
+            5
+          ],
+          "narration_speech": "Back when brawling over lunch money was the worst problem anyone had to deal with."
+        },
+        {
+          "scene_index": 3,
+          "timing": "00:00:11,960 --> 00:00:17,940",
+          "start_seconds": 11.96,
+          "end_seconds": 17.94,
+          "duration_seconds": 5.98,
+          "pages_used": [
+            6,
+            7
+          ],
+          "narration_speech": "Sitting alone inside quiet barracks, reminiscing about simpler times before civilization collapsed."
+        },
+        {
+          "scene_index": 4,
+          "timing": "00:00:18,400 --> 00:00:22,920",
+          "start_seconds": 18.4,
+          "end_seconds": 22.92,
+          "duration_seconds": 4.52,
+          "pages_used": [
+            9
+          ],
+          "narration_speech": "A swimsuit pinup taped beside his desk. Peak military luxury right there."
+        },
+        {
+          "scene_index": 5,
+          "timing": "00:00:23,440 --> 00:00:28,000",
+          "start_seconds": 23.44,
+          "end_seconds": 28.0,
+          "duration_seconds": 4.56,
+          "pages_used": [
+            10
+          ],
+          "narration_speech": "Staring through rain-streaked glass, he senses the calm world will not last."
+        },
+        {
+          "scene_index": 6,
+          "timing": "00:00:28,000 --> 00:00:33,140",
+          "start_seconds": 28.0,
+          "end_seconds": 33.14,
+          "duration_seconds": 5.14,
+          "pages_used": [
+            11
+          ],
+          "narration_speech": "Far away from Tae's base, a heavily armored vault transport races through the stormy darkness."
+        },
+        {
+          "scene_index": 7,
+          "timing": "00:00:33,660 --> 00:00:38,400",
+          "start_seconds": 33.66,
+          "end_seconds": 38.4,
+          "duration_seconds": 4.74,
+          "pages_used": [
+            12
+          ],
+          "narration_speech": "The escort driver feels an unnatural shudder beneath the chassis. That is never good."
+        },
+        {
+          "scene_index": 8,
+          "timing": "00:00:39,020 --> 00:00:43,580",
+          "start_seconds": 39.02,
+          "end_seconds": 43.58,
+          "duration_seconds": 4.56,
+          "pages_used": [
+            13,
+            14
+          ],
+          "narration_speech": "Stepping out into the downpour, his flashlight beam catches a massive spike trap."
+        },
+        {
+          "scene_index": 9,
+          "timing": "00:00:44,080 --> 00:00:48,080",
+          "start_seconds": 44.08,
+          "end_seconds": 48.08,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            15
+          ],
+          "narration_speech": "He frantically keys his radio, but cold static is the only answer."
+        },
+        {
+          "scene_index": 10,
+          "timing": "00:00:48,120 --> 00:00:52,220",
+          "start_seconds": 48.12,
+          "end_seconds": 52.22,
+          "duration_seconds": 4.1,
+          "pages_used": [
+            16,
+            17
+          ],
+          "narration_speech": "A brutal blunt strike shatters his skull, dropping him instantly onto the asphalt."
+        },
+        {
+          "scene_index": 11,
+          "timing": "00:00:53,140 --> 00:00:57,560",
+          "start_seconds": 53.14,
+          "end_seconds": 57.56,
+          "duration_seconds": 4.42,
+          "pages_used": [
+            20
+          ],
+          "narration_speech": "Headlights slice through the darkness as a dozen armed syndicate vehicles box them in."
+        },
+        {
+          "scene_index": 12,
+          "timing": "00:00:57,560 --> 00:01:02,580",
+          "start_seconds": 57.56,
+          "end_seconds": 62.58,
+          "duration_seconds": 5.02,
+          "pages_used": [
+            21,
+            22
+          ],
+          "narration_speech": "The mob enforcer steps forward, calmly ordering his goons to eliminate all witnesses."
+        },
+        {
+          "scene_index": 13,
+          "timing": "00:01:03,240 --> 00:01:05,560",
+          "start_seconds": 63.24,
+          "end_seconds": 65.56,
+          "duration_seconds": 2.32,
+          "pages_used": [
+            23
+          ],
+          "narration_speech": "No negotiations. Zero mercy."
+        },
+        {
+          "scene_index": 14,
+          "timing": "00:01:05,920 --> 00:01:11,960",
+          "start_seconds": 65.92,
+          "end_seconds": 71.96,
+          "duration_seconds": 6.04,
+          "pages_used": [
+            24,
+            25
+          ],
+          "narration_speech": "Grinning raiders brandish nail-studded clubs, storming the stranded escort convoy like ravenous dogs."
+        },
+        {
+          "scene_index": 15,
+          "timing": "00:01:12,660 --> 00:01:17,480",
+          "start_seconds": 72.66,
+          "end_seconds": 77.48,
+          "duration_seconds": 4.82,
+          "pages_used": [
+            26,
+            27
+          ],
+          "narration_speech": "A wooden bat obliterates the driver window, smashing the defenseless agent backward."
+        },
+        {
+          "scene_index": 16,
+          "timing": "00:01:18,000 --> 00:01:22,600",
+          "start_seconds": 78.0,
+          "end_seconds": 82.6,
+          "duration_seconds": 4.6,
+          "pages_used": [
+            28,
+            29
+          ],
+          "narration_speech": "The escorts scramble to deploy, but get overwhelmed and beaten down immediately."
+        },
+        {
+          "scene_index": 17,
+          "timing": "00:01:23,080 --> 00:01:29,100",
+          "start_seconds": 83.08,
+          "end_seconds": 89.1,
+          "duration_seconds": 6.02,
+          "pages_used": [
+            30,
+            31
+          ],
+          "narration_speech": "Striking every vital nerve cluster with surgical savagery—these are not amateur street thugs."
+        },
+        {
+          "scene_index": 18,
+          "timing": "00:01:29,480 --> 00:01:34,820",
+          "start_seconds": 89.48,
+          "end_seconds": 94.82,
+          "duration_seconds": 5.34,
+          "pages_used": [
+            32,
+            33
+          ],
+          "narration_speech": "The squad commander shouts for headquarters, right before a lethal spike pierces his forehead."
+        },
+        {
+          "scene_index": 19,
+          "timing": "00:01:35,520 --> 00:01:39,520",
+          "start_seconds": 95.52,
+          "end_seconds": 99.52,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            34,
+            35
+          ],
+          "narration_speech": "A lone assassin touches down onto the highway with terrifying precision."
+        },
+        {
+          "scene_index": 20,
+          "timing": "00:01:39,660 --> 00:01:44,200",
+          "start_seconds": 99.66,
+          "end_seconds": 104.2,
+          "duration_seconds": 4.54,
+          "pages_used": [
+            36,
+            37
+          ],
+          "narration_speech": "Rising through the storm, he unleashes a lightning slash that sprays crimson everywhere."
+        },
+        {
+          "scene_index": 21,
+          "timing": "00:01:44,760 --> 00:01:48,760",
+          "start_seconds": 104.76,
+          "end_seconds": 108.76,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            38
+          ],
+          "narration_speech": "A devastating punch shatters the lead guard's face into splintered bone."
+        },
+        {
+          "scene_index": 22,
+          "timing": "00:01:49,440 --> 00:01:53,480",
+          "start_seconds": 109.44,
+          "end_seconds": 113.48,
+          "duration_seconds": 4.04,
+          "pages_used": [
+            39
+          ],
+          "narration_speech": "The squad captain drops face-first into the mud. Total wipeout."
+        },
+        {
+          "scene_index": 23,
+          "timing": "00:01:53,480 --> 00:01:58,920",
+          "start_seconds": 113.48,
+          "end_seconds": 118.92,
+          "duration_seconds": 5.44,
+          "pages_used": [
+            40,
+            41
+          ],
+          "narration_speech": "Panicked survivors empty full pistol magazines, but the assassin dodges like water."
+        },
+        {
+          "scene_index": 24,
+          "timing": "00:01:59,540 --> 00:02:03,900",
+          "start_seconds": 119.54,
+          "end_seconds": 123.9,
+          "duration_seconds": 4.36,
+          "pages_used": [
+            42,
+            43
+          ],
+          "narration_speech": "Snatching a fallen guard off the ground, he hoists the body upward effortlessly."
+        }
+      ]
+    },
+    "episode_5": {
+      "episode": 5,
+      "total_scenes": 94,
+      "video_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_5\\video.mp4",
+      "scenes": [
+        {
+          "scene_index": 1,
+          "timing": "00:00:00,000 --> 00:00:06,300",
+          "start_seconds": 0.0,
+          "end_seconds": 6.3,
+          "duration_seconds": 6.3,
+          "pages_used": [
+            3
+          ],
+          "narration_speech": "Tae shines his flashlight inside the refrigerated container, expecting contraband, not an arctic meat locker."
+        },
+        {
+          "scene_index": 2,
+          "timing": "00:00:06,940 --> 00:00:11,620",
+          "start_seconds": 6.94,
+          "end_seconds": 11.62,
+          "duration_seconds": 4.68,
+          "pages_used": [
+            4
+          ],
+          "narration_speech": "Frost coats the interior, but something resting in the back immediately catches his eye."
+        },
+        {
+          "scene_index": 3,
+          "timing": "00:00:12,400 --> 00:00:16,680",
+          "start_seconds": 12.4,
+          "end_seconds": 16.68,
+          "duration_seconds": 4.28,
+          "pages_used": [
+            7
+          ],
+          "narration_speech": "Look at that pale, frozen face caked in grime and suspicious bite marks."
+        },
+        {
+          "scene_index": 4,
+          "timing": "00:00:17,160 --> 00:00:21,280",
+          "start_seconds": 17.16,
+          "end_seconds": 21.28,
+          "duration_seconds": 4.12,
+          "pages_used": [
+            8
+          ],
+          "narration_speech": "Tae frowns, wondering why his corrupt boss ordered a haul of frozen corpses."
+        },
+        {
+          "scene_index": 5,
+          "timing": "00:00:22,020 --> 00:00:27,200",
+          "start_seconds": 22.02,
+          "end_seconds": 27.2,
+          "duration_seconds": 5.18,
+          "pages_used": [
+            10
+          ],
+          "narration_speech": "Carrying expired human cargo across borders makes zero financial sense, even for gangsters."
+        },
+        {
+          "scene_index": 6,
+          "timing": "00:00:27,200 --> 00:00:32,500",
+          "start_seconds": 27.2,
+          "end_seconds": 32.5,
+          "duration_seconds": 5.3,
+          "pages_used": [
+            12
+          ],
+          "narration_speech": "Deep lacerations cover the skin, looking less like cuts and more like rabid bites."
+        },
+        {
+          "scene_index": 7,
+          "timing": "00:00:32,940 --> 00:00:37,700",
+          "start_seconds": 32.94,
+          "end_seconds": 37.7,
+          "duration_seconds": 4.76,
+          "pages_used": [
+            13
+          ],
+          "narration_speech": "Outside the truck, an impatient thug pounds loudly on the reinforced metal doors."
+        },
+        {
+          "scene_index": 8,
+          "timing": "00:00:38,340 --> 00:00:42,340",
+          "start_seconds": 38.34,
+          "end_seconds": 42.34,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            14
+          ],
+          "narration_speech": "Tae snarls back, telling the idiot outside to shut his mouth and wait."
+        },
+        {
+          "scene_index": 9,
+          "timing": "00:00:43,060 --> 00:00:47,060",
+          "start_seconds": 43.06,
+          "end_seconds": 47.06,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            16
+          ],
+          "narration_speech": "Dealing with jumpy lackeys in the middle of a torrential downpour is exhausting."
+        },
+        {
+          "scene_index": 10,
+          "timing": "00:00:47,540 --> 00:00:51,760",
+          "start_seconds": 47.54,
+          "end_seconds": 51.76,
+          "duration_seconds": 4.22,
+          "pages_used": [
+            17
+          ],
+          "narration_speech": "The frozen corpse stumbles upright with hollow eyes and decaying jaws agape."
+        },
+        {
+          "scene_index": 11,
+          "timing": "00:00:52,400 --> 00:00:56,840",
+          "start_seconds": 52.4,
+          "end_seconds": 56.84,
+          "duration_seconds": 4.44,
+          "pages_used": [
+            18
+          ],
+          "narration_speech": "Tae freezes in place, realizing this refrigerated stiff isn't actually dead."
+        },
+        {
+          "scene_index": 12,
+          "timing": "00:00:56,840 --> 00:00:58,640",
+          "start_seconds": 56.84,
+          "end_seconds": 58.64,
+          "duration_seconds": 1.8,
+          "pages_used": [
+            19
+          ],
+          "narration_speech": "Not even close."
+        },
+        {
+          "scene_index": 13,
+          "timing": "00:00:58,640 --> 00:01:02,880",
+          "start_seconds": 58.64,
+          "end_seconds": 62.88,
+          "duration_seconds": 4.24,
+          "pages_used": [
+            20
+          ],
+          "narration_speech": "The creature unleashes an ear-piercing screech, snapping its jaws straight at Tae's throat."
+        },
+        {
+          "scene_index": 14,
+          "timing": "00:01:02,880 --> 00:01:08,400",
+          "start_seconds": 62.88,
+          "end_seconds": 68.4,
+          "duration_seconds": 5.52,
+          "pages_used": [
+            22
+          ],
+          "narration_speech": "It lunges with freakish velocity, moving way too fast for a supposed dead body."
+        },
+        {
+          "scene_index": 15,
+          "timing": "00:01:09,020 --> 00:01:13,020",
+          "start_seconds": 69.02,
+          "end_seconds": 73.02,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            23
+          ],
+          "narration_speech": "Tae throws a desperate right hook, barely keeping the rabid teeth off him."
+        },
+        {
+          "scene_index": 16,
+          "timing": "00:01:13,460 --> 00:01:18,340",
+          "start_seconds": 73.46,
+          "end_seconds": 78.34,
+          "duration_seconds": 4.88,
+          "pages_used": [
+            24
+          ],
+          "narration_speech": "No weapons in reach? Tae just uses his heavy smartphone as an improvised blunt club."
+        },
+        {
+          "scene_index": 17,
+          "timing": "00:01:18,700 --> 00:01:22,700",
+          "start_seconds": 78.7,
+          "end_seconds": 82.7,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            25
+          ],
+          "narration_speech": "He bashes the monster across the skull with brute force and pure adrenaline."
+        },
+        {
+          "scene_index": 18,
+          "timing": "00:01:23,640 --> 00:01:28,500",
+          "start_seconds": 83.64,
+          "end_seconds": 88.5,
+          "duration_seconds": 4.86,
+          "pages_used": [
+            26
+          ],
+          "narration_speech": "Repeated heavy impacts ring out against bone, driving the raving creature backward."
+        },
+        {
+          "scene_index": 19,
+          "timing": "00:01:29,080 --> 00:01:33,080",
+          "start_seconds": 89.08,
+          "end_seconds": 93.08,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            28
+          ],
+          "narration_speech": "The monster collapses flat, twitching on the frozen floor of the truck bed."
+        },
+        {
+          "scene_index": 20,
+          "timing": "00:01:33,320 --> 00:01:37,320",
+          "start_seconds": 93.32,
+          "end_seconds": 97.32,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            29
+          ],
+          "narration_speech": "Tae catches his breath, thinking that nightmare was finally resolved."
+        },
+        {
+          "scene_index": 21,
+          "timing": "00:01:37,660 --> 00:01:42,060",
+          "start_seconds": 97.66,
+          "end_seconds": 102.06,
+          "duration_seconds": 4.4,
+          "pages_used": [
+            30
+          ],
+          "narration_speech": "A sickening crunch shatters the brief silence behind him."
+        },
+        {
+          "scene_index": 22,
+          "timing": "00:01:42,060 --> 00:01:43,860",
+          "start_seconds": 102.06,
+          "end_seconds": 103.86,
+          "duration_seconds": 1.8,
+          "pages_used": [
+            31
+          ],
+          "narration_speech": "Classic mistake."
+        },
+        {
+          "scene_index": 23,
+          "timing": "00:01:43,860 --> 00:01:47,860",
+          "start_seconds": 103.86,
+          "end_seconds": 107.86,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            32
+          ],
+          "narration_speech": "Two more snarling infected tackle him from the shadows of the frost-filled container."
+        },
+        {
+          "scene_index": 24,
+          "timing": "00:01:47,860 --> 00:01:51,860",
+          "start_seconds": 107.86,
+          "end_seconds": 111.86,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            33
+          ],
+          "narration_speech": "Rotting fangs snap inches from his neck as heavy claws dig into his suit."
+        },
+        {
+          "scene_index": 25,
+          "timing": "00:01:52,140 --> 00:01:57,060",
+          "start_seconds": 112.14,
+          "end_seconds": 117.06,
+          "duration_seconds": 4.92,
+          "pages_used": [
+            34
+          ],
+          "narration_speech": "Tae unloads rapid hammer fists, violently dislodging the snarling monstrosity."
+        },
+        {
+          "scene_index": 26,
+          "timing": "00:01:57,420 --> 00:02:02,340",
+          "start_seconds": 117.42,
+          "end_seconds": 122.34,
+          "duration_seconds": 4.92,
+          "pages_used": [
+            36
+          ],
+          "narration_speech": "But staring down two unfeeling predators in a pitch-black steel box is pure suicide."
+        },
+        {
+          "scene_index": 27,
+          "timing": "00:02:02,800 --> 00:02:07,300",
+          "start_seconds": 122.8,
+          "end_seconds": 127.3,
+          "duration_seconds": 4.5,
+          "pages_used": [
+            38
+          ],
+          "narration_speech": "Tae curses under his breath, realizing this delivery was an absolute death trap."
+        },
+        {
+          "scene_index": 28,
+          "timing": "00:02:07,940 --> 00:02:13,020",
+          "start_seconds": 127.94,
+          "end_seconds": 133.02,
+          "duration_seconds": 5.08,
+          "pages_used": [
+            40
+          ],
+          "narration_speech": "Outside the rainy warehouse, mobsters wait idly while passing around packs of cigarettes."
+        },
+        {
+          "scene_index": 29,
+          "timing": "00:02:13,660 --> 00:02:18,460",
+          "start_seconds": 133.66,
+          "end_seconds": 138.46,
+          "duration_seconds": 4.8,
+          "pages_used": [
+            41
+          ],
+          "narration_speech": "One loyal goon offers a lighter, blissfully unaware of the horrors unfolding inside."
+        },
+        {
+          "scene_index": 30,
+          "timing": "00:02:18,960 --> 00:02:23,400",
+          "start_seconds": 138.96,
+          "end_seconds": 143.4,
+          "duration_seconds": 4.44,
+          "pages_used": [
+            43
+          ],
+          "narration_speech": "Inside the container, desperate thuds shake the massive steel lock mechanism."
+        },
+        {
+          "scene_index": 31,
+          "timing": "00:02:24,060 --> 00:02:28,520",
+          "start_seconds": 144.06,
+          "end_seconds": 148.52,
+          "duration_seconds": 4.46,
+          "pages_used": [
+            44
+          ],
+          "narration_speech": "The mafia boss puffs his cigarette, slightly amused by all the clumsy racket."
+        },
+        {
+          "scene_index": 32,
+          "timing": "00:02:29,280 --> 00:02:34,420",
+          "start_seconds": 149.28,
+          "end_seconds": 154.42,
+          "duration_seconds": 5.14,
+          "pages_used": [
+            45
+          ],
+          "narration_speech": "Finally realizing something is terribly wrong, the gangsters hammer frantically on the truck."
+        },
+        {
+          "scene_index": 33,
+          "timing": "00:02:34,780 --> 00:02:39,040",
+          "start_seconds": 154.78,
+          "end_seconds": 159.04,
+          "duration_seconds": 4.26,
+          "pages_used": [
+            46
+          ],
+          "narration_speech": "A hulking bald thug grabs the metal latches, wrenching the heavy doors open."
+        },
+        {
+          "scene_index": 34,
+          "timing": "00:02:39,040 --> 00:02:43,840",
+          "start_seconds": 159.04,
+          "end_seconds": 163.84,
+          "duration_seconds": 4.8,
+          "pages_used": [
+            47
+          ],
+          "narration_speech": "Total shock freezes the entire crew as bloody screams spill out into rain."
+        },
+        {
+          "scene_index": 35,
+          "timing": "00:02:44,460 --> 00:02:48,460",
+          "start_seconds": 164.46,
+          "end_seconds": 168.46,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            48
+          ],
+          "narration_speech": "Tae's partner gets pulled into the shadows, mauled by ravenous shadows."
+        },
+        {
+          "scene_index": 36,
+          "timing": "00:02:48,680 --> 00:02:53,320",
+          "start_seconds": 168.68,
+          "end_seconds": 173.32,
+          "duration_seconds": 4.64,
+          "pages_used": [
+            49
+          ],
+          "narration_speech": "The bald enforcer loses his temper, charging headfirst into the blood-soaked trailer."
+        },
+        {
+          "scene_index": 37,
+          "timing": "00:02:53,800 --> 00:02:58,580",
+          "start_seconds": 173.8,
+          "end_seconds": 178.58,
+          "duration_seconds": 4.78,
+          "pages_used": [
+            51
+          ],
+          "narration_speech": "He delivers a vicious front kick, sending an infected ghoul flying backward."
+        },
+        {
+          "scene_index": 38,
+          "timing": "00:02:59,160 --> 00:03:03,260",
+          "start_seconds": 179.16,
+          "end_seconds": 183.26,
+          "duration_seconds": 4.1,
+          "pages_used": [
+            52
+          ],
+          "narration_speech": "Slipping a combat blade into his grip, the brute prepares for street warfare."
+        },
+        {
+          "scene_index": 39,
+          "timing": "00:03:03,740 --> 00:03:07,740",
+          "start_seconds": 183.74,
+          "end_seconds": 187.74,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            53
+          ],
+          "narration_speech": "He drives the cold steel straight through the lung of an incoming creature."
+        },
+        {
+          "scene_index": 40,
+          "timing": "00:03:08,100 --> 00:03:10,500",
+          "start_seconds": 188.1,
+          "end_seconds": 190.5,
+          "duration_seconds": 2.4,
+          "pages_used": [
+            54
+          ],
+          "narration_speech": "Did that put it down? Not even a flinch."
+        },
+        {
+          "scene_index": 41,
+          "timing": "00:03:10,720 --> 00:03:16,080",
+          "start_seconds": 190.72,
+          "end_seconds": 196.08,
+          "duration_seconds": 5.36,
+          "pages_used": [
+            55
+          ],
+          "narration_speech": "The junior henchmen freeze in sheer terror, completely paralyzed by the bizarre attack."
+        },
+        {
+          "scene_index": 42,
+          "timing": "00:03:16,500 --> 00:03:21,860",
+          "start_seconds": 196.5,
+          "end_seconds": 201.86,
+          "duration_seconds": 5.36,
+          "pages_used": [
+            56
+          ],
+          "narration_speech": "Another raving corpse leaps from the dark, completely ignoring standard human survival instincts."
+        },
+        {
+          "scene_index": 43,
+          "timing": "00:03:22,340 --> 00:03:27,800",
+          "start_seconds": 202.34,
+          "end_seconds": 207.8,
+          "duration_seconds": 5.46,
+          "pages_used": [
+            57
+          ],
+          "narration_speech": "In one brutal snap, razor-sharp fangs tear straight into the bald enforcer's jugular."
+        },
+        {
+          "scene_index": 44,
+          "timing": "00:03:28,420 --> 00:03:33,820",
+          "start_seconds": 208.42,
+          "end_seconds": 213.82,
+          "duration_seconds": 5.4,
+          "pages_used": [
+            58
+          ],
+          "narration_speech": "Stabbing vital organs doesn't do squat against monsters that are already biologically expired."
+        },
+        {
+          "scene_index": 45,
+          "timing": "00:03:33,820 --> 00:03:38,300",
+          "start_seconds": 213.82,
+          "end_seconds": 218.3,
+          "duration_seconds": 4.48,
+          "pages_used": [
+            61
+          ],
+          "narration_speech": "The beast's crimson eyes gleam under raindrops as it rips through warm flesh."
+        },
+        {
+          "scene_index": 46,
+          "timing": "00:03:38,820 --> 00:03:43,820",
+          "start_seconds": 218.82,
+          "end_seconds": 223.82,
+          "duration_seconds": 5.0,
+          "pages_used": [
+            62
+          ],
+          "narration_speech": "Terror erupts through the crew as reality violently smashes their tough-guy facade."
+        },
+        {
+          "scene_index": 47,
+          "timing": "00:03:44,300 --> 00:03:48,300",
+          "start_seconds": 224.3,
+          "end_seconds": 228.3,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            66
+          ],
+          "narration_speech": "The infected howls into the midnight storm, hungry for fresh prey."
+        },
+        {
+          "scene_index": 48,
+          "timing": "00:03:48,540 --> 00:03:52,540",
+          "start_seconds": 228.54,
+          "end_seconds": 232.54,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            67
+          ],
+          "narration_speech": "Dripping claws reach toward the trembling gang members huddled in the rain."
+        },
+        {
+          "scene_index": 49,
+          "timing": "00:03:52,960 --> 00:03:57,980",
+          "start_seconds": 232.96,
+          "end_seconds": 237.98,
+          "duration_seconds": 5.02,
+          "pages_used": [
+            69
+          ],
+          "narration_speech": "But standing right in the downpour, Tae watches the madness unfold without flinching."
+        },
+        {
+          "scene_index": 50,
+          "timing": "00:03:58,320 --> 00:04:02,740",
+          "start_seconds": 238.32,
+          "end_seconds": 242.74,
+          "duration_seconds": 4.42,
+          "pages_used": [
+            71
+          ],
+          "narration_speech": "That ruthless glare says it all—panic is a luxury dead men can't afford."
+        },
+        {
+          "scene_index": 51,
+          "timing": "00:04:02,740 --> 00:04:07,540",
+          "start_seconds": 242.74,
+          "end_seconds": 247.54,
+          "duration_seconds": 4.8,
+          "pages_used": [
+            72
+          ],
+          "narration_speech": "Another panicked lackey gets dragged to the wet asphalt, screeching for backup."
+        },
+        {
+          "scene_index": 52,
+          "timing": "00:04:08,080 --> 00:04:12,080",
+          "start_seconds": 248.08,
+          "end_seconds": 252.08,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            73
+          ],
+          "narration_speech": "Brandishing a wooden baseball bat, a trembling goon backs away slowly."
+        },
+        {
+          "scene_index": 53,
+          "timing": "00:04:12,540 --> 00:04:18,180",
+          "start_seconds": 252.54,
+          "end_seconds": 258.18,
+          "duration_seconds": 5.64,
+          "pages_used": [
+            74
+          ],
+          "narration_speech": "Cannibals or biological freaks? Tae honestly couldn't care less about their official label."
+        },
+        {
+          "scene_index": 54,
+          "timing": "00:04:18,540 --> 00:04:23,120",
+          "start_seconds": 258.54,
+          "end_seconds": 263.12,
+          "duration_seconds": 4.58,
+          "pages_used": [
+            76
+          ],
+          "narration_speech": "Tae steps forward calmly, brushing his panicked men aside like annoying flies."
+        },
+        {
+          "scene_index": 55,
+          "timing": "00:04:23,760 --> 00:04:28,540",
+          "start_seconds": 263.76,
+          "end_seconds": 268.54,
+          "duration_seconds": 4.78,
+          "pages_used": [
+            77
+          ],
+          "narration_speech": "Polished leather boots splash down in dirty puddles, calculated and completely fearless."
+        },
+        {
+          "scene_index": 56,
+          "timing": "00:04:28,540 --> 00:04:33,260",
+          "start_seconds": 268.54,
+          "end_seconds": 273.26,
+          "duration_seconds": 4.72,
+          "pages_used": [
+            78
+          ],
+          "narration_speech": "The rabid ghoul feasts on the asphalt, fully distracted by fresh meat."
+        },
+        {
+          "scene_index": 57,
+          "timing": "00:04:33,620 --> 00:04:38,380",
+          "start_seconds": 273.62,
+          "end_seconds": 278.38,
+          "duration_seconds": 4.76,
+          "pages_used": [
+            80
+          ],
+          "narration_speech": "Tae drops a thunderous curb stomp directly across the monster's arched spinal column."
+        },
+        {
+          "scene_index": 58,
+          "timing": "00:04:39,000 --> 00:04:43,720",
+          "start_seconds": 279.0,
+          "end_seconds": 283.72,
+          "duration_seconds": 4.72,
+          "pages_used": [
+            81
+          ],
+          "narration_speech": "He looks down with pure irritation, utterly disgusted by the repulsive pest."
+        },
+        {
+          "scene_index": 59,
+          "timing": "00:04:44,240 --> 00:04:48,500",
+          "start_seconds": 284.24,
+          "end_seconds": 288.5,
+          "duration_seconds": 4.26,
+          "pages_used": [
+            82
+          ],
+          "narration_speech": "Even with a shattered spine, the monstrosity still thrashes against the gravel."
+        },
+        {
+          "scene_index": 60,
+          "timing": "00:04:48,880 --> 00:04:53,680",
+          "start_seconds": 288.88,
+          "end_seconds": 293.68,
+          "duration_seconds": 4.8,
+          "pages_used": [
+            83
+          ],
+          "narration_speech": "Tae draws a wicked curved blade, deciding it's time for actual surgical precision."
+        },
+        {
+          "scene_index": 61,
+          "timing": "00:04:54,260 --> 00:04:58,260",
+          "start_seconds": 294.26,
+          "end_seconds": 298.26,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            85
+          ],
+          "narration_speech": "One blinding arc of steel severs the ghoul's head cleanly off its shoulders."
+        },
+        {
+          "scene_index": 62,
+          "timing": "00:04:58,540 --> 00:05:03,720",
+          "start_seconds": 298.54,
+          "end_seconds": 303.72,
+          "duration_seconds": 5.18,
+          "pages_used": [
+            86
+          ],
+          "narration_speech": "The severed skull thuds against wet asphalt, lifeless and permanently deactivated."
+        },
+        {
+          "scene_index": 63,
+          "timing": "00:05:03,980 --> 00:05:08,200",
+          "start_seconds": 303.98,
+          "end_seconds": 308.2,
+          "duration_seconds": 4.22,
+          "pages_used": [
+            88
+          ],
+          "narration_speech": "Tae watches coldly as dark fluid mixes into the pouring rain gutters."
+        },
+        {
+          "scene_index": 64,
+          "timing": "00:05:08,760 --> 00:05:13,260",
+          "start_seconds": 308.76,
+          "end_seconds": 313.26,
+          "duration_seconds": 4.5,
+          "pages_used": [
+            89
+          ],
+          "narration_speech": "Outside, a chilling howl echoes across the lot, signaling reinforcements."
+        },
+        {
+          "scene_index": 65,
+          "timing": "00:05:13,760 --> 00:05:17,760",
+          "start_seconds": 313.76,
+          "end_seconds": 317.76,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            90
+          ],
+          "narration_speech": "Another shrieking stalker leaps from the roof of the delivery truck."
+        },
+        {
+          "scene_index": 66,
+          "timing": "00:05:17,760 --> 00:05:22,000",
+          "start_seconds": 317.76,
+          "end_seconds": 322.0,
+          "duration_seconds": 4.24,
+          "pages_used": [
+            92
+          ],
+          "narration_speech": "Tae dodges effortlessly, slamming the incoming beast face-first into concrete."
+        },
+        {
+          "scene_index": 67,
+          "timing": "00:05:22,440 --> 00:05:27,540",
+          "start_seconds": 322.44,
+          "end_seconds": 327.54,
+          "duration_seconds": 5.1,
+          "pages_used": [
+            93
+          ],
+          "narration_speech": "It snaps feral jaws relentlessly, feeling zero pain from the bone-shattering collision."
+        },
+        {
+          "scene_index": 68,
+          "timing": "00:05:28,340 --> 00:05:32,620",
+          "start_seconds": 328.34,
+          "end_seconds": 332.62,
+          "duration_seconds": 4.28,
+          "pages_used": [
+            94
+          ],
+          "narration_speech": "Tae asks the snarling ghoul why on earth it refuses to stay deceased."
+        },
+        {
+          "scene_index": 69,
+          "timing": "00:05:33,280 --> 00:05:37,280",
+          "start_seconds": 333.28,
+          "end_seconds": 337.28,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            96
+          ],
+          "narration_speech": "He answers his own question by stomping its cranium into the pavement."
+        },
+        {
+          "scene_index": 70,
+          "timing": "00:05:37,380 --> 00:05:41,060",
+          "start_seconds": 337.38,
+          "end_seconds": 341.06,
+          "duration_seconds": 3.68,
+          "pages_used": [
+            97
+          ],
+          "narration_speech": "That wretched screeching was getting annoying anyway."
+        },
+        {
+          "scene_index": 71,
+          "timing": "00:05:41,060 --> 00:05:45,060",
+          "start_seconds": 341.06,
+          "end_seconds": 345.06,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            98
+          ],
+          "narration_speech": "Another pair of crimson eyes glares through the torrential downpour."
+        },
+        {
+          "scene_index": 72,
+          "timing": "00:05:45,060 --> 00:05:49,060",
+          "start_seconds": 345.06,
+          "end_seconds": 349.06,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            99
+          ],
+          "narration_speech": "Tae runs a wet hand through his hair and lets out a grim chuckle."
+        },
+        {
+          "scene_index": 73,
+          "timing": "00:05:49,240 --> 00:05:54,560",
+          "start_seconds": 349.24,
+          "end_seconds": 354.56,
+          "duration_seconds": 5.32,
+          "pages_used": [
+            100
+          ],
+          "narration_speech": "Conventional puncture wounds mean nothing to creatures devoid of functioning circulatory systems."
+        },
+        {
+          "scene_index": 74,
+          "timing": "00:05:54,560 --> 00:05:59,240",
+          "start_seconds": 354.56,
+          "end_seconds": 359.24,
+          "duration_seconds": 4.68,
+          "pages_used": [
+            102
+          ],
+          "narration_speech": "Severing the nervous system is literally the only language these freaks understand."
+        },
+        {
+          "scene_index": 75,
+          "timing": "00:05:59,600 --> 00:06:04,660",
+          "start_seconds": 359.6,
+          "end_seconds": 364.66,
+          "duration_seconds": 5.06,
+          "pages_used": [
+            103
+          ],
+          "narration_speech": "A female infected screeches, charging with freakish speed across the pavement."
+        },
+        {
+          "scene_index": 76,
+          "timing": "00:06:05,200 --> 00:06:09,200",
+          "start_seconds": 365.2,
+          "end_seconds": 369.2,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            104
+          ],
+          "narration_speech": "Tae locks his focus directly on the base of her exposed skull."
+        },
+        {
+          "scene_index": 77,
+          "timing": "00:06:09,840 --> 00:06:13,840",
+          "start_seconds": 369.84,
+          "end_seconds": 373.84,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            106
+          ],
+          "narration_speech": "He drives the thick hunting knife straight through the back of her neck."
+        },
+        {
+          "scene_index": 78,
+          "timing": "00:06:13,840 --> 00:06:17,840",
+          "start_seconds": 373.84,
+          "end_seconds": 377.84,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            107
+          ],
+          "narration_speech": "The shrieking instantly cuts out as dead nerve signals violently misfire."
+        },
+        {
+          "scene_index": 79,
+          "timing": "00:06:18,580 --> 00:06:22,820",
+          "start_seconds": 378.58,
+          "end_seconds": 382.82,
+          "duration_seconds": 4.24,
+          "pages_used": [
+            108
+          ],
+          "narration_speech": "Tae pulls the dripping blade free, maintaining a rock-solid tactical grip."
+        },
+        {
+          "scene_index": 80,
+          "timing": "00:06:22,820 --> 00:06:26,820",
+          "start_seconds": 382.82,
+          "end_seconds": 386.82,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            109
+          ],
+          "narration_speech": "A shadowy claw swipes millimeters from his temple out of nowhere."
+        },
+        {
+          "scene_index": 81,
+          "timing": "00:06:27,160 --> 00:06:32,160",
+          "start_seconds": 387.16,
+          "end_seconds": 392.16,
+          "duration_seconds": 5.0,
+          "pages_used": [
+            110
+          ],
+          "narration_speech": "Another rotting fiend lunges aggressively, nearly catching Tae off guard in the darkness."
+        },
+        {
+          "scene_index": 82,
+          "timing": "00:06:32,960 --> 00:06:36,960",
+          "start_seconds": 392.96,
+          "end_seconds": 396.96,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            111
+          ],
+          "narration_speech": "Hesitating for even half a second out here guarantees an instant grave."
+        },
+        {
+          "scene_index": 83,
+          "timing": "00:06:37,280 --> 00:06:41,640",
+          "start_seconds": 397.28,
+          "end_seconds": 401.64,
+          "duration_seconds": 4.36,
+          "pages_used": [
+            112
+          ],
+          "narration_speech": "Tae plants his palms against the slick asphalt, pivoting low under the swing."
+        },
+        {
+          "scene_index": 84,
+          "timing": "00:06:42,140 --> 00:06:46,140",
+          "start_seconds": 402.14,
+          "end_seconds": 406.14,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            113
+          ],
+          "narration_speech": "He whips his entire lower body into a crushing spinning kick."
+        },
+        {
+          "scene_index": 85,
+          "timing": "00:06:46,140 --> 00:06:50,140",
+          "start_seconds": 406.14,
+          "end_seconds": 410.14,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            114
+          ],
+          "narration_speech": "Heavy leather smashes into decayed bone with the crack of a bat."
+        },
+        {
+          "scene_index": 86,
+          "timing": "00:06:50,140 --> 00:06:54,140",
+          "start_seconds": 410.14,
+          "end_seconds": 414.14,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            115
+          ],
+          "narration_speech": "The impact sends the beast skidding hard across wet parking lines."
+        },
+        {
+          "scene_index": 87,
+          "timing": "00:06:54,140 --> 00:06:58,140",
+          "start_seconds": 414.14,
+          "end_seconds": 418.14,
+          "duration_seconds": 4.0,
+          "pages_used": [
+            116
+          ],
+          "narration_speech": "So their bones do shatter under enough kinetic force after all."
+        },
+        {
+          "scene_index": 88,
+          "timing": "00:06:58,160 --> 00:07:02,560",
+          "start_seconds": 418.16,
+          "end_seconds": 422.56,
+          "duration_seconds": 4.4,
+          "pages_used": [
+            117
+          ],
+          "narration_speech": "Yet another crazed mutant sprints forward, eyes glowing with rabid hunger."
+        },
+        {
+          "scene_index": 89,
+          "timing": "00:07:03,160 --> 00:07:07,600",
+          "start_seconds": 423.16,
+          "end_seconds": 427.6,
+          "duration_seconds": 4.44,
+          "pages_used": [
+            119
+          ],
+          "narration_speech": "Tae builds instant momentum, sprinting straight toward the incoming nightmare."
+        },
+        {
+          "scene_index": 90,
+          "timing": "00:07:08,120 --> 00:07:12,300",
+          "start_seconds": 428.12,
+          "end_seconds": 432.3,
+          "duration_seconds": 4.18,
+          "pages_used": [
+            120
+          ],
+          "narration_speech": "He slips past the clumsy swipe, pressing his back against a nearby pillar."
+        },
+        {
+          "scene_index": 91,
+          "timing": "00:07:12,540 --> 00:07:18,000",
+          "start_seconds": 432.54,
+          "end_seconds": 438.0,
+          "duration_seconds": 5.46,
+          "pages_used": [
+            122
+          ],
+          "narration_speech": "Tae delivers a vicious counterstrike, crushing the beast's skull directly into solid steel."
+        },
+        {
+          "scene_index": 92,
+          "timing": "00:07:18,000 --> 00:07:22,940",
+          "start_seconds": 438.0,
+          "end_seconds": 442.94,
+          "duration_seconds": 4.94,
+          "pages_used": [
+            123
+          ],
+          "narration_speech": "The battered fiend collapses into a bloody puddle, completely neutralized for good."
+        },
+        {
+          "scene_index": 93,
+          "timing": "00:07:23,400 --> 00:07:27,420",
+          "start_seconds": 443.4,
+          "end_seconds": 447.42,
+          "duration_seconds": 4.02,
+          "pages_used": [
+            124
+          ],
+          "narration_speech": "Tae tilts his chin upward, letting cool rain wash the filth away."
+        },
+        {
+          "scene_index": 94,
+          "timing": "00:07:27,840 --> 00:07:33,760",
+          "start_seconds": 447.84,
+          "end_seconds": 453.76,
+          "duration_seconds": 5.92,
+          "pages_used": [
+            126
+          ],
+          "narration_speech": "But as dozens of guttural roars echo across the district, Tae realizes this outbreak has only begun."
+        }
+      ]
+    }
+  }
+}

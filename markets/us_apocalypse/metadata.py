@@ -1656,7 +1656,7 @@ def extract_episode_theme(
 
 
 def build_narrative_story_chapters(
-    chapters: Optional[List[Dict[str, Any]]],
+    chapters: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]],
     download_dir: Optional[str] = None,
     comic_title: str = "Comic",
     archetype: str = "general_apocalypse",
@@ -1665,14 +1665,46 @@ def build_narrative_story_chapters(
 ) -> List[Dict[str, Any]]:
     """
     Builds narrative story chapters grouped by video story progression arcs.
-    Fail-Closed: If chapters is None or empty, returns [] to avoid fabricating false timestamps.
+    Fail-Closed: If chapters is None, empty, or lacks valid timestamps, returns [] to avoid fabricating false timestamps.
     Uses window-based grounding: each chapter [start_ep, end_ep] only extracts themes
     from recap files in that exact episode window with decomposed semantic evidence.
     """
     if not chapters:
         return []
 
-    num_input_chapters = len(chapters)
+    # Handle dictionary input (e.g. stage11_timeline_and_chapter_markers.json)
+    if isinstance(chapters, dict):
+        marker_dict = chapters.get("chapter_markers", {})
+        if isinstance(marker_dict, dict):
+            raw_input = (
+                marker_dict.get("series_143_arc_milestones")
+                or marker_dict.get("episodes_1_5_video_timeline")
+                or (list(marker_dict.values())[0] if marker_dict else [])
+            )
+        else:
+            raw_input = (
+                chapters.get("series_143_arc_milestones")
+                or chapters.get("chapters")
+                or []
+            )
+    elif isinstance(chapters, list):
+        raw_input = chapters
+    else:
+        return []
+
+    if not raw_input or not isinstance(raw_input, list):
+        return []
+
+    # Grounding validation: every chapter item must have a non-empty timestamp string
+    # Never invent timestamps!
+    for ch in raw_input:
+        if not isinstance(ch, dict):
+            return []
+        ts_val = ch.get("timestamp")
+        if ts_val is None or str(ts_val).strip() == "":
+            return []
+
+    num_input_chapters = len(raw_input)
     span_eps = to_ep - from_ep + 1
     prog_list = [
         "Outbreak & Patient Zero",
@@ -1715,17 +1747,19 @@ def build_narrative_story_chapters(
         is_direct_mapping = True
 
     # Backward compatibility with small 2-chapter tests without download_dir
-    if num_input_chapters <= 2 and not download_dir and all(ch.get("title", "").strip().lower().startswith("episode") for ch in chapters):
+    if num_input_chapters <= 2 and not download_dir and all(ch.get("title", "").strip().lower().startswith("episode") for ch in raw_input):
         return [
             {
-                "timestamp": "00:00" if i == 0 else ch.get("timestamp", "00:00"),
+                "timestamp": ch.get("timestamp", "00:00" if i == 0 else ""),
                 "title": ch.get("title", f"Episode {ch.get('episode', i + 1)}"),
-                "episode": ch.get("episode", i + 1),
-                "end_episode": ch.get("episode", i + 1),
+                "episode": ch.get("start_episode", ch.get("episode", i + 1)),
+                "end_episode": ch.get("end_episode", ch.get("episode", i + 1)),
+                "source_episode_range": ch.get("episode_range") or (f"Ep {ch.get('episode', i + 1)}" if ch.get("episode") else f"{i + 1}"),
                 "theme": ch.get("title", f"Episode {ch.get('episode', i + 1)}"),
                 "evidence": [],
+                "grounded": bool(ch.get("timestamp") not in (None, "")),
             }
-            for i, ch in enumerate(chapters)
+            for i, ch in enumerate(raw_input)
         ]
 
     result = []
@@ -1733,24 +1767,38 @@ def build_narrative_story_chapters(
 
     for k in range(num_arcs):
         if is_direct_mapping:
-            ch_curr = chapters[k]
-            start_ep = ch_curr.get("episode", from_ep + k)
-            if k < num_arcs - 1:
-                next_ep = chapters[k + 1].get("episode", start_ep + 1)
+            ch_curr = raw_input[k]
+            start_ep = ch_curr.get("start_episode", ch_curr.get("episode", from_ep + k))
+            if "end_episode" in ch_curr:
+                end_ep = ch_curr["end_episode"]
+            elif k < num_arcs - 1:
+                next_ep = raw_input[k + 1].get("start_episode", raw_input[k + 1].get("episode", start_ep + 1))
                 end_ep = max(start_ep, next_ep - 1)
             else:
                 end_ep = max(start_ep, to_ep)
-            ts = "00:00" if k == 0 else ch_curr.get("timestamp", "00:00")
+            ts = ch_curr.get("timestamp", "00:00" if k == 0 else "")
+            ep_range_field = ch_curr.get("episode_range")
+            raw_title = ch_curr.get("title", "")
         else:
             start_idx = round(k * num_input_chapters / num_arcs)
             end_idx = min(num_input_chapters - 1, round((k + 1) * num_input_chapters / num_arcs) - 1)
             if end_idx < start_idx:
                 end_idx = start_idx
-            ch_start = chapters[start_idx]
-            ch_end = chapters[end_idx]
-            start_ep = ch_start.get("episode", start_idx + from_ep)
-            end_ep = ch_end.get("episode", end_idx + from_ep)
-            ts = "00:00" if k == 0 else ch_start.get("timestamp", "00:00")
+            ch_start = raw_input[start_idx]
+            ch_end = raw_input[end_idx]
+            start_ep = ch_start.get("start_episode", ch_start.get("episode", start_idx + from_ep))
+            end_ep = ch_end.get("end_episode", ch_end.get("episode", end_idx + from_ep))
+            ts = ch_start.get("timestamp", "00:00" if k == 0 else "")
+            ep_range_field = ch_start.get("episode_range")
+            raw_title = ch_start.get("title", "")
+
+        # Grounded episode range extraction
+        if ep_range_field:
+            source_episode_range = str(ep_range_field)
+        elif start_ep == end_ep:
+            source_episode_range = f"Ep {start_ep}"
+        else:
+            source_episode_range = f"Ep {start_ep}–{end_ep}"
 
         # Window-based extraction: scan episodes in [start_ep, end_ep]
         chosen_theme = None
@@ -1764,6 +1812,12 @@ def build_narrative_story_chapters(
                         chosen_theme = cand_theme
                         chapter_evidence = comp_evs
                         break
+
+        if not chosen_theme and raw_title and not raw_title.lower().startswith("episode"):
+            # Preserve existing meaningful Stage 11 CTR title
+            cand = re.sub(r"\s*\(Ep.*?\)$", "", raw_title).strip()
+            if cand and cand not in used_themes:
+                chosen_theme = cand
 
         if not chosen_theme:
             theme_idx = min(len(prog_list) - 1, round(k * (len(prog_list) - 1) / max(1, num_arcs - 1)))
@@ -1781,15 +1835,19 @@ def build_narrative_story_chapters(
 
         used_themes.add(chosen_theme)
         ep_label = f"Ep {start_ep}" if start_ep == end_ep else f"Ep {start_ep}–{end_ep}"
-        title = f"{chosen_theme} ({ep_label})"
+        title = f"{chosen_theme} ({ep_label})" if not chosen_theme.endswith(f"({ep_label})") else chosen_theme
+
+        is_grounded = bool(ts is not None and str(ts).strip() != "")
 
         result.append({
             "timestamp": ts,
             "title": title,
             "episode": start_ep,
             "end_episode": end_ep,
+            "source_episode_range": source_episode_range,
             "theme": chosen_theme,
             "evidence": chapter_evidence,
+            "grounded": is_grounded,
         })
 
     return result
@@ -2726,6 +2784,7 @@ def validate_packaging_consistency(
     checks["thumbnail_prompts_grounded"] = thumb_prompts_valid
 
     # 3. Chapter sequence & themes check
+    chapter_audit: List[Dict[str, Any]] = []
     if narrative_chapters:
         first_ts = narrative_chapters[0].get("timestamp", "")
         ch_00 = first_ts in ("00:00", "0:00")
@@ -2733,11 +2792,22 @@ def validate_packaging_consistency(
         ch_themes_valid = True
         for ch in narrative_chapters:
             ch_title = ch.get("title", "")
+            ch_ts = ch.get("timestamp", "")
+            ch_grounded = bool(ch.get("grounded", True) and ch_ts and str(ch_ts).strip() != "")
+            chapter_audit.append({
+                "chapter_title": ch_title,
+                "timestamp": ch_ts,
+                "source_episode_range": ch.get("source_episode_range", f"Ep {ch.get('episode', 1)}–{ch.get('end_episode', 1)}"),
+                "grounded": ch_grounded,
+            })
+            if not ch_grounded:
+                ch_themes_valid = False
+                warnings.append(f"Chapter '{ch_title}': UNGROUNDED_CHAPTER_BLOCKED")
             ch_res = validate_text_surface(ch_title, evidence_index, archetype, surface_type="chapter")
             if not ch_res["passed"]:
                 ch_themes_valid = False
                 warnings.extend([f"Chapter '{ch_title}': {v}" for v in ch_res["violations"]])
-        checks["chapters_grounded"] = ch_themes_valid
+        checks["chapters_grounded"] = ch_themes_valid and (len(chapter_audit) > 0 and all(c["grounded"] for c in chapter_audit))
     else:
         # V5.1: Empty chapters without explicit opt-out = packaging failure
         # This prevents PASS when Stage 11 timeline was not provided
@@ -2748,7 +2818,7 @@ def validate_packaging_consistency(
             checks["chapter_00_present"] = False
             checks["chapters_grounded"] = False
             warnings.append(
-                "NO_REAL_TIMELINE_INPUT_FROM_STAGE_11: "
+                "NO_REAL_TIMELINE_INPUT_FROM_STAGE_11: UNGROUNDED_CHAPTER_BLOCKED: "
                 "narrative_chapters=[] but chapters_explicitly_disabled=False. "
                 "Provide real Stage 11 chapter timestamps or set chapters_explicitly_disabled=True."
             )
@@ -2797,6 +2867,7 @@ def validate_packaging_consistency(
     return {
         "is_consistent": is_consistent,
         "checks": checks,
+        "chapter_audit": chapter_audit,
         "downgrades_applied": downgrades_applied,
         "warnings": warnings,
     }
@@ -2859,6 +2930,8 @@ def generate_us_apocalypse_metadata(
             from_ep=from_ep,
             to_ep=to_ep,
         )
+        if not narrative_chapters and not chapters_explicitly_disabled:
+            chapter_warnings.append("UNGROUNDED_CHAPTER_BLOCKED")
 
     # ── 3. DESCRIPTION — Research-validated tier structure ──────────────────
     disaster = beats.get("disaster", "the Apocalypse")
@@ -3054,6 +3127,7 @@ def generate_us_apocalypse_metadata(
         desc_bytes <= 5000 and
         tag_chars <= 500 and
         chapter_00_ok and
+        packaging_audit["checks"].get("chapters_grounded", False) and
         packaging_audit["is_consistent"]
     )
 
@@ -3086,6 +3160,8 @@ def generate_us_apocalypse_metadata(
         "archetype": archetype,
         "archetype_mismatch": [],
         "chapter_warnings": chapter_warnings,
+        "chapter_audit": packaging_audit.get("chapter_audit", []),
+        "chapters_grounded": packaging_audit["checks"].get("chapters_grounded", False),
         "candidate_rejections": rejected_items,
         "title_validation": title_validation,
         "packaging_audit": packaging_audit,

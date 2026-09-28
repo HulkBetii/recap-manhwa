@@ -1,0 +1,1369 @@
+{
+  "title": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+  "title_options": [
+    "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+    "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+    "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+    "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+    "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap"
+  ],
+  "title_variants": {
+    "variant_a_conflict": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+    "variant_b_paradox": "When Zombie Apocalypse Hits, Everyone Panics But He Holds The Line | Manhwa Recap",
+    "variant_c_scale": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap"
+  },
+  "description": "When zombie apocalypse strikes, everyone scrambles to survive—but Tae fights to hold the line.\nThis manhwa recap covers Zombie Revelation: 82-08 (Ep 1~143).\n\n📖 Series: Zombie Revelation: 82-08\nGenre: apocalypse, survival, zombie apocalypse\n\nSubscribe for long-form apocalypse and survival manhwa recaps.\n\nThis video contains original scripted narration, editorial structure,\ncommentary and original editing. Rights in source artwork remain with\ntheir respective owners.\n\n#zombierevelation8208 #manhwarecap #apocalypsemanhwa #survivalmanhwa #zombiemanhwa",
+  "pinned_comment": "📌 MANHWA INFO & STATUS LOG:\n📖 Series: Zombie Revelation: 82-08 (Chapters 1 – 143)\n\n📊 SURVIVAL LOG:\n• 📖 Story Arc: Episodes 1–143 (143 Chapters)\n• 📍 Threat Zone: Infected Urban Sector — Active Swarms\n• 🛡️ Security Status: Makeshift Safehouse\n• ⚠️ Alert Level: Zombie Threat Active\n\n💬 Would YOU open the door for strangers during the apocalypse? Be honest 👀\n\n👉 Like & Subscribe for more full-arc manhwa recaps!",
+  "tags": [
+    "manhwa recap",
+    "zombie revelation: 82-08",
+    "zombie revelation: 82-08 recap",
+    "zombie manhwa",
+    "apocalypse manhwa"
+  ],
+  "narrative_chapters": [],
+  "thumbnail_concepts": [
+    {
+      "id": "concept_survival_split",
+      "name": "Split-Screen Survival Inequality (Phân Chia Sinh Tồn)",
+      "thumbnail_text": "OUTBREAK vs SURVIVE",
+      "text_style": "Two contrasting stat badges: LEFT fiery red, RIGHT gold/amber. Bold Impact font, thick black stroke.",
+      "composition": "Vertical split: devastation LEFT vs protagonist stand RIGHT",
+      "gpt_prompt": "Create a dramatic, cinematic 16:9 widescreen YouTube thumbnail illustration in authentic Korean webtoon manhwa art style. Sharp ink linework, saturated cel-shading, dynamic rim lighting.\n\n[COMPOSITION — SPLIT-SCREEN SURVIVAL INEQUALITY]:\nDivide the frame vertically with a dramatic diagonal crack or divide.\n\nLEFT SIDE (DEVASTATION — 45% of frame):\nA crumbling cityscape showing the Zombie Apocalypse. Panicked civilians fleeing through dust and debris. Muted, desaturated dark tones. A large bold text overlay reads 'OUTBREAK'.\n\nRIGHT SIDE (PROTAGONIST STAND — 55% of frame):\nTae standing firm with a determined survival gaze. Tactical dark clothing, practical reinforced gear, survival backpack, realistic weapon in hand. A large bold text overlay reads 'SURVIVE'.\n\n[THUMBNAIL GRAPHIC OVERLAYS]:\nTwo contrasting badges: LEFT in fiery red, RIGHT in sharp amber/gold. Bold sans-serif font (Montserrat/Impact style), thick black stroke for mobile readability.",
+      "visual_facts_used": [
+        {
+          "fact_id": "infection_event_ep001_001",
+          "visual_claim": "outbreak/disaster scene",
+          "quality": 0.9,
+          "source_type": "recap",
+          "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked "
+        },
+        {
+          "fact_id": "character_action_ep023_001",
+          "visual_claim": "protagonist survival action",
+          "quality": 0.88,
+          "source_type": "recap",
+          "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby ab"
+        }
+      ]
+    },
+    {
+      "id": "concept_before_after",
+      "name": "Before/After Survival Progression (OUTBREAK → SURVIVAL)",
+      "thumbnail_text": "OUTBREAK → SURVIVAL",
+      "text_style": "BEFORE in muted grey, AFTER in bold amber (#FFBF00). Horizontal timeline arrow.",
+      "composition": "Horizontal timeline: weak LEFT → powerful RIGHT",
+      "gpt_prompt": "Create a high-impact, cinematic 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. Sharp linework, vibrant colors, dynamic composition.\n\n[COMPOSITION — BEFORE/AFTER SURVIVAL PROGRESSION]:\nHorizontal timeline comparison showing the protagonist's transformation.\n\nLEFT (BEFORE — 40% of frame):\nA vulnerable version of Tae standing amid the initial chaos of Zombie Apocalypse. Confused expression, basic civilian clothing, no equipment. Muted warm tones.\n\nCENTER (TRANSITION — 20% of frame):\nA dramatic visual divide connecting the two states.\n\nRIGHT (AFTER — 40% of frame):\nTae transformed into a battle-hardened survivor standing firm. Tactical dark clothing, makeshift reinforced gear, survival backpack, realistic weapon in hand. Gritty cinematic lighting.\n\n[THUMBNAIL GRAPHIC OVERLAYS]:\nBold typography: 'BEFORE' in muted grey on the left, 'AFTER' in bold amber on the right. Thick black stroke. Clean readability on mobile.",
+      "visual_facts_used": [
+        {
+          "fact_id": "infection_event_ep001_001",
+          "visual_claim": "outbreak/disaster scene",
+          "quality": 0.9,
+          "source_type": "recap",
+          "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked "
+        },
+        {
+          "fact_id": "character_action_ep023_001",
+          "visual_claim": "protagonist survival action",
+          "quality": 0.88,
+          "source_type": "recap",
+          "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby ab"
+        }
+      ]
+    },
+    {
+      "id": "concept_survival_dashboard",
+      "name": "Survival Dashboard HUD (Bảng Tình Trạng Sinh Tồn)",
+      "thumbnail_text": "STATUS: ACTIVE | THREAT: ACTIVE",
+      "text_style": "Survival HUD with progress indicators and threat badges. Semi-transparent dark panels.",
+      "composition": "Character center + floating survival stats overlay",
+      "gpt_prompt": "Create a cinematic, survival-UI-inspired 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. Clean linework, dark atmospheric background, gritty textures.\n\n[COMPOSITION — SURVIVAL STATUS OVERLAY]:\n\nCENTER: Tae standing in a dramatic tactical posture amid the ruins of Zombie Apocalypse. Confident expression, tactical gear, weapon in hand.\n\nOVERLAY — SURVIVAL HUD (semi-transparent):\nFloating around the character, render a stylized survival status dashboard:\n  • Top-left: 'SURVIVAL ARC' in bold white\n  • Left bar: 'STATUS: ACTIVE' in green\n  • Right badge: 'ZOMBIE THREAT' in dark red\n  • Right badge: 'SECTOR: ISOLATED' in amber\n\n[THUMBNAIL GRAPHIC OVERLAYS]:\nSemi-transparent dark panel behind the HUD stats for readability. All text in clean sans-serif font.",
+      "visual_facts_used": [
+        {
+          "fact_id": "infection_event_ep001_001",
+          "visual_claim": "outbreak/disaster scene",
+          "quality": 0.9,
+          "source_type": "recap",
+          "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked "
+        },
+        {
+          "fact_id": "character_action_ep023_001",
+          "visual_claim": "protagonist survival action",
+          "quality": 0.88,
+          "source_type": "recap",
+          "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby ab"
+        }
+      ]
+    }
+  ],
+  "engagement_question": "Would YOU open the door for strangers during the apocalypse? Be honest 👀",
+  "survival_dashboard": {
+    "story_arc": "Episodes 1–143 (143 Chapters)",
+    "from_ep": 1,
+    "to_ep": 143,
+    "total_episodes_covered": 143,
+    "outside_condition": "Infected Urban Sector — Active Swarms",
+    "outside_condition_provenance": {
+      "fact_id": "location_event_ep004_001",
+      "fact_type": "location_event",
+      "quality_score": 0.72,
+      "source_type": "recap",
+      "evidence_snippet": "A lone assassin touches down onto the highway with terrifying precision."
+    },
+    "threat_description": "Zombie Threat Active",
+    "threat_description_provenance": {
+      "fact_id": "infection_event_ep001_001",
+      "fact_type": "infection_event",
+      "quality_score": 0.9,
+      "source_type": "recap",
+      "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+    },
+    "base_security_level": "Makeshift Safehouse",
+    "base_security_level_provenance": {
+      "fact_id": "shelter_event_ep013_001",
+      "fact_type": "shelter_event",
+      "quality_score": 0.85,
+      "source_type": "recap",
+      "evidence_snippet": "Inside the construction shelter, someone sleeps like a baby."
+    },
+    "power_status": null,
+    "day_number": null,
+    "food_reserve_pct": null,
+    "water_reserve_pct": null,
+    "mc_level": null,
+    "party_size": null
+  },
+  "compliance_flags": {
+    "passed": false,
+    "unsupported_claims": [],
+    "archetype": "zombie_apocalypse",
+    "archetype_mismatch": [],
+    "chapter_warnings": [
+      "NO_REAL_TIMELINE_INPUT_FROM_STAGE_11"
+    ],
+    "candidate_rejections": [],
+    "title_validation": {
+      "option_1": {
+        "passed": true,
+        "candidate": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_2": {
+        "passed": true,
+        "candidate": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_3": {
+        "passed": true,
+        "candidate": "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_4": {
+        "passed": true,
+        "candidate": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_5": {
+        "passed": true,
+        "candidate": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_6": {
+        "passed": true,
+        "candidate": "They Left Him for DEAD in the Quarantine Zone, But He Survived | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_7": {
+        "passed": true,
+        "candidate": "The Lone Veteran of Zombie Apocalypse Holds The Line [Ep 1~143] | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "variant_a_conflict": {
+        "passed": true,
+        "candidate": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "variant_b_paradox": {
+        "passed": true,
+        "candidate": "When Zombie Apocalypse Hits, Everyone Panics But He Holds The Line | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "variant_c_scale": {
+        "passed": true,
+        "candidate": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      }
+    },
+    "packaging_audit": {
+      "is_consistent": false,
+      "checks": {
+        "title_grounded": true,
+        "thumbnails_grounded": true,
+        "thumbnail_prompts_grounded": true,
+        "chapter_00_present": false,
+        "chapters_grounded": false,
+        "description_compliant": true,
+        "tags_consistent": true,
+        "pinned_comment_grounded": true,
+        "survival_dashboard_grounded": true
+      },
+      "downgrades_applied": [],
+      "warnings": [
+        "NO_REAL_TIMELINE_INPUT_FROM_STAGE_11: narrative_chapters=[] but chapters_explicitly_disabled=False. Provide real Stage 11 chapter timestamps or set chapters_explicitly_disabled=True."
+      ]
+    },
+    "episodes_scanned": 143,
+    "episodes_requested": 143,
+    "title_length_chars": 78,
+    "title_length_ok": true,
+    "title_first_40_chars_hook": true,
+    "description_utf8_bytes": 558,
+    "description_bytes_ok": true,
+    "tag_count": 5,
+    "tag_count_ok": true,
+    "tag_total_chars": 104,
+    "tag_chars_ok": true,
+    "hashtag_count": 5,
+    "hashtag_count_ok": true,
+    "first_chapter_is_zero": false,
+    "ypp_originality_statement_present": true,
+    "claim_audit": {
+      "is_early_stage": false,
+      "transcript_checked": true,
+      "adjusted_fields": [],
+      "title_validation": {
+        "option_1": {
+          "passed": true,
+          "candidate": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_2": {
+          "passed": true,
+          "candidate": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_3": {
+          "passed": true,
+          "candidate": "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_4": {
+          "passed": true,
+          "candidate": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_5": {
+          "passed": true,
+          "candidate": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_6": {
+          "passed": true,
+          "candidate": "They Left Him for DEAD in the Quarantine Zone, But He Survived | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_7": {
+          "passed": true,
+          "candidate": "The Lone Veteran of Zombie Apocalypse Holds The Line [Ep 1~143] | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "variant_a_conflict": {
+          "passed": true,
+          "candidate": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "variant_b_paradox": {
+          "passed": true,
+          "candidate": "When Zombie Apocalypse Hits, Everyone Panics But He Holds The Line | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "variant_c_scale": {
+          "passed": true,
+          "candidate": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        }
+      },
+      "evidence_index_archetype": "zombie_apocalypse",
+      "episodes_scanned_count": 143,
+      "v5_provenance": {
+        "generation_mode": "fact_graph_validated",
+        "facts_used": [],
+        "evidence_count": 143,
+        "total_facts": 1024,
+        "fact_types": [
+          "arrival_event",
+          "character_action",
+          "character_state",
+          "combat_event",
+          "containment_event",
+          "death_event",
+          "departure_event",
+          "disaster_event",
+          "environment_state",
+          "escape_event",
+          "group_state",
+          "infection_event",
+          "location_event",
+          "military_event",
+          "relationship_event",
+          "resource_event",
+          "shelter_event"
+        ],
+        "invariant_violations": [],
+        "rejected_facts_blocked": 327
+      },
+      "title_candidates_provenance": [
+        {
+          "text": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+          "generation_mode": "template_fact_resolved",
+          "requirement_key": "disaster_survival",
+          "facts_used": [
+            {
+              "fact_id": "infection_event_ep001_001",
+              "role": "infection_event",
+              "quality": 0.9,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "infected",
+              "canonical": "[Ep 1] Infected spreads population (trigger: 'infected'; from: \"Screams echo across the streets as m",
+              "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+            },
+            {
+              "fact_id": "disaster_event_ep029_011",
+              "role": "disaster_event",
+              "quality": 0.9,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "total collapse",
+              "canonical": "[Ep 29] Disaster destroys city/region (trigger: 'total collapse'; from: \"Tae adjusts his glasses, co",
+              "evidence_snippet": "Tae adjusts his glasses, convinced the authorities are hiding the capital's total collapse."
+            },
+            {
+              "fact_id": "combat_event_ep032_022",
+              "role": "combat_event",
+              "quality": 0.95,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "swings",
+              "canonical": "[Ep 32] Protagonist fights infected (trigger: 'swings'; from: \"Tae swings a heavy sledgehammer with ",
+              "evidence_snippet": "Tae swings a heavy sledgehammer with devastating force, cracking straight through skull and spine."
+            }
+          ],
+          "evidence_count": 3,
+          "facts_resolved": 3,
+          "facts_required": 3,
+          "provenance_complete": true
+        },
+        {
+          "text": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+          "generation_mode": "template_fact_resolved",
+          "requirement_key": "generic_survival",
+          "facts_used": [
+            {
+              "fact_id": "infection_event_ep001_001",
+              "role": "infection_event",
+              "quality": 0.9,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "infected",
+              "canonical": "[Ep 1] Infected spreads population (trigger: 'infected'; from: \"Screams echo across the streets as m",
+              "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+            },
+            {
+              "fact_id": "character_action_ep023_001",
+              "role": "character_action",
+              "quality": 0.88,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "rescued",
+              "canonical": "[Ep 23] Protagonist acts under pressure (trigger: 'rescued'; from: \"The squad scrambles through the ",
+              "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby aboard."
+            }
+          ],
+          "evidence_count": 2,
+          "facts_resolved": 2,
+          "facts_required": 2,
+          "provenance_complete": true
+        },
+        {
+          "text": "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+          "generation_mode": "template_fact_resolved",
+          "requirement_key": "betrayal",
+          "facts_used": [],
+          "evidence_count": 0,
+          "facts_resolved": 0,
+          "facts_required": 1,
+          "provenance_complete": false
+        },
+        {
+          "text": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+          "generation_mode": "template_fact_resolved",
+          "requirement_key": "defense",
+          "facts_used": [
+            {
+              "fact_id": "character_action_ep023_001",
+              "role": "character_action",
+              "quality": 0.88,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "rescued",
+              "canonical": "[Ep 23] Protagonist acts under pressure (trigger: 'rescued'; from: \"The squad scrambles through the ",
+              "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby aboard."
+            },
+            {
+              "fact_id": "combat_event_ep032_022",
+              "role": "combat_event",
+              "quality": 0.95,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "swings",
+              "canonical": "[Ep 32] Protagonist fights infected (trigger: 'swings'; from: \"Tae swings a heavy sledgehammer with ",
+              "evidence_snippet": "Tae swings a heavy sledgehammer with devastating force, cracking straight through skull and spine."
+            }
+          ],
+          "evidence_count": 2,
+          "facts_resolved": 2,
+          "facts_required": 2,
+          "provenance_complete": true
+        },
+        {
+          "text": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+          "generation_mode": "template_fact_resolved",
+          "requirement_key": "collapse",
+          "facts_used": [
+            {
+              "fact_id": "disaster_event_ep029_011",
+              "role": "disaster_event",
+              "quality": 0.9,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "total collapse",
+              "canonical": "[Ep 29] Disaster destroys city/region (trigger: 'total collapse'; from: \"Tae adjusts his glasses, co",
+              "evidence_snippet": "Tae adjusts his glasses, convinced the authorities are hiding the capital's total collapse."
+            },
+            {
+              "fact_id": "infection_event_ep001_001",
+              "role": "infection_event",
+              "quality": 0.9,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "infected",
+              "canonical": "[Ep 1] Infected spreads population (trigger: 'infected'; from: \"Screams echo across the streets as m",
+              "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+            }
+          ],
+          "evidence_count": 2,
+          "facts_resolved": 2,
+          "facts_required": 2,
+          "provenance_complete": true
+        }
+      ]
+    },
+    "fact_usage_audit": {
+      "title": {
+        "total_facts_used": 9,
+        "min_quality_required": 0.85
+      },
+      "thumbnail": {
+        "total_facts_used": 6,
+        "min_quality_required": 0.75
+      },
+      "dashboard": {
+        "threat_grounded": true,
+        "outside_grounded": true,
+        "base_security_grounded": true
+      },
+      "story_memory": {
+        "confirmed": 0,
+        "rejected": 327
+      }
+    }
+  },
+  "prepublish_audit": {
+    "passed": false,
+    "unsupported_claims": [],
+    "archetype": "zombie_apocalypse",
+    "archetype_mismatch": [],
+    "chapter_warnings": [
+      "NO_REAL_TIMELINE_INPUT_FROM_STAGE_11"
+    ],
+    "candidate_rejections": [],
+    "title_validation": {
+      "option_1": {
+        "passed": true,
+        "candidate": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_2": {
+        "passed": true,
+        "candidate": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_3": {
+        "passed": true,
+        "candidate": "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_4": {
+        "passed": true,
+        "candidate": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_5": {
+        "passed": true,
+        "candidate": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_6": {
+        "passed": true,
+        "candidate": "They Left Him for DEAD in the Quarantine Zone, But He Survived | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "option_7": {
+        "passed": true,
+        "candidate": "The Lone Veteran of Zombie Apocalypse Holds The Line [Ep 1~143] | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "variant_a_conflict": {
+        "passed": true,
+        "candidate": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "variant_b_paradox": {
+        "passed": true,
+        "candidate": "When Zombie Apocalypse Hits, Everyone Panics But He Holds The Line | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      },
+      "variant_c_scale": {
+        "passed": true,
+        "candidate": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+        "rejected_claims": [],
+        "assertions_detected": 0,
+        "assertions_validated": 0,
+        "assertions_supported": 0,
+        "assertions_unsupported": 0,
+        "assertion_details": []
+      }
+    },
+    "packaging_audit": {
+      "is_consistent": false,
+      "checks": {
+        "title_grounded": true,
+        "thumbnails_grounded": true,
+        "thumbnail_prompts_grounded": true,
+        "chapter_00_present": false,
+        "chapters_grounded": false,
+        "description_compliant": true,
+        "tags_consistent": true,
+        "pinned_comment_grounded": true,
+        "survival_dashboard_grounded": true
+      },
+      "downgrades_applied": [],
+      "warnings": [
+        "NO_REAL_TIMELINE_INPUT_FROM_STAGE_11: narrative_chapters=[] but chapters_explicitly_disabled=False. Provide real Stage 11 chapter timestamps or set chapters_explicitly_disabled=True."
+      ]
+    },
+    "episodes_scanned": 143,
+    "episodes_requested": 143,
+    "title_length_chars": 78,
+    "title_length_ok": true,
+    "title_first_40_chars_hook": true,
+    "description_utf8_bytes": 558,
+    "description_bytes_ok": true,
+    "tag_count": 5,
+    "tag_count_ok": true,
+    "tag_total_chars": 104,
+    "tag_chars_ok": true,
+    "hashtag_count": 5,
+    "hashtag_count_ok": true,
+    "first_chapter_is_zero": false,
+    "ypp_originality_statement_present": true,
+    "claim_audit": {
+      "is_early_stage": false,
+      "transcript_checked": true,
+      "adjusted_fields": [],
+      "title_validation": {
+        "option_1": {
+          "passed": true,
+          "candidate": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_2": {
+          "passed": true,
+          "candidate": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_3": {
+          "passed": true,
+          "candidate": "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_4": {
+          "passed": true,
+          "candidate": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_5": {
+          "passed": true,
+          "candidate": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_6": {
+          "passed": true,
+          "candidate": "They Left Him for DEAD in the Quarantine Zone, But He Survived | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "option_7": {
+          "passed": true,
+          "candidate": "The Lone Veteran of Zombie Apocalypse Holds The Line [Ep 1~143] | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "variant_a_conflict": {
+          "passed": true,
+          "candidate": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "variant_b_paradox": {
+          "passed": true,
+          "candidate": "When Zombie Apocalypse Hits, Everyone Panics But He Holds The Line | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        },
+        "variant_c_scale": {
+          "passed": true,
+          "candidate": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+          "rejected_claims": [],
+          "assertions_detected": 0,
+          "assertions_validated": 0,
+          "assertions_supported": 0,
+          "assertions_unsupported": 0,
+          "assertion_details": []
+        }
+      },
+      "evidence_index_archetype": "zombie_apocalypse",
+      "episodes_scanned_count": 143,
+      "v5_provenance": {
+        "generation_mode": "fact_graph_validated",
+        "facts_used": [],
+        "evidence_count": 143,
+        "total_facts": 1024,
+        "fact_types": [
+          "arrival_event",
+          "character_action",
+          "character_state",
+          "combat_event",
+          "containment_event",
+          "death_event",
+          "departure_event",
+          "disaster_event",
+          "environment_state",
+          "escape_event",
+          "group_state",
+          "infection_event",
+          "location_event",
+          "military_event",
+          "relationship_event",
+          "resource_event",
+          "shelter_event"
+        ],
+        "invariant_violations": [],
+        "rejected_facts_blocked": 327
+      },
+      "title_candidates_provenance": [
+        {
+          "text": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+          "generation_mode": "template_fact_resolved",
+          "requirement_key": "disaster_survival",
+          "facts_used": [
+            {
+              "fact_id": "infection_event_ep001_001",
+              "role": "infection_event",
+              "quality": 0.9,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "infected",
+              "canonical": "[Ep 1] Infected spreads population (trigger: 'infected'; from: \"Screams echo across the streets as m",
+              "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+            },
+            {
+              "fact_id": "disaster_event_ep029_011",
+              "role": "disaster_event",
+              "quality": 0.9,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "total collapse",
+              "canonical": "[Ep 29] Disaster destroys city/region (trigger: 'total collapse'; from: \"Tae adjusts his glasses, co",
+              "evidence_snippet": "Tae adjusts his glasses, convinced the authorities are hiding the capital's total collapse."
+            },
+            {
+              "fact_id": "combat_event_ep032_022",
+              "role": "combat_event",
+              "quality": 0.95,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "swings",
+              "canonical": "[Ep 32] Protagonist fights infected (trigger: 'swings'; from: \"Tae swings a heavy sledgehammer with ",
+              "evidence_snippet": "Tae swings a heavy sledgehammer with devastating force, cracking straight through skull and spine."
+            }
+          ],
+          "evidence_count": 3,
+          "facts_resolved": 3,
+          "facts_required": 3,
+          "provenance_complete": true
+        },
+        {
+          "text": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+          "generation_mode": "template_fact_resolved",
+          "requirement_key": "generic_survival",
+          "facts_used": [
+            {
+              "fact_id": "infection_event_ep001_001",
+              "role": "infection_event",
+              "quality": 0.9,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "infected",
+              "canonical": "[Ep 1] Infected spreads population (trigger: 'infected'; from: \"Screams echo across the streets as m",
+              "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+            },
+            {
+              "fact_id": "character_action_ep023_001",
+              "role": "character_action",
+              "quality": 0.88,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "rescued",
+              "canonical": "[Ep 23] Protagonist acts under pressure (trigger: 'rescued'; from: \"The squad scrambles through the ",
+              "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby aboard."
+            }
+          ],
+          "evidence_count": 2,
+          "facts_resolved": 2,
+          "facts_required": 2,
+          "provenance_complete": true
+        },
+        {
+          "text": "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+          "generation_mode": "template_fact_resolved",
+          "requirement_key": "betrayal",
+          "facts_used": [],
+          "evidence_count": 0,
+          "facts_resolved": 0,
+          "facts_required": 1,
+          "provenance_complete": false
+        },
+        {
+          "text": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+          "generation_mode": "template_fact_resolved",
+          "requirement_key": "defense",
+          "facts_used": [
+            {
+              "fact_id": "character_action_ep023_001",
+              "role": "character_action",
+              "quality": 0.88,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "rescued",
+              "canonical": "[Ep 23] Protagonist acts under pressure (trigger: 'rescued'; from: \"The squad scrambles through the ",
+              "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby aboard."
+            },
+            {
+              "fact_id": "combat_event_ep032_022",
+              "role": "combat_event",
+              "quality": 0.95,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "swings",
+              "canonical": "[Ep 32] Protagonist fights infected (trigger: 'swings'; from: \"Tae swings a heavy sledgehammer with ",
+              "evidence_snippet": "Tae swings a heavy sledgehammer with devastating force, cracking straight through skull and spine."
+            }
+          ],
+          "evidence_count": 2,
+          "facts_resolved": 2,
+          "facts_required": 2,
+          "provenance_complete": true
+        },
+        {
+          "text": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+          "generation_mode": "template_fact_resolved",
+          "requirement_key": "collapse",
+          "facts_used": [
+            {
+              "fact_id": "disaster_event_ep029_011",
+              "role": "disaster_event",
+              "quality": 0.9,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "total collapse",
+              "canonical": "[Ep 29] Disaster destroys city/region (trigger: 'total collapse'; from: \"Tae adjusts his glasses, co",
+              "evidence_snippet": "Tae adjusts his glasses, convinced the authorities are hiding the capital's total collapse."
+            },
+            {
+              "fact_id": "infection_event_ep001_001",
+              "role": "infection_event",
+              "quality": 0.9,
+              "source_type": "recap",
+              "source_priority": 1,
+              "surface_allowed": true,
+              "trigger": "infected",
+              "canonical": "[Ep 1] Infected spreads population (trigger: 'infected'; from: \"Screams echo across the streets as m",
+              "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+            }
+          ],
+          "evidence_count": 2,
+          "facts_resolved": 2,
+          "facts_required": 2,
+          "provenance_complete": true
+        }
+      ]
+    },
+    "fact_usage_audit": {
+      "title": {
+        "total_facts_used": 9,
+        "min_quality_required": 0.85
+      },
+      "thumbnail": {
+        "total_facts_used": 6,
+        "min_quality_required": 0.75
+      },
+      "dashboard": {
+        "threat_grounded": true,
+        "outside_grounded": true,
+        "base_security_grounded": true
+      },
+      "story_memory": {
+        "confirmed": 0,
+        "rejected": 327
+      }
+    }
+  },
+  "fact_usage_audit": {
+    "title": {
+      "total_facts_used": 9,
+      "min_quality_required": 0.85
+    },
+    "thumbnail": {
+      "total_facts_used": 6,
+      "min_quality_required": 0.75
+    },
+    "dashboard": {
+      "threat_grounded": true,
+      "outside_grounded": true,
+      "base_security_grounded": true
+    },
+    "story_memory": {
+      "confirmed": 0,
+      "rejected": 327
+    }
+  },
+  "title_validation": {
+    "option_1": {
+      "passed": true,
+      "candidate": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+      "rejected_claims": [],
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "assertions_supported": 0,
+      "assertions_unsupported": 0,
+      "assertion_details": []
+    },
+    "option_2": {
+      "passed": true,
+      "candidate": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+      "rejected_claims": [],
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "assertions_supported": 0,
+      "assertions_unsupported": 0,
+      "assertion_details": []
+    },
+    "option_3": {
+      "passed": true,
+      "candidate": "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+      "rejected_claims": [],
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "assertions_supported": 0,
+      "assertions_unsupported": 0,
+      "assertion_details": []
+    },
+    "option_4": {
+      "passed": true,
+      "candidate": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+      "rejected_claims": [],
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "assertions_supported": 0,
+      "assertions_unsupported": 0,
+      "assertion_details": []
+    },
+    "option_5": {
+      "passed": true,
+      "candidate": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+      "rejected_claims": [],
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "assertions_supported": 0,
+      "assertions_unsupported": 0,
+      "assertion_details": []
+    },
+    "option_6": {
+      "passed": true,
+      "candidate": "They Left Him for DEAD in the Quarantine Zone, But He Survived | Manhwa Recap",
+      "rejected_claims": [],
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "assertions_supported": 0,
+      "assertions_unsupported": 0,
+      "assertion_details": []
+    },
+    "option_7": {
+      "passed": true,
+      "candidate": "The Lone Veteran of Zombie Apocalypse Holds The Line [Ep 1~143] | Manhwa Recap",
+      "rejected_claims": [],
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "assertions_supported": 0,
+      "assertions_unsupported": 0,
+      "assertion_details": []
+    },
+    "variant_a_conflict": {
+      "passed": true,
+      "candidate": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+      "rejected_claims": [],
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "assertions_supported": 0,
+      "assertions_unsupported": 0,
+      "assertion_details": []
+    },
+    "variant_b_paradox": {
+      "passed": true,
+      "candidate": "When Zombie Apocalypse Hits, Everyone Panics But He Holds The Line | Manhwa Recap",
+      "rejected_claims": [],
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "assertions_supported": 0,
+      "assertions_unsupported": 0,
+      "assertion_details": []
+    },
+    "variant_c_scale": {
+      "passed": true,
+      "candidate": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+      "rejected_claims": [],
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "assertions_supported": 0,
+      "assertions_unsupported": 0,
+      "assertion_details": []
+    }
+  },
+  "packaging_audit": {
+    "is_consistent": false,
+    "checks": {
+      "title_grounded": true,
+      "thumbnails_grounded": true,
+      "thumbnail_prompts_grounded": true,
+      "chapter_00_present": false,
+      "chapters_grounded": false,
+      "description_compliant": true,
+      "tags_consistent": true,
+      "pinned_comment_grounded": true,
+      "survival_dashboard_grounded": true
+    },
+    "downgrades_applied": [],
+    "warnings": [
+      "NO_REAL_TIMELINE_INPUT_FROM_STAGE_11: narrative_chapters=[] but chapters_explicitly_disabled=False. Provide real Stage 11 chapter timestamps or set chapters_explicitly_disabled=True."
+    ]
+  },
+  "formatted_kit": "================================================================================\nYOUTUBE UPLOAD KIT: Zombie Revelation: 82-08\nEpisodes: 1 - 143 | Market: us_apocalypse | Archetype: ZOMBIE_APOCALYPSE\n================================================================================\n\n[1. NATIVE A/B TEST TITLE HYPOTHESES (Paste 3 options into YouTube A/B Tester)]\n★ Hypothesis A (Conflict / Retaliation Hook):\n  When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap\n★ Hypothesis B (Paradox / Resource Monopoly Hook):\n  When Zombie Apocalypse Hits, Everyone Panics But He Holds The Line | Manhwa Recap\n★ Hypothesis C (Scale / Survival Arc Hook):\n  From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap\n\n--- Top 5 Ranked Title Candidates ---\n★ Option 1: When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap\n  Option 2: Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap\n  Option 3: He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap\n  Option 4: When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap\n  Option 5: From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap\n\n[2. DESCRIPTION & TIMESTAMPS (Copy & paste into YouTube Description)]\nWhen zombie apocalypse strikes, everyone scrambles to survive—but Tae fights to hold the line.\nThis manhwa recap covers Zombie Revelation: 82-08 (Ep 1~143).\n\n📖 Series: Zombie Revelation: 82-08\nGenre: apocalypse, survival, zombie apocalypse\n\nSubscribe for long-form apocalypse and survival manhwa recaps.\n\nThis video contains original scripted narration, editorial structure,\ncommentary and original editing. Rights in source artwork remain with\ntheir respective owners.\n\n#zombierevelation8208 #manhwarecap #apocalypsemanhwa #survivalmanhwa #zombiemanhwa\n\n[3. PINNED COMMENT (Copy & paste to Pin)]\n📌 MANHWA INFO & STATUS LOG:\n📖 Series: Zombie Revelation: 82-08 (Chapters 1 – 143)\n\n📊 SURVIVAL LOG:\n• 📖 Story Arc: Episodes 1–143 (143 Chapters)\n• 📍 Threat Zone: Infected Urban Sector — Active Swarms\n• 🛡️ Security Status: Makeshift Safehouse\n• ⚠️ Alert Level: Zombie Threat Active\n\n💬 Would YOU open the door for strangers during the apocalypse? Be honest 👀\n\n👉 Like & Subscribe for more full-arc manhwa recaps!\n\n[4. TAGS (Copy & paste directly into YouTube Studio Tag Box)]\nmanhwa recap, zombie revelation: 82-08, zombie revelation: 82-08 recap, zombie manhwa, apocalypse manhwa\n\n================================================================================\n[5. RESOURCE-CONTRAST THUMBNAIL CONCEPTS & AI PROMPTS]\n================================================================================\n\n▶ CONCEPT 1: SPLIT-SCREEN SURVIVAL INEQUALITY (PHÂN CHIA SINH TỒN)\n  • Text Overlay : OUTBREAK vs SURVIVE\n  • Text Style   : Two contrasting stat badges: LEFT fiery red, RIGHT gold/amber. Bold Impact font, thick black stroke.\n  • Composition  : Vertical split: devastation LEFT vs protagonist stand RIGHT\n\n  • MASTER PROMPT (Copy & paste into GPT-4o):\n--------------------------------------------------------------------------------\nCreate a dramatic, cinematic 16:9 widescreen YouTube thumbnail illustration in authentic Korean webtoon manhwa art style. Sharp ink linework, saturated cel-shading, dynamic rim lighting.\n\n[COMPOSITION — SPLIT-SCREEN SURVIVAL INEQUALITY]:\nDivide the frame vertically with a dramatic diagonal crack or divide.\n\nLEFT SIDE (DEVASTATION — 45% of frame):\nA crumbling cityscape showing the Zombie Apocalypse. Panicked civilians fleeing through dust and debris. Muted, desaturated dark tones. A large bold text overlay reads 'OUTBREAK'.\n\nRIGHT SIDE (PROTAGONIST STAND — 55% of frame):\nTae standing firm with a determined survival gaze. Tactical dark clothing, practical reinforced gear, survival backpack, realistic weapon in hand. A large bold text overlay reads 'SURVIVE'.\n\n[THUMBNAIL GRAPHIC OVERLAYS]:\nTwo contrasting badges: LEFT in fiery red, RIGHT in sharp amber/gold. Bold sans-serif font (Montserrat/Impact style), thick black stroke for mobile readability.\n--------------------------------------------------------------------------------\n\n▶ CONCEPT 2: BEFORE/AFTER SURVIVAL PROGRESSION (OUTBREAK → SURVIVAL)\n  • Text Overlay : OUTBREAK → SURVIVAL\n  • Text Style   : BEFORE in muted grey, AFTER in bold amber (#FFBF00). Horizontal timeline arrow.\n  • Composition  : Horizontal timeline: weak LEFT → powerful RIGHT\n\n  • MASTER PROMPT (Copy & paste into GPT-4o):\n--------------------------------------------------------------------------------\nCreate a high-impact, cinematic 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. Sharp linework, vibrant colors, dynamic composition.\n\n[COMPOSITION — BEFORE/AFTER SURVIVAL PROGRESSION]:\nHorizontal timeline comparison showing the protagonist's transformation.\n\nLEFT (BEFORE — 40% of frame):\nA vulnerable version of Tae standing amid the initial chaos of Zombie Apocalypse. Confused expression, basic civilian clothing, no equipment. Muted warm tones.\n\nCENTER (TRANSITION — 20% of frame):\nA dramatic visual divide connecting the two states.\n\nRIGHT (AFTER — 40% of frame):\nTae transformed into a battle-hardened survivor standing firm. Tactical dark clothing, makeshift reinforced gear, survival backpack, realistic weapon in hand. Gritty cinematic lighting.\n\n[THUMBNAIL GRAPHIC OVERLAYS]:\nBold typography: 'BEFORE' in muted grey on the left, 'AFTER' in bold amber on the right. Thick black stroke. Clean readability on mobile.\n--------------------------------------------------------------------------------\n\n▶ CONCEPT 3: SURVIVAL DASHBOARD HUD (BẢNG TÌNH TRẠNG SINH TỒN)\n  • Text Overlay : STATUS: ACTIVE | THREAT: ACTIVE\n  • Text Style   : Survival HUD with progress indicators and threat badges. Semi-transparent dark panels.\n  • Composition  : Character center + floating survival stats overlay\n\n  • MASTER PROMPT (Copy & paste into GPT-4o):\n--------------------------------------------------------------------------------\nCreate a cinematic, survival-UI-inspired 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. Clean linework, dark atmospheric background, gritty textures.\n\n[COMPOSITION — SURVIVAL STATUS OVERLAY]:\n\nCENTER: Tae standing in a dramatic tactical posture amid the ruins of Zombie Apocalypse. Confident expression, tactical gear, weapon in hand.\n\nOVERLAY — SURVIVAL HUD (semi-transparent):\nFloating around the character, render a stylized survival status dashboard:\n  • Top-left: 'SURVIVAL ARC' in bold white\n  • Left bar: 'STATUS: ACTIVE' in green\n  • Right badge: 'ZOMBIE THREAT' in dark red\n  • Right badge: 'SECTOR: ISOLATED' in amber\n\n[THUMBNAIL GRAPHIC OVERLAYS]:\nSemi-transparent dark panel behind the HUD stats for readability. All text in clean sans-serif font.\n--------------------------------------------------------------------------------\n\n================================================================================\n[6. SURVIVAL DASHBOARD OVERLAY DATA (For video editing)]\n  Story Arc: Episodes 1–143 (143 Chapters)\n  Outside Condition: Infected Urban Sector — Active Swarms\n  Threat: Zombie Threat Active\n  Base Security: Makeshift Safehouse\n================================================================================\n\n================================================================================\n[7. 2026 PRE-PUBLISH QUALITY AUDIT SUMMARY]\n  • Overall Validation: FAIL\n  • Episodes Scanned: 143 / 143\n  • Packaging Consistent: FAIL\n  • Title Length: 78 chars -> PASS\n  • Description Size: 558 bytes -> PASS\n  • Tag Count: 5 tags, 104 chars -> PASS\n  • Chapter 00:00 Present: FAIL\n  • YPP Originality Statement: PASS\n  • Unsupported Claims: NONE (Clean)\n================================================================================",
+  "provenance_summary": {
+    "fact_graph_surfaces": 8,
+    "legacy_text_surfaces": 0,
+    "total_facts_used": 0,
+    "total_evidence_units": 143,
+    "total_facts_in_graph": 1024,
+    "fact_types_present": [
+      "arrival_event",
+      "character_action",
+      "character_state",
+      "combat_event",
+      "containment_event",
+      "death_event",
+      "departure_event",
+      "disaster_event",
+      "environment_state",
+      "escape_event",
+      "group_state",
+      "infection_event",
+      "location_event",
+      "military_event",
+      "relationship_event",
+      "resource_event",
+      "shelter_event"
+    ],
+    "invariant_violations": [],
+    "generation_mode": "fact_graph_validated",
+    "title_candidates_provenance": [
+      {
+        "text": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+        "generation_mode": "template_fact_resolved",
+        "requirement_key": "disaster_survival",
+        "facts_used": [
+          {
+            "fact_id": "infection_event_ep001_001",
+            "role": "infection_event",
+            "quality": 0.9,
+            "source_type": "recap",
+            "source_priority": 1,
+            "surface_allowed": true,
+            "trigger": "infected",
+            "canonical": "[Ep 1] Infected spreads population (trigger: 'infected'; from: \"Screams echo across the streets as m",
+            "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+          },
+          {
+            "fact_id": "disaster_event_ep029_011",
+            "role": "disaster_event",
+            "quality": 0.9,
+            "source_type": "recap",
+            "source_priority": 1,
+            "surface_allowed": true,
+            "trigger": "total collapse",
+            "canonical": "[Ep 29] Disaster destroys city/region (trigger: 'total collapse'; from: \"Tae adjusts his glasses, co",
+            "evidence_snippet": "Tae adjusts his glasses, convinced the authorities are hiding the capital's total collapse."
+          },
+          {
+            "fact_id": "combat_event_ep032_022",
+            "role": "combat_event",
+            "quality": 0.95,
+            "source_type": "recap",
+            "source_priority": 1,
+            "surface_allowed": true,
+            "trigger": "swings",
+            "canonical": "[Ep 32] Protagonist fights infected (trigger: 'swings'; from: \"Tae swings a heavy sledgehammer with ",
+            "evidence_snippet": "Tae swings a heavy sledgehammer with devastating force, cracking straight through skull and spine."
+          }
+        ],
+        "evidence_count": 3,
+        "facts_resolved": 3,
+        "facts_required": 3,
+        "provenance_complete": true
+      },
+      {
+        "text": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+        "generation_mode": "template_fact_resolved",
+        "requirement_key": "generic_survival",
+        "facts_used": [
+          {
+            "fact_id": "infection_event_ep001_001",
+            "role": "infection_event",
+            "quality": 0.9,
+            "source_type": "recap",
+            "source_priority": 1,
+            "surface_allowed": true,
+            "trigger": "infected",
+            "canonical": "[Ep 1] Infected spreads population (trigger: 'infected'; from: \"Screams echo across the streets as m",
+            "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+          },
+          {
+            "fact_id": "character_action_ep023_001",
+            "role": "character_action",
+            "quality": 0.88,
+            "source_type": "recap",
+            "source_priority": 1,
+            "surface_allowed": true,
+            "trigger": "rescued",
+            "canonical": "[Ep 23] Protagonist acts under pressure (trigger: 'rescued'; from: \"The squad scrambles through the ",
+            "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby aboard."
+          }
+        ],
+        "evidence_count": 2,
+        "facts_resolved": 2,
+        "facts_required": 2,
+        "provenance_complete": true
+      },
+      {
+        "text": "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+        "generation_mode": "template_fact_resolved",
+        "requirement_key": "betrayal",
+        "facts_used": [],
+        "evidence_count": 0,
+        "facts_resolved": 0,
+        "facts_required": 1,
+        "provenance_complete": false
+      },
+      {
+        "text": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+        "generation_mode": "template_fact_resolved",
+        "requirement_key": "defense",
+        "facts_used": [
+          {
+            "fact_id": "character_action_ep023_001",
+            "role": "character_action",
+            "quality": 0.88,
+            "source_type": "recap",
+            "source_priority": 1,
+            "surface_allowed": true,
+            "trigger": "rescued",
+            "canonical": "[Ep 23] Protagonist acts under pressure (trigger: 'rescued'; from: \"The squad scrambles through the ",
+            "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby aboard."
+          },
+          {
+            "fact_id": "combat_event_ep032_022",
+            "role": "combat_event",
+            "quality": 0.95,
+            "source_type": "recap",
+            "source_priority": 1,
+            "surface_allowed": true,
+            "trigger": "swings",
+            "canonical": "[Ep 32] Protagonist fights infected (trigger: 'swings'; from: \"Tae swings a heavy sledgehammer with ",
+            "evidence_snippet": "Tae swings a heavy sledgehammer with devastating force, cracking straight through skull and spine."
+          }
+        ],
+        "evidence_count": 2,
+        "facts_resolved": 2,
+        "facts_required": 2,
+        "provenance_complete": true
+      },
+      {
+        "text": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+        "generation_mode": "template_fact_resolved",
+        "requirement_key": "collapse",
+        "facts_used": [
+          {
+            "fact_id": "disaster_event_ep029_011",
+            "role": "disaster_event",
+            "quality": 0.9,
+            "source_type": "recap",
+            "source_priority": 1,
+            "surface_allowed": true,
+            "trigger": "total collapse",
+            "canonical": "[Ep 29] Disaster destroys city/region (trigger: 'total collapse'; from: \"Tae adjusts his glasses, co",
+            "evidence_snippet": "Tae adjusts his glasses, convinced the authorities are hiding the capital's total collapse."
+          },
+          {
+            "fact_id": "infection_event_ep001_001",
+            "role": "infection_event",
+            "quality": 0.9,
+            "source_type": "recap",
+            "source_priority": 1,
+            "surface_allowed": true,
+            "trigger": "infected",
+            "canonical": "[Ep 1] Infected spreads population (trigger: 'infected'; from: \"Screams echo across the streets as m",
+            "evidence_snippet": "Screams echo across the streets as mutated infected violently run down panicked survivors."
+          }
+        ],
+        "evidence_count": 2,
+        "facts_resolved": 2,
+        "facts_required": 2,
+        "provenance_complete": true
+      }
+    ]
+  }
+}

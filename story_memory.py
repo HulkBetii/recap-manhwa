@@ -259,6 +259,7 @@ class StoryMemory:
             "Dropping", "Pulling", "Pushing", "Grinding", "Unfazed", "Collapsed",
             "Bare", "Cold", "Dark", "Heavy", "Deep", "Pure", "Every", "Still",
             "Spinning", "Sliding", "Day", "Night", "Morning", "Evening",
+            "Paran",
             "Khi", "Sau", "Trong", "Giữa", "Trước", "Nếu", "Nhưng", "Thế",
             "Tuy", "Dù", "Ngay", "Đúng", "Cùng", "Toàn", "Khắp", "Mọi",
             "Quân", "Đích", "Tiểu", "Vị", "Bản", "Cơn", "Trận", "Cuộc",
@@ -358,6 +359,21 @@ class StoryMemory:
 
         return "auto"
 
+    @staticmethod
+    def normalize_protagonist_entities(text: str, canonical_name: str) -> str:
+        """
+        Normalizes placeholder or hallucinated protagonist entities (e.g. 'Paran')
+        into the confirmed canonical protagonist name.
+        """
+        if not text or not canonical_name:
+            return text
+        if canonical_name.strip().lower() == "paran":
+            return text
+        # Word boundary safe replacement for Paran's and Paran
+        text = re.sub(r"\bParan's\b", f"{canonical_name}'s", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bParan\b", canonical_name, text, flags=re.IGNORECASE)
+        return text
+
     def set_protagonist_name(self, name: str) -> None:
         """Sets or updates the detected protagonist name."""
         if name and name.strip():
@@ -405,6 +421,12 @@ class StoryMemory:
             if isinstance(recap_data[0], dict)
             else getattr(recap_data[0], "speech", "")
         )
+
+        canonical = self.protagonist_name
+        if canonical and canonical.lower() != "paran":
+            opening = self.normalize_protagonist_entities(opening, canonical)
+            cliffhanger = self.normalize_protagonist_entities(cliffhanger, canonical)
+            summary = self.normalize_protagonist_entities(summary, canonical)
 
         self.episodes[str(ep)] = {
             "episode": ep,

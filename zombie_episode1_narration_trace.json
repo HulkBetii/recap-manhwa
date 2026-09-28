@@ -1,0 +1,619 @@
+{
+  "comic_title": "Zombie Revelation 82-08",
+  "episode": 1,
+  "pipeline_version": "Stage 5 V5.3 (Retention & Protagonist Bootstrap)",
+  "total_segments": 36,
+  "audit_window": "Full Episode (36 segments / 03:20)",
+  "hook_validation_report": {
+    "protagonist_first_appearance": "When the apocalypse turns Seoul into a feral meat grinder, Tae knows screaming won't save anyone.",
+    "protagonist_name_used": "Tae (Confirmed Canonical Identity)",
+    "seconds_delay": 0.0,
+    "sentence_index_first_appearance": 1,
+    "opening_type": "Character-First Survival Hook (0-15s Golden Hook)",
+    "hook_score": "9.8 / 10.0 (High Retention & Zero Drop-off Hazard)",
+    "contains_world_disaster_only": false,
+    "contains_protagonist_action_in_0_15s": true,
+    "contains_personal_stakes_in_0_15s": true,
+    "contains_unique_ability_in_0_15s": true,
+    "contains_survival_decision_in_0_15s": true,
+    "validation_status": "PASS"
+  },
+  "segments": [
+    {
+      "segment_id": "ep001_seg_001",
+      "segment_number": 1,
+      "timing": "00:00:00,000 --> 00:00:05,440",
+      "start_seconds": 0.0,
+      "end_seconds": 5.44,
+      "text": "When the apocalypse turns Seoul into a feral meat grinder, Tae knows screaming won't save anyone.",
+      "pages_used": [
+        1
+      ],
+      "facts_used": [
+        {
+          "fact_id": "disaster_event_ep001_001",
+          "fact_type": "disaster_event",
+          "quality": 0.8500000000000001,
+          "canonical": "[Ep 1] Disaster destroys city/region (trigger: 'apocalypse'; from: \"When the apocalypse turns Seoul into a feral meat grinder, Tae knows screaming w...\")"
+        }
+      ],
+      "protagonist_present": true,
+      "location_present": true,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_002",
+      "segment_number": 2,
+      "timing": "00:00:05,960 --> 00:00:12,460",
+      "start_seconds": 5.96,
+      "end_seconds": 12.46,
+      "text": "Emergency broadcasts spew hollow reassurances while entire districts collapse into fiery, lawless chaos.",
+      "pages_used": [
+        3
+      ],
+      "facts_used": [
+        {
+          "fact_id": "environment_state_ep001_001",
+          "fact_type": "environment_state",
+          "quality": 0.75,
+          "canonical": "[Ep 1] Environment is hazardous (trigger: 'collapse'; from: \"Emergency broadcasts spew hollow reassurances while entire districts collapse in...\")"
+        }
+      ],
+      "protagonist_present": false,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_003",
+      "segment_number": 3,
+      "timing": "00:00:13,320 --> 00:00:18,360",
+      "start_seconds": 13.32,
+      "end_seconds": 18.36,
+      "text": "Screams echo across the streets as mutated infected violently run down panicked survivors.",
+      "pages_used": [
+        4,
+        5
+      ],
+      "facts_used": [
+        {
+          "fact_id": "infection_event_ep001_001",
+          "fact_type": "infection_event",
+          "quality": 0.9,
+          "canonical": "[Ep 1] Infected spreads population (trigger: 'infected'; from: \"Screams echo across the streets as mutated infected violently run down panicked...\")"
+        }
+      ],
+      "protagonist_present": true,
+      "location_present": true,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_004",
+      "segment_number": 4,
+      "timing": "00:00:18,720 --> 00:00:24,640",
+      "start_seconds": 18.72,
+      "end_seconds": 24.64,
+      "text": "A victim desperately fights back, but brute feral strength easily overpowers standard human resistance.",
+      "pages_used": [
+        6
+      ],
+      "facts_used": [],
+      "protagonist_present": false,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_005",
+      "segment_number": 5,
+      "timing": "00:00:25,260 --> 00:00:30,520",
+      "start_seconds": 25.26,
+      "end_seconds": 30.52,
+      "text": "Bloodshot eyes and gaping jaws confirm civilization ended before lunch even arrived.",
+      "pages_used": [
+        7
+      ],
+      "facts_used": [],
+      "protagonist_present": false,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_006",
+      "segment_number": 6,
+      "timing": "00:00:30,900 --> 00:00:35,360",
+      "start_seconds": 30.9,
+      "end_seconds": 35.36,
+      "text": "An endless swarm charges down the asphalt like a tidal wave of nightmare fuel.",
+      "pages_used": [
+        8
+      ],
+      "facts_used": [
+        {
+          "fact_id": "combat_event_ep001_001",
+          "fact_type": "combat_event",
+          "quality": 0.8,
+          "canonical": "[Ep 1] Zombie_Horde attacks survivors (trigger: 'swarm'; from: \"An endless swarm charges down the asphalt like a tidal wave of nightmare fuel....\")"
+        },
+        {
+          "fact_id": "resource_event_ep001_001",
+          "fact_type": "resource_event",
+          "quality": 0.7250000000000001,
+          "canonical": "[Ep 1] Protagonist acquires supplies (trigger: 'fuel'; from: \"An endless swarm charges down the asphalt like a tidal wave of nightmare fuel....\")"
+        }
+      ],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_007",
+      "segment_number": 7,
+      "timing": "00:00:35,660 --> 00:00:40,760",
+      "start_seconds": 35.66,
+      "end_seconds": 40.76,
+      "text": "State announcements urge everyone to lock their doors and wait for miracles that aren't coming.",
+      "pages_used": [
+        9
+      ],
+      "facts_used": [],
+      "protagonist_present": false,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_008",
+      "segment_number": 8,
+      "timing": "00:00:41,680 --> 00:00:47,280",
+      "start_seconds": 41.68,
+      "end_seconds": 47.28,
+      "text": "Across the shattered skyline, plumes of black smoke mark where organized resistance crumbled.",
+      "pages_used": [
+        10,
+        11
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": true,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_009",
+      "segment_number": 9,
+      "timing": "00:00:47,900 --> 00:00:53,460",
+      "start_seconds": 47.9,
+      "end_seconds": 53.46,
+      "text": "Military checkpoints collapse under crushing hordes faster than command can issue fresh orders.",
+      "pages_used": [
+        12
+      ],
+      "facts_used": [
+        {
+          "fact_id": "military_event_ep001_001",
+          "fact_type": "military_event",
+          "quality": 0.7,
+          "canonical": "[Ep 1] Military responds to outbreak (trigger: 'military'; from: \"Military checkpoints collapse under crushing hordes faster than command can issu...\")"
+        }
+      ],
+      "protagonist_present": false,
+      "location_present": true,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_010",
+      "segment_number": 10,
+      "timing": "00:00:54,000 --> 00:00:59,600",
+      "start_seconds": 54.0,
+      "end_seconds": 59.6,
+      "text": "High-caliber rounds tear through the frontline beasts, yet the swarm pushes relentlessly forward.",
+      "pages_used": [
+        13,
+        14
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_011",
+      "segment_number": 11,
+      "timing": "00:01:00,120 --> 00:01:05,380",
+      "start_seconds": 60.12,
+      "end_seconds": 65.38,
+      "text": "Desperate squad leaders scream for headshots into radios that nobody is answering anymore.",
+      "pages_used": [
+        15
+      ],
+      "facts_used": [
+        {
+          "fact_id": "group_state_ep001_001",
+          "fact_type": "group_state",
+          "quality": 0.65,
+          "canonical": "[Ep 1] Group are survivors (trigger: 'squad'; from: \"Desperate squad leaders scream for headshots into radios that nobody is answerin...\")"
+        }
+      ],
+      "protagonist_present": false,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_012",
+      "segment_number": 12,
+      "timing": "00:01:05,940 --> 00:01:10,780",
+      "start_seconds": 65.94,
+      "end_seconds": 70.78,
+      "text": "Heavy fire chews up the pavement, cutting down waves without slowing the main tide.",
+      "pages_used": [
+        16
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_013",
+      "segment_number": 13,
+      "timing": "00:01:11,260 --> 00:01:15,640",
+      "start_seconds": 71.26,
+      "end_seconds": 75.64,
+      "text": "Piercing shrieks rip through the cordons as more infected barrel into point-blank range.",
+      "pages_used": [
+        17
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_014",
+      "segment_number": 14,
+      "timing": "00:01:16,420 --> 00:01:21,140",
+      "start_seconds": 76.42,
+      "end_seconds": 81.14,
+      "text": "Rabid monstrosities shrug off flesh wounds, driven purely by the urge to consume.",
+      "pages_used": [
+        19
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_015",
+      "segment_number": 15,
+      "timing": "00:01:21,980 --> 00:01:26,020",
+      "start_seconds": 81.98,
+      "end_seconds": 86.02,
+      "text": "Tae casually sparks up a lighter, watching the chaos with ice in his veins.",
+      "pages_used": [
+        20
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_016",
+      "segment_number": 16,
+      "timing": "00:01:26,580 --> 00:01:31,140",
+      "start_seconds": 86.58,
+      "end_seconds": 91.14,
+      "text": "Golden flames flicker as he leans back against the wall, utterly unfazed by the apocalypse.",
+      "pages_used": [
+        21,
+        22
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_017",
+      "segment_number": 17,
+      "timing": "00:01:31,900 --> 00:01:36,640",
+      "start_seconds": 91.9,
+      "end_seconds": 96.64,
+      "text": "Outside, society drowns in madness; here, he takes a slow, steady drag.",
+      "pages_used": [
+        23
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_018",
+      "segment_number": 18,
+      "timing": "00:01:37,080 --> 00:01:41,780",
+      "start_seconds": 97.08,
+      "end_seconds": 101.78,
+      "text": "Stepping out onto the bloodstained floor, he observes the carnage with pure disgust.",
+      "pages_used": [
+        26
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_019",
+      "segment_number": 19,
+      "timing": "00:01:42,060 --> 00:01:46,760",
+      "start_seconds": 102.06,
+      "end_seconds": 106.76,
+      "text": "Cold, calculating eyes scan the alleyway, daring any creature to sprint forward.",
+      "pages_used": [
+        27
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": true,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_020",
+      "segment_number": 20,
+      "timing": "00:01:47,160 --> 00:01:51,700",
+      "start_seconds": 107.16,
+      "end_seconds": 111.7,
+      "text": "He issues a blunt ultimatum: attack all at once, or stop wasting his time.",
+      "pages_used": [
+        28
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_021",
+      "segment_number": 21,
+      "timing": "00:01:51,700 --> 00:01:57,300",
+      "start_seconds": 111.7,
+      "end_seconds": 117.3,
+      "text": "A survivor swings desperately at charging beasts, struggling to buy another precious second.",
+      "pages_used": [
+        29
+      ],
+      "facts_used": [],
+      "protagonist_present": false,
+      "location_present": false,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_022",
+      "segment_number": 22,
+      "timing": "00:01:57,560 --> 00:02:02,560",
+      "start_seconds": 117.56,
+      "end_seconds": 122.56,
+      "text": "Teeth clenched and knuckles white, every swing is fueled by raw survival adrenaline.",
+      "pages_used": [
+        30
+      ],
+      "facts_used": [],
+      "protagonist_present": false,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_023",
+      "segment_number": 23,
+      "timing": "00:02:03,260 --> 00:02:07,260",
+      "start_seconds": 123.26,
+      "end_seconds": 127.26,
+      "text": "The blunt weapon crashes down with everything the defender has left in reserve.",
+      "pages_used": [
+        31
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_024",
+      "segment_number": 24,
+      "timing": "00:02:07,980 --> 00:02:12,660",
+      "start_seconds": 127.98,
+      "end_seconds": 132.66,
+      "text": "Bone fractures on impact, unleashing a furious blast of dust and splintered wood.",
+      "pages_used": [
+        32,
+        33
+      ],
+      "facts_used": [],
+      "protagonist_present": false,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_025",
+      "segment_number": 25,
+      "timing": "00:02:13,040 --> 00:02:17,040",
+      "start_seconds": 133.04,
+      "end_seconds": 137.04,
+      "text": "Swept off balance in the narrow corridor, the defender tumbles into lethal danger.",
+      "pages_used": [
+        34
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": true,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_026",
+      "segment_number": 26,
+      "timing": "00:02:18,000 --> 00:02:22,560",
+      "start_seconds": 138.0,
+      "end_seconds": 142.56,
+      "text": "He scrambles backward across the floor, clutching his weapon as shadows loom above.",
+      "pages_used": [
+        35
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_027",
+      "segment_number": 27,
+      "timing": "00:02:23,380 --> 00:02:28,660",
+      "start_seconds": 143.38,
+      "end_seconds": 148.66,
+      "text": "From behind the barricade, steel mesh is the only fragile barrier keeping predators out.",
+      "pages_used": [
+        37
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": true,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_028",
+      "segment_number": 28,
+      "timing": "00:02:29,040 --> 00:02:33,720",
+      "start_seconds": 149.04,
+      "end_seconds": 153.72,
+      "text": "Tae and his companions peer down from the catwalk, coolly assessing the struggling stranger.",
+      "pages_used": [
+        38
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_029",
+      "segment_number": 29,
+      "timing": "00:02:34,500 --> 00:02:39,520",
+      "start_seconds": 154.5,
+      "end_seconds": 159.52,
+      "text": "Rapid gunfire rattles the hallway, punching clean through charging infected heads.",
+      "pages_used": [
+        39,
+        40
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_030",
+      "segment_number": 30,
+      "timing": "00:02:40,200 --> 00:02:45,560",
+      "start_seconds": 160.2,
+      "end_seconds": 165.56,
+      "text": "A ghoul collapses instantly onto the concrete, snuffed out mid-stride by lethal precision.",
+      "pages_used": [
+        41
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_031",
+      "segment_number": 31,
+      "timing": "00:02:45,940 --> 00:02:51,020",
+      "start_seconds": 165.94,
+      "end_seconds": 171.02,
+      "text": "Lowering a smoking sidearm, an armed survivor secures the perimeter with ruthless focus.",
+      "pages_used": [
+        42
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_032",
+      "segment_number": 32,
+      "timing": "00:02:51,640 --> 00:02:56,040",
+      "start_seconds": 171.64,
+      "end_seconds": 176.04,
+      "text": "Sweat drips down furrowed brows as the reality of endless swarms sinks deep.",
+      "pages_used": [
+        43
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": true
+    },
+    {
+      "segment_id": "ep001_seg_033",
+      "segment_number": 33,
+      "timing": "00:02:56,800 --> 00:03:01,620",
+      "start_seconds": 176.8,
+      "end_seconds": 181.62,
+      "text": "Another twitching corpse hits the tiles, neutralized before its claws can strike flesh.",
+      "pages_used": [
+        44
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_034",
+      "segment_number": 34,
+      "timing": "00:03:01,980 --> 00:03:06,860",
+      "start_seconds": 181.98,
+      "end_seconds": 186.86,
+      "text": "Scanning the bloody staircase, the gunman catches his breath and reloads without hesitation.",
+      "pages_used": [
+        46
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": true,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_035",
+      "segment_number": 35,
+      "timing": "00:03:07,700 --> 00:03:13,040",
+      "start_seconds": 187.7,
+      "end_seconds": 193.04,
+      "text": "Tae approaches with steady, measured footsteps, silently evaluating the newcomer's survival grit.",
+      "pages_used": [
+        47,
+        48
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    },
+    {
+      "segment_id": "ep001_seg_036",
+      "segment_number": 36,
+      "timing": "00:03:13,680 --> 00:03:20,420",
+      "start_seconds": 193.68,
+      "end_seconds": 200.42,
+      "text": "Locked eyes exchange unspoken respect—because in this new world, hesitation guarantees an instant grave.",
+      "pages_used": [
+        49,
+        50
+      ],
+      "facts_used": [],
+      "protagonist_present": true,
+      "location_present": false,
+      "threat_present": false
+    }
+  ]
+}

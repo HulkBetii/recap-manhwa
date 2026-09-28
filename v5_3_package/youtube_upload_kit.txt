@@ -1,0 +1,159 @@
+================================================================================
+YOUTUBE UPLOAD KIT: 좀비묵시록 82-08
+Episodes: 1 - 143 | Market: us_apocalypse | Archetype: ZOMBIE_APOCALYPSE
+================================================================================
+
+[1. NATIVE A/B TEST TITLE HYPOTHESES (Paste 3 options into YouTube A/B Tester)]
+★ Hypothesis A (Conflict / Retaliation Hook):
+  When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap
+★ Hypothesis B (Paradox / Resource Monopoly Hook):
+  When Zombie Apocalypse Hits, Everyone Panics But He Holds The Line | Manhwa Recap
+★ Hypothesis C (Scale / Survival Arc Hook):
+  From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap
+
+--- Top 5 Ranked Title Candidates ---
+★ Option 1: When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap
+  Option 2: Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap
+  Option 3: He Was BETRAYED by His Own Allies, But Survived Zombie Apocalypse | Manhwa Recap
+  Option 4: When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap
+  Option 5: From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap
+
+[2. DESCRIPTION & TIMESTAMPS (Copy & paste into YouTube Description)]
+When zombie apocalypse strikes, everyone scrambles to survive—but Tae fights to hold the line.
+This manhwa recap covers 좀비묵시록 82-08 (Ep 1~143).
+
+📖 Series: 좀비묵시록 82-08
+Genre: apocalypse, survival, zombie apocalypse
+
+⏱️ Chapters:
+00:00 — Pure Bedlam Detonates Across The City (Ep 1–14)
+01:32:56 — Tae Roars The Execution Signal Dropping (Ep 15–29)
+03:16:04 — Tae Instantly Spots Panicked Survivors Clamoring Desperately (Ep 30–43)
+04:39:58 — Tae Plants His Feet (Ep 44–57)
+06:01:33 — Tae Keeps That Frosty Gaze Locked (Ep 58–72)
+07:24:31 — Tae Stares In Utter Disbelief (Ep 73–86)
+08:26:02 — Tae Pulls The Trigger Point-Blank Catching His (Ep 87–100)
+09:34:00 — Tae Barely Registers That Playful Smirk Before (Ep 101–114)
+10:40:16 — The Security Checkpoint Lock Down As Nervous (Ep 115–129)
+11:54:50 — Damaged Limbs Slow Them Down Which Immediately (Ep 130–143)
+
+Subscribe for long-form apocalypse and survival manhwa recaps.
+
+This video contains original scripted narration, editorial structure,
+commentary and original editing. Rights in source artwork remain with
+their respective owners.
+
+#8208 #manhwarecap #apocalypsemanhwa #survivalmanhwa #zombiemanhwa
+
+[3. PINNED COMMENT (Copy & paste to Pin)]
+📌 MANHWA INFO & STATUS LOG:
+📖 Series: 좀비묵시록 82-08 (Chapters 1 – 143)
+
+📊 SURVIVAL LOG:
+• 📖 Story Arc: Episodes 1–143 (143 Chapters)
+• 📍 Threat Zone: Infected Urban Sector — Active Swarms
+• 🛡️ Security Status: Makeshift Safehouse
+• ⚠️ Alert Level: Zombie Threat Active
+
+💬 Would YOU open the door for strangers during the apocalypse? Be honest 👀
+
+👉 Like & Subscribe for more full-arc manhwa recaps!
+
+[4. TAGS (Copy & paste directly into YouTube Studio Tag Box)]
+manhwa recap, 좀비묵시록 82-08, 좀비묵시록 82-08 recap, zombie manhwa, apocalypse manhwa
+
+================================================================================
+[5. RESOURCE-CONTRAST THUMBNAIL CONCEPTS & AI PROMPTS]
+================================================================================
+
+▶ CONCEPT 1: SPLIT-SCREEN SURVIVAL INEQUALITY (PHÂN CHIA SINH TỒN)
+  • Text Overlay : OUTBREAK vs SURVIVE
+  • Text Style   : Two contrasting stat badges: LEFT fiery red, RIGHT gold/amber. Bold Impact font, thick black stroke.
+  • Composition  : Vertical split: devastation LEFT vs protagonist stand RIGHT
+
+  • MASTER PROMPT (Copy & paste into GPT-4o):
+--------------------------------------------------------------------------------
+Create a dramatic, cinematic 16:9 widescreen YouTube thumbnail illustration in authentic Korean webtoon manhwa art style. Sharp ink linework, saturated cel-shading, dynamic rim lighting.
+
+[COMPOSITION — SPLIT-SCREEN SURVIVAL INEQUALITY]:
+Divide the frame vertically with a dramatic diagonal crack or divide.
+
+LEFT SIDE (DEVASTATION — 45% of frame):
+A crumbling cityscape showing the Zombie Apocalypse. Panicked civilians fleeing through dust and debris. Muted, desaturated dark tones. A large bold text overlay reads 'OUTBREAK'.
+
+RIGHT SIDE (PROTAGONIST STAND — 55% of frame):
+Tae standing firm with a determined survival gaze. Tactical dark clothing, practical reinforced gear, survival backpack, realistic weapon in hand. A large bold text overlay reads 'SURVIVE'.
+
+[THUMBNAIL GRAPHIC OVERLAYS]:
+Two contrasting badges: LEFT in fiery red, RIGHT in sharp amber/gold. Bold sans-serif font (Montserrat/Impact style), thick black stroke for mobile readability.
+--------------------------------------------------------------------------------
+
+▶ CONCEPT 2: BEFORE/AFTER SURVIVAL PROGRESSION (OUTBREAK → SURVIVAL)
+  • Text Overlay : OUTBREAK → SURVIVAL
+  • Text Style   : BEFORE in muted grey, AFTER in bold amber (#FFBF00). Horizontal timeline arrow.
+  • Composition  : Horizontal timeline: weak LEFT → powerful RIGHT
+
+  • MASTER PROMPT (Copy & paste into GPT-4o):
+--------------------------------------------------------------------------------
+Create a high-impact, cinematic 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. Sharp linework, vibrant colors, dynamic composition.
+
+[COMPOSITION — BEFORE/AFTER SURVIVAL PROGRESSION]:
+Horizontal timeline comparison showing the protagonist's transformation.
+
+LEFT (BEFORE — 40% of frame):
+A vulnerable version of Tae standing amid the initial chaos of Zombie Apocalypse. Confused expression, basic civilian clothing, no equipment. Muted warm tones.
+
+CENTER (TRANSITION — 20% of frame):
+A dramatic visual divide connecting the two states.
+
+RIGHT (AFTER — 40% of frame):
+Tae transformed into a battle-hardened survivor standing firm. Tactical dark clothing, makeshift reinforced gear, survival backpack, realistic weapon in hand. Gritty cinematic lighting.
+
+[THUMBNAIL GRAPHIC OVERLAYS]:
+Bold typography: 'BEFORE' in muted grey on the left, 'AFTER' in bold amber on the right. Thick black stroke. Clean readability on mobile.
+--------------------------------------------------------------------------------
+
+▶ CONCEPT 3: SURVIVAL DASHBOARD HUD (BẢNG TÌNH TRẠNG SINH TỒN)
+  • Text Overlay : STATUS: ACTIVE | THREAT: ACTIVE
+  • Text Style   : Survival HUD with progress indicators and threat badges. Semi-transparent dark panels.
+  • Composition  : Character center + floating survival stats overlay
+
+  • MASTER PROMPT (Copy & paste into GPT-4o):
+--------------------------------------------------------------------------------
+Create a cinematic, survival-UI-inspired 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. Clean linework, dark atmospheric background, gritty textures.
+
+[COMPOSITION — SURVIVAL STATUS OVERLAY]:
+
+CENTER: Tae standing in a dramatic tactical posture amid the ruins of Zombie Apocalypse. Confident expression, tactical gear, weapon in hand.
+
+OVERLAY — SURVIVAL HUD (semi-transparent):
+Floating around the character, render a stylized survival status dashboard:
+  • Top-left: 'SURVIVAL ARC' in bold white
+  • Left bar: 'STATUS: ACTIVE' in green
+  • Right badge: 'ZOMBIE THREAT' in dark red
+  • Right badge: 'SECTOR: ISOLATED' in amber
+
+[THUMBNAIL GRAPHIC OVERLAYS]:
+Semi-transparent dark panel behind the HUD stats for readability. All text in clean sans-serif font.
+--------------------------------------------------------------------------------
+
+================================================================================
+[6. SURVIVAL DASHBOARD OVERLAY DATA (For video editing)]
+  Story Arc: Episodes 1–143 (143 Chapters)
+  Outside Condition: Infected Urban Sector — Active Swarms
+  Threat: Zombie Threat Active
+  Base Security: Makeshift Safehouse
+================================================================================
+
+================================================================================
+[7. 2026 PRE-PUBLISH QUALITY AUDIT SUMMARY]
+  • Overall Validation: PASS
+  • Episodes Scanned: 143 / 143
+  • Packaging Consistent: PASS
+  • Title Length: 78 chars -> PASS
+  • Description Size: 1226 bytes -> PASS
+  • Tag Count: 5 tags, 78 chars -> PASS
+  • Chapter 00:00 Present: PASS
+  • YPP Originality Statement: PASS
+  • Unsupported Claims: NONE (Clean)
+================================================================================
