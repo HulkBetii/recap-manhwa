@@ -288,11 +288,14 @@ class JSONWorkflowRepository(BaseWorkflowRepository):
 
 # --- WORKFLOW CONTEXT ---
 class WorkflowContext:
-    def __init__(self, task: WorkflowTask, config: Dict[str, Any], manager: "WorkflowManager"):
+    def __init__(self, task: WorkflowTask, config: Dict[str, Any], manager: Optional["WorkflowManager"] = None):
         self.task = task
-        self.config = config
+        self.config = config or {}
         self.manager = manager
-        self.cancel_token = manager.get_cancel_token(task.id)
+        if manager and hasattr(manager, "get_cancel_token"):
+            self.cancel_token = manager.get_cancel_token(task.id)
+        else:
+            self.cancel_token = CancellationToken()
 
     async def log(self, message: str, level: str = "info", stage_name: Optional[str] = None, episode: Optional[int] = None):
         timestamp = time.strftime("%H:%M:%S", time.localtime())
@@ -313,15 +316,18 @@ class WorkflowContext:
                 sys.stdout.buffer.flush()
             except Exception:
                 pass
-        await self.manager.save_and_broadcast("WorkflowProgressUpdated", self.task)
+        if self.manager and hasattr(self.manager, "save_and_broadcast"):
+            await self.manager.save_and_broadcast("WorkflowProgressUpdated", self.task)
 
     async def update_stage_progress(self, stage_name: str, progress: float):
         for s in self.task.stages:
             if s["name"] == stage_name:
                 s["progress"] = progress
                 break
-        await self.manager.calculate_overall_progress(self.task)
-        await self.manager.save_and_broadcast("WorkflowProgressUpdated", self.task)
+        if self.manager and hasattr(self.manager, "calculate_overall_progress"):
+            await self.manager.calculate_overall_progress(self.task)
+        if self.manager and hasattr(self.manager, "save_and_broadcast"):
+            await self.manager.save_and_broadcast("WorkflowProgressUpdated", self.task)
 
     async def start_episode(self, episode: int):
         self.task.current_episode = episode
@@ -329,7 +335,8 @@ class WorkflowContext:
         if ep_key not in self.task.episode_progress:
             self.task.episode_progress[ep_key] = {}
         self.task.episode_progress[ep_key][self.task.current_stage] = StageState.RUNNING
-        await self.manager.save_and_broadcast("EpisodeStarted", self.task)
+        if self.manager and hasattr(self.manager, "save_and_broadcast"):
+            await self.manager.save_and_broadcast("EpisodeStarted", self.task)
 
     async def complete_episode(self, episode: int):
         ep_key = str(episode)
@@ -340,7 +347,8 @@ class WorkflowContext:
             1 for ep_num, stages in self.task.episode_progress.items()
             if all(status == StageState.SUCCESS for status in stages.values())
         )
-        await self.manager.save_and_broadcast("EpisodeCompleted", self.task)
+        if self.manager and hasattr(self.manager, "save_and_broadcast"):
+            await self.manager.save_and_broadcast("EpisodeCompleted", self.task)
 
     async def fail_episode(self, episode: int, error_msg: str):
         ep_key = str(episode)
@@ -352,7 +360,8 @@ class WorkflowContext:
             if any(status == StageState.FAILED for status in stages.values())
         )
         await self.log(f"Episode {episode} failed: {error_msg}", "error", episode=episode)
-        await self.manager.save_and_broadcast("EpisodeFailed", self.task)
+        if self.manager and hasattr(self.manager, "save_and_broadcast"):
+            await self.manager.save_and_broadcast("EpisodeFailed", self.task)
 
 # --- BASE STAGE INTERFACE ---
 class BaseStage(abc.ABC):

@@ -1,0 +1,28 @@
+{
+  "thumbnail_traces": [
+    {
+      "concept_id": "concept_survival_split",
+      "name": "Split-Screen Survival Inequality (Phân Chia Sinh Tồn)",
+      "passed": true,
+      "violations": [],
+      "story_state_check": [],
+      "thumbnail_text": "OUTBREAK vs SURVIVE"
+    },
+    {
+      "concept_id": "concept_before_after",
+      "name": "Before/After Survival Progression (OUTBREAK → SURVIVAL)",
+      "passed": true,
+      "violations": [],
+      "story_state_check": [],
+      "thumbnail_text": "OUTBREAK → SURVIVAL"
+    },
+    {
+      "concept_id": "concept_survival_dashboard",
+      "name": "Survival Dashboard HUD (Bảng Tình Trạng Sinh Tồn)",
+      "passed": true,
+      "violations": [],
+      "story_state_check": [],
+      "thumbnail_text": "STATUS: ACTIVE | THREAT: ACTIVE"
+    }
+  ]
+}

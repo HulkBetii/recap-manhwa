@@ -1,0 +1,186 @@
+{
+  "packaging_audit": {
+    "is_consistent": true,
+    "checks": {
+      "title_grounded": true,
+      "thumbnails_grounded": true,
+      "chapter_00_present": true,
+      "chapters_grounded": true,
+      "description_compliant": true,
+      "tags_consistent": true
+    },
+    "downgrades_applied": [],
+    "warnings": []
+  },
+  "prepublish_audit": {
+    "passed": true,
+    "unsupported_claims": [],
+    "archetype": "zombie_apocalypse",
+    "archetype_mismatch": [],
+    "chapter_warnings": [],
+    "candidate_rejections": [],
+    "title_validation": {
+      "option_1": {
+        "passed": true,
+        "candidate": "Everyone Is STARVING and Infected, But He Controls a Stockpiled Supply Cache | Manhwa Recap",
+        "rejected_claims": []
+      },
+      "option_2": {
+        "passed": true,
+        "candidate": "When Zombie Apocalypse Hits, Everyone Loses Hope But He Has a Stockpiled Supply Cache | Manhwa Recap",
+        "rejected_claims": []
+      },
+      "option_3": {
+        "passed": true,
+        "candidate": "The World Ran Out of Safe Shelter, But He Controls a Stockpiled Supply Cache | Manhwa Recap",
+        "rejected_claims": []
+      },
+      "option_4": {
+        "passed": true,
+        "candidate": "They Called Him INSANE for Building a Doomsday Bunker, Until the Zombie Apocalypse | Manhwa Recap",
+        "rejected_claims": []
+      },
+      "option_5": {
+        "passed": true,
+        "candidate": "He Spent 16 Years Preparing for Zombie Apocalypse That ACTUALLY Happened | Manhwa Recap",
+        "rejected_claims": []
+      },
+      "variant_a_conflict": {
+        "passed": true,
+        "candidate": "When Zombie Apocalypse Overruns The City, Tae Uses a Stockpiled Supply Cache | Manhwa Recap",
+        "rejected_claims": []
+      },
+      "variant_b_paradox": {
+        "passed": true,
+        "candidate": "Everyone Is STARVING and Infected, But He Controls a Stockpiled Supply Cache | Manhwa Recap",
+        "rejected_claims": []
+      },
+      "variant_c_scale": {
+        "passed": true,
+        "candidate": "From Day 1 to Day 143: Surviving Zombie Apocalypse Against All Odds | Manhwa Recap",
+        "rejected_claims": []
+      }
+    },
+    "packaging_audit": {
+      "is_consistent": true,
+      "checks": {
+        "title_grounded": true,
+        "thumbnails_grounded": true,
+        "chapter_00_present": true,
+        "chapters_grounded": true,
+        "description_compliant": true,
+        "tags_consistent": true
+      },
+      "downgrades_applied": [],
+      "warnings": []
+    },
+    "episodes_scanned": 143,
+    "episodes_requested": 143,
+    "title_length_chars": 91,
+    "title_length_ok": true,
+    "title_first_40_chars_hook": true,
+    "description_utf8_bytes": 1185,
+    "description_bytes_ok": true,
+    "tag_count": 5,
+    "tag_count_ok": true,
+    "tag_total_chars": 78,
+    "tag_chars_ok": true,
+    "hashtag_count": 5,
+    "hashtag_count_ok": true,
+    "first_chapter_is_zero": true,
+    "ypp_originality_statement_present": true,
+    "claim_audit": {
+      "is_early_stage": false,
+      "transcript_checked": true,
+      "adjusted_fields": [],
+      "title_validation": {
+        "option_1": {
+          "passed": true,
+          "candidate": "Everyone Is STARVING and Infected, But He Controls a Stockpiled Supply Cache | Manhwa Recap",
+          "rejected_claims": []
+        },
+        "option_2": {
+          "passed": true,
+          "candidate": "When Zombie Apocalypse Hits, Everyone Loses Hope But He Has a Stockpiled Supply Cache | Manhwa Recap",
+          "rejected_claims": []
+        },
+        "option_3": {
+          "passed": true,
+          "candidate": "The World Ran Out of Safe Shelter, But He Controls a Stockpiled Supply Cache | Manhwa Recap",
+          "rejected_claims": []
+        },
+        "option_4": {
+          "passed": true,
+          "candidate": "They Called Him INSANE for Building a Doomsday Bunker, Until the Zombie Apocalypse | Manhwa Recap",
+          "rejected_claims": []
+        },
+        "option_5": {
+          "passed": true,
+          "candidate": "He Spent 16 Years Preparing for Zombie Apocalypse That ACTUALLY Happened | Manhwa Recap",
+          "rejected_claims": []
+        },
+        "variant_a_conflict": {
+          "passed": true,
+          "candidate": "When Zombie Apocalypse Overruns The City, Tae Uses a Stockpiled Supply Cache | Manhwa Recap",
+          "rejected_claims": []
+        },
+        "variant_b_paradox": {
+          "passed": true,
+          "candidate": "Everyone Is STARVING and Infected, But He Controls a Stockpiled Supply Cache | Manhwa Recap",
+          "rejected_claims": []
+        },
+        "variant_c_scale": {
+          "passed": true,
+          "candidate": "From Day 1 to Day 143: Surviving Zombie Apocalypse Against All Odds | Manhwa Recap",
+          "rejected_claims": []
+        }
+      },
+      "evidence_index_archetype": "zombie_apocalypse",
+      "episodes_scanned_count": 143
+    }
+  },
+  "title_validation": {
+    "option_1": {
+      "passed": true,
+      "candidate": "Everyone Is STARVING and Infected, But He Controls a Stockpiled Supply Cache | Manhwa Recap",
+      "rejected_claims": []
+    },
+    "option_2": {
+      "passed": true,
+      "candidate": "When Zombie Apocalypse Hits, Everyone Loses Hope But He Has a Stockpiled Supply Cache | Manhwa Recap",
+      "rejected_claims": []
+    },
+    "option_3": {
+      "passed": true,
+      "candidate": "The World Ran Out of Safe Shelter, But He Controls a Stockpiled Supply Cache | Manhwa Recap",
+      "rejected_claims": []
+    },
+    "option_4": {
+      "passed": true,
+      "candidate": "They Called Him INSANE for Building a Doomsday Bunker, Until the Zombie Apocalypse | Manhwa Recap",
+      "rejected_claims": []
+    },
+    "option_5": {
+      "passed": true,
+      "candidate": "He Spent 16 Years Preparing for Zombie Apocalypse That ACTUALLY Happened | Manhwa Recap",
+      "rejected_claims": []
+    },
+    "variant_a_conflict": {
+      "passed": true,
+      "candidate": "When Zombie Apocalypse Overruns The City, Tae Uses a Stockpiled Supply Cache | Manhwa Recap",
+      "rejected_claims": []
+    },
+    "variant_b_paradox": {
+      "passed": true,
+      "candidate": "Everyone Is STARVING and Infected, But He Controls a Stockpiled Supply Cache | Manhwa Recap",
+      "rejected_claims": []
+    },
+    "variant_c_scale": {
+      "passed": true,
+      "candidate": "From Day 1 to Day 143: Surviving Zombie Apocalypse Against All Odds | Manhwa Recap",
+      "rejected_claims": []
+    }
+  },
+  "is_consistent": true,
+  "all_checks_passed": true
+}

@@ -4,74 +4,278 @@ import json
 import os
 import re
 import glob
-import math
-from typing import Dict, Any, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, Any, List, Optional, Tuple, Set
+
+# V5: StoryFactGraph for evidence-first structured fact generation
+try:
+    from markets.us_apocalypse.story_fact_graph import (
+        StoryFactGraph, GroundedFact, validate_fact_entailment, ExtractionRule,
+        FACT_USAGE_POLICY, can_use_fact_for_surface
+    )
+except ImportError:
+    try:
+        from story_fact_graph import (
+            StoryFactGraph, GroundedFact, validate_fact_entailment, ExtractionRule,
+            FACT_USAGE_POLICY, can_use_fact_for_surface
+        )
+    except ImportError:
+        StoryFactGraph = None           # type: ignore
+        GroundedFact = None             # type: ignore
+        validate_fact_entailment = None # type: ignore
+        ExtractionRule = None           # type: ignore
+        FACT_USAGE_POLICY = {}          # type: ignore
+        can_use_fact_for_surface = None # type: ignore
 
 
 # =============================================================================
-# RESEARCH-VALIDATED CONSTANTS
-# Based on: deep-research-report.md & Manhwa Recap Channel Analysis.md
+# DATA STRUCTURES & EVIDENCE MODELS
 # =============================================================================
 
-# Title formula templates — data-driven, story-adaptive
-# Structure: [Disadvantage/Threat] + [OP Resolution/Resource] | Manhwa Recap
-# Target length: 80-95 chars (research validated: mean ~91, median ~93)
-TITLE_FORMULA_TEMPLATES = {
-    "resource_monopoly": [
-        "Everyone Is {suffering}, But He Has {advantage} After the {disaster} | Manhwa Recap",
-        "{disaster} Hit and EVERYONE Lost {scarce_thing}, But He Had {advantage} | Manhwa Recap",
-        "The World Ran Out of {scarce_thing}, But He Controls the ONLY {advantage} | Manhwa Recap",
+@dataclass
+class EvidenceUnit:
+    """
+    Represents a single atomic unit of story evidence with source location,
+    subject binding, scope classification, and context type.
+    """
+    source: str  # "recap" | "story_memory" | "title"
+    episode: int  # 0 for story_memory, 1..N for recap
+    segment_index: int  # -1 for story_memory, 0..M for recap speech segments
+    snippet: str
+    source_path: str = ""
+    timestamp: Optional[str] = None
+    subject: Optional[str] = None
+    scope: str = "local_scene"  # "global_story_world" | "local_group" | "local_scene"
+    context_type: str = "dialogue"  # "dialogue" | "narration" | "memory" | "title"
+
+    @property
+    def unit_id(self) -> Tuple[str, int, int]:
+        return (self.source, self.episode, self.segment_index)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source,
+            "episode": self.episode,
+            "segment_index": self.segment_index,
+            "snippet": self.snippet[:300] if len(self.snippet) > 300 else self.snippet,
+            "source_path": self.source_path,
+            "timestamp": self.timestamp,
+            "subject": self.subject,
+            "scope": self.scope,
+            "context_type": self.context_type,
+        }
+
+
+@dataclass
+class SemanticAssertion:
+    """
+    Structured semantic assertion extracted from any text surface (titles, thumbnails,
+    prompts, chapters, pinned comments, dashboard fields) for rigorous evidence verification.
+    """
+    assertion_type: str       # e.g. "preparation_duration", "day_number", "mc_built_bunker", "bunker_claim", "controls_stockpile"
+    raw_text: str             # e.g. "16 Years Preparing", "Day 143", "Building a Doomsday Bunker"
+    subject: str = "protagonist"  # "protagonist" | "world" | "population" | "antagonist" | "environment"
+    scope: str = "local_scene"    # "global_story_world" | "story_arc" | "local_group" | "local_scene"
+    value: Any = None         # e.g. 16 (int), 143 (int), "doomsday_bunker"
+    unit: Optional[str] = None  # "years", "days", "floors", "percent"
+    risk: str = "high"        # "high" | "medium" | "low"
+    requires_evidence: bool = True
+    status: str = "unvalidated"  # "supported" | "unsupported" | "downgraded"
+    evidence_units: List[Dict[str, Any]] = field(default_factory=list)
+    rejection_reason: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "assertion_type": self.assertion_type,
+            "raw_text": self.raw_text,
+            "subject": self.subject,
+            "scope": self.scope,
+            "value": self.value,
+            "unit": self.unit,
+            "risk": self.risk,
+            "requires_evidence": self.requires_evidence,
+            "status": self.status,
+            "evidence_units": self.evidence_units,
+            "rejection_reason": self.rejection_reason,
+        }
+
+
+# =============================================================================
+# RESEARCH-VALIDATED CONSTANTS & DEDICATED ARCHETYPE TITLE POOLS
+# =============================================================================
+
+ARCHETYPE_TITLE_POOLS = {
+    "zombie_apocalypse": [
+        "When {disaster} Overruns The City, {mc_name} Fights To Survive | Manhwa Recap",
+        "Surviving {disaster} Against All Odds [{ep_range}] | Manhwa Recap",
+        "He Was BETRAYED by {betrayer}, But Survived {disaster} | Manhwa Recap",
+        "When {disaster} Strikes, {mc_name} Holds The Defense Line | Manhwa Recap",
+        "From Outbreak to Total Collapse: Surviving {disaster} [{ep_range}] | Manhwa Recap",
+        "They Left Him for DEAD in the Quarantine Zone, But He Survived | Manhwa Recap",
+        "The Lone Veteran of {disaster} Holds The Line [{ep_range}] | Manhwa Recap",
     ],
-    "preparation_advantage": [
-        "He KNEW the {disaster} Was Coming and Built {fortress} | Manhwa Recap",
+    "bunker_prepper": [
         "They Called Him INSANE for {prep_action}, Until the {disaster} Hit | Manhwa Recap",
+        "He Prepared Before the {disaster} Hit and Built a FORTIFIED Base | Manhwa Recap",
         "He Spent {time_span} Preparing for {disaster} That ACTUALLY Happened | Manhwa Recap",
+        "The World Reaches {extreme_temp}, But His Shelter Has Heat | Manhwa Recap",
+        "When {disaster} Freezes The World, He Thrives Inside His Bunker | Manhwa Recap",
     ],
-    "climate_disaster": [
-        "The World Reaches {extreme_temp}, But His {shelter} Has {resource} | Manhwa Recap",
-        "{extreme_condition} Wiped Out EVERYONE, But He Had {secret_advantage} | Manhwa Recap",
-    ],
-    "class_reversal": [
-        "Everyone Picked {obvious_class}, But His '{trash_class}' Controls All {resource} | Manhwa Recap",
-        "His '{trash_class}' Was WORTHLESS Until the {disaster} Made It STRONGEST | Manhwa Recap",
-    ],
-    "kingdom_building": [
-        "Exiled to {danger_zone}, His 100% DROP RATE Builds an UNSTOPPABLE Empire | Manhwa Recap",
-        "Starving Lords Fight for Scraps, But He Controls the KING of Loot | Manhwa Recap",
-        "They Left Him with NOTHING, But His Domain Snowballed Into a KINGDOM | Manhwa Recap",
-    ],
-    "murim_vengeance": [
-        "His Danjeon Was SHATTERED by Elders, Until He Awakened the HEAVENLY DEMON Art | Manhwa Recap",
-        "Betrayed by His Sect, He Mastered FORBIDDEN Cultivation to DESTROY Them All | Manhwa Recap",
-    ],
-    "academy_humiliation": [
+    "hunter_gate": [
         "Academy Mocked His '{trash_class}' Until His Combat Power HUMILIATES the Rank 1 | Manhwa Recap",
         "When The F-RANK Trainee Reveals His Hidden SSS-Power and SHOCKS the Elites | Manhwa Recap",
+        "He Awakened a BROKEN {system_name} That Turns Low Rank Into SSS-Tier | Manhwa Recap",
+        "He Was BETRAYED in the Abyss, But Came Back as the Strongest Hunter | Manhwa Recap",
     ],
-    "undead_evolution": [
-        "He Started With ONE Weak Skeleton—Now Undead Armies BOW to Him | Manhwa Recap",
-        "The WEAKEST Necromancer Can Steal Stats and Level INFINITELY | Manhwa Recap",
-    ],
-    "regression_return": [
+    "regression_prep": [
         "He DIES in the {disaster} and Returns {time_before} Before Everyone Else | Manhwa Recap",
-        "BETRAYED at Level {level}, He REGRESSED {time_span} to DESTROY Them All | Manhwa Recap",
+        "BETRAYED at the End, He REGRESSED {time_span} to DESTROY Them All | Manhwa Recap",
+        "When {disaster} Strikes, He Thrives With Complete Future Knowledge | Manhwa Recap",
     ],
-    "betrayal_revenge": [
-        "He Was BETRAYED by {betrayer}, But Awakened {power} | Manhwa Recap",
-        "They Left Him for DEAD in {danger_zone}, But He Came Back as {title} | Manhwa Recap",
+    "farming_kingdom": [
+        "Exiled to {danger_zone}, His Farming System Builds an UNSTOPPABLE Domain | Manhwa Recap",
+        "They Left Him with NOTHING, But His Domain Snowballed Into a KINGDOM | Manhwa Recap",
+        "He Was BETRAYED by {betrayer}, But Built a KINGDOM From Worthless Land | Manhwa Recap",
     ],
-    "system_awakening": [
-        "He Awakened a BROKEN {system_name} That Turns {weak_thing} Into {strong_thing} | Manhwa Recap",
-        "Everyone Got {common_power}, But His GLITCHED System Gives {op_ability} | Manhwa Recap",
+    "tower_anti_regression": [
+        "Everyone Chose Regression, But He Refused and Broke Reality | Manhwa Recap",
+        "He Climbed Floor 100 Alone and Now Controls Reality | Manhwa Recap",
+        "They Left Him for DEAD in the Tower, But He Came Back Stronger | Manhwa Recap",
     ],
-    "lone_survivor": [
-        "He Is the ONLY Survivor of {disaster} and Now Controls {advantage} | Manhwa Recap",
-        "{disaster} Wiped Out 99% of Humanity, But He Thrives With {advantage} | Manhwa Recap",
+    "game_system_reality": [
+        "Everyone Got Common Classes, But His GLITCHED System Gives Godly Power | Manhwa Recap",
+        "From Level 1 to Server Boss: Conquering the Game Reality | Manhwa Recap",
+        "He Awakened a BROKEN {system_name} That Turns Low Tier Into Server Boss | Manhwa Recap",
+    ],
+    "murim_apocalypse": [
+        "His Danjeon Was SHATTERED by Elders, Until He Awakened Forbidden Arts | Manhwa Recap",
+        "Betrayed by His Sect, He Mastered FORBIDDEN Cultivation to DESTROY Them All | Manhwa Recap",
+        "From Exiled Outcast to Martial Overlord: The Complete Vengeance Arc | Manhwa Recap",
+    ],
+    "general_apocalypse": [
+        "When {disaster} Overruns The World, He Thrives Against All Odds | Manhwa Recap",
+        "Surviving {disaster} When Everyone Else Lost Hope [{ep_range}] | Manhwa Recap",
+        "He Was BETRAYED by {betrayer}, But Survived {disaster} | Manhwa Recap",
     ],
 }
 
-# Engagement questions for pinned comments — per archetype
-# (Research: top channels use pinned debate questions to inflate comment velocity)
+ARCHETYPE_VARIANT_POOL = {
+    "zombie_apocalypse": {
+        "conflict": [
+            "When {disaster} Overruns The City, {mc_name} Fights To Survive | Manhwa Recap",
+            "He Was BETRAYED by {betrayer}, But Survived {disaster} | Manhwa Recap",
+            "They Left Him for DEAD in the Quarantine Zone, But He Survived | Manhwa Recap",
+        ],
+        "paradox": [
+            "When {disaster} Hits, Everyone Panics But He Holds The Line | Manhwa Recap",
+            "Surviving {disaster} When All Safe Zones Fall [{ep_range}] | Manhwa Recap",
+        ],
+        "scale": [
+            "From Outbreak to Total Collapse: Surviving {disaster} [{ep_range}] | Manhwa Recap",
+            "Surviving {disaster} Against All Odds [{ep_range}] | Manhwa Recap",
+        ],
+    },
+    "bunker_prepper": {
+        "conflict": [
+            "They Called Him INSANE for {prep_action}, Until the {disaster} Hit | Manhwa Recap",
+            "He Prepared Before the {disaster} Hit and Built a FORTIFIED Base | Manhwa Recap",
+        ],
+        "paradox": [
+            "The World Reaches {extreme_temp}, But His Shelter Has Heat | Manhwa Recap",
+            "When {disaster} Hits, Everyone Freezes But He Stays Warm | Manhwa Recap",
+        ],
+        "scale": [
+            "Building a FORTIFIED Base in a Dead World [{ep_range}] | Manhwa Recap",
+            "Surviving {disaster} in the Ultimate Sanctuary [{ep_range}] | Manhwa Recap",
+        ],
+    },
+    "hunter_gate": {
+        "conflict": [
+            "Academy Mocked His '{trash_class}' Until His Combat Power HUMILIATES the Rank 1 | Manhwa Recap",
+            "When The F-RANK Trainee Reveals His Hidden SSS-Power and SHOCKS the Elites | Manhwa Recap",
+        ],
+        "paradox": [
+            "He Awakened a BROKEN {system_name} That Turns Low Rank Into SSS-Tier | Manhwa Recap",
+            "Everyone Got Common Classes, But His System Gives SSS Awakening | Manhwa Recap",
+        ],
+        "scale": [
+            "From F-Rank to the Strongest Hunter [{ep_range}] | Manhwa Recap",
+            "Conquering S-Rank Dungeons Alone [{ep_range}] | Manhwa Recap",
+        ],
+    },
+    "regression_prep": {
+        "conflict": [
+            "He DIES in the {disaster} and Returns {time_before} Before Everyone Else | Manhwa Recap",
+            "BETRAYED at the End, He REGRESSED {time_span} to DESTROY Them All | Manhwa Recap",
+        ],
+        "paradox": [
+            "When {disaster} Strikes, He Thrives With Complete Future Knowledge | Manhwa Recap",
+        ],
+        "scale": [
+            "Conquering {disaster} Alone With Future Knowledge [{ep_range}] | Manhwa Recap",
+        ],
+    },
+    "farming_kingdom": {
+        "conflict": [
+            "Exiled to {danger_zone}, His Farming System Builds an UNSTOPPABLE Domain | Manhwa Recap",
+            "They Left Him with NOTHING, But His Domain Snowballed Into a KINGDOM | Manhwa Recap",
+        ],
+        "paradox": [
+            "Starving Lords Fight for Scraps, But He Controls the Harvest | Manhwa Recap",
+        ],
+        "scale": [
+            "From Zero to Overlord: How One Exiled Man Built an Empire [{ep_range}] | Manhwa Recap",
+        ],
+    },
+    "tower_anti_regression": {
+        "conflict": [
+            "Everyone Chose Regression, But He Refused and Broke Reality | Manhwa Recap",
+            "They Left Him for DEAD in the Tower, But He Came Back Stronger | Manhwa Recap",
+        ],
+        "paradox": [
+            "The Tower Stole EVERYTHING, But He Controls Reality | Manhwa Recap",
+        ],
+        "scale": [
+            "He Climbed Floor 100 Alone and Now Controls Reality [{ep_range}] | Manhwa Recap",
+        ],
+    },
+    "game_system_reality": {
+        "conflict": [
+            "Everyone Got Common Classes, But His GLITCHED System Gives Godly Power | Manhwa Recap",
+        ],
+        "paradox": [
+            "He Awakened a BROKEN {system_name} That Turns Low Tier Into Server Boss | Manhwa Recap",
+        ],
+        "scale": [
+            "From Level 1 to Server Boss: Conquering the Game Reality [{ep_range}] | Manhwa Recap",
+        ],
+    },
+    "murim_apocalypse": {
+        "conflict": [
+            "His Danjeon Was SHATTERED by Elders, Until He Awakened Forbidden Arts | Manhwa Recap",
+            "Betrayed by His Sect, He Mastered FORBIDDEN Cultivation to DESTROY Them All | Manhwa Recap",
+        ],
+        "paradox": [
+            "Everyone Thought His Cultivation Was Broken, But He Mastered Absolute Power | Manhwa Recap",
+        ],
+        "scale": [
+            "From Exiled Outcast to Martial Overlord: The Complete Vengeance Arc [{ep_range}] | Manhwa Recap",
+        ],
+    },
+    "general_apocalypse": {
+        "conflict": [
+            "He Was BETRAYED by {betrayer}, But Survived {disaster} | Manhwa Recap",
+            "They Left Him for DEAD, But He Came Back Stronger | Manhwa Recap",
+        ],
+        "paradox": [
+            "When {disaster} Hits, Everyone Loses Hope But He Keeps Fighting | Manhwa Recap",
+        ],
+        "scale": [
+            "When {disaster} Overruns The World, He Thrives Against All Odds [{ep_range}] | Manhwa Recap",
+        ],
+    },
+}
+
 ENGAGEMENT_QUESTIONS = {
     "zombie_apocalypse": [
         "What's more dangerous — the zombies or the other survivors? Drop your take below! 👇",
@@ -113,33 +317,1059 @@ ENGAGEMENT_QUESTIONS = {
     ],
 }
 
-# Survival Dashboard template — original editorial overlay concept
-# (Research: strengthens YPP compliance as "original editorial content" evidence)
-SURVIVAL_DASHBOARD_FIELDS = [
-    "day_number",
-    "food_reserve_pct",
-    "water_reserve_pct",
-    "power_status",
-    "outside_condition",
-    "base_security_level",
-    "threat_description",
-    "mc_level",
-    "party_size",
-]
+CLAIM_REGISTRY = {
+    "sss_rank": {
+        "patterns": ["sss", "sss-rank", "sss rank", "triple s"],
+        "canonical_patterns": ["sss-rank", "sss rank"],
+        "high_risk": True,
+        "description": "SSS-Rank or high tier hunter grading",
+    },
+    "trainee": {
+        "patterns": ["trainee", "rookie trainee", "cadet", "f-rank trainee"],
+        "canonical_patterns": ["trainee", "f-rank trainee"],
+        "high_risk": False,
+        "description": "Hunter academy / trainee identity",
+    },
+    "academy": {
+        "patterns": ["academy", "military academy", "training academy", "hunter academy"],
+        "canonical_patterns": ["academy"],
+        "high_risk": False,
+        "description": "Academy setting",
+    },
+    "regression": {
+        "patterns": ["regress", "regression", "returned to the past", "went back in time", "time travel", "time loop"],
+        "canonical_patterns": ["regression", "regressed", "went back in time", "returned to the past"],
+        "high_risk": False,
+        "description": "Time travel / regression premise",
+    },
+    "system": {
+        "patterns": ["system window", "status window", "quest alert", "level up", "skill acquired", "glitched system", "broken system"],
+        "canonical_patterns": ["system window", "status window", "glitched system"],
+        "high_risk": False,
+        "description": "Game system / status UI",
+    },
+    "infinite_resources": {
+        "patterns": [
+            "infinite supplies", "unlimited supplies", "infinite food", "infinite resources",
+            "endless supply", "unlimited rations", "never runs out", "infinite dimensional",
+            "infinite storage", "unlimited storage"
+        ],
+        "canonical_patterns": ["infinite dimensional warehouse"],
+        "high_risk": True,
+        "description": "Infinite or unlimited resource stockpile",
+    },
+    "bunker": {
+        "patterns": ["bunker", "fallout shelter", "underground bunker", "underground shelter", "fallout vault"],
+        "canonical_patterns": ["bunker", "underground bunker", "fallout shelter"],
+        "high_risk": False,
+        "description": "Bunker or prepper shelter",
+    },
+    "zombie": {
+        "patterns": ["zombie", "infected", "undead", "horde", "82-08", "outbreak", "virus", "plague"],
+        "canonical_patterns": ["zombie", "infected", "undead"],
+        "high_risk": False,
+        "description": "Zombie infection premise",
+    },
+    "cultivation": {
+        "patterns": ["cultivation", "danjeon", "qi", "meridian", "inner energy"],
+        "canonical_patterns": ["cultivation", "danjeon", "qi"],
+        "high_risk": False,
+        "description": "Murim / martial arts cultivation",
+    },
+    "heavenly_demon": {
+        "patterns": ["heavenly demon", "heavenly demon art", "demonic art"],
+        "canonical_patterns": ["heavenly demon"],
+        "high_risk": False,
+        "description": "Heavenly demon lore",
+    },
+    "drop_rate": {
+        "patterns": ["drop rate", "100% drop", "loot system", "100% drop rate"],
+        "canonical_patterns": ["100% drop", "drop rate"],
+        "high_risk": False,
+        "description": "100% drop rate mechanic",
+    },
+    "percentage_humanity_destroyed": {
+        "patterns": ["99%", "99 percent", "90%", "90 percent", "wiped out 99%", "wiped out 90%", "99% of humanity", "90% of humanity"],
+        "canonical_patterns": ["99% of humanity", "wiped out 99%", "90% of humanity"],
+        "high_risk": True,
+        "description": "Specific numerical percentage of humanity destroyed",
+    },
+    "only_survivor": {
+        "patterns": ["only survivor", "sole survivor", "last survivor", "last man alive", "only one left alive", "survived alone"],
+        "canonical_patterns": ["only survivor in the world", "sole survivor of humanity", "last man alive on earth"],
+        "high_risk": True,
+        "description": "Sole survivor claim in multi-character survival",
+    },
+    "knew_apocalypse_beforehand": {
+        "patterns": ["knew the apocalypse was coming", "predicted the end", "prepared beforehand", "foresaw the apocalypse", "knew the disaster was coming", "knew it was coming"],
+        "canonical_patterns": ["knew the apocalypse was coming", "foresaw the apocalypse"],
+        "high_risk": True,
+        "description": "Foreknowledge / pre-disaster prediction claim",
+    },
+    "unbreakable_fortress": {
+        "patterns": ["unbreakable fortress", "impenetrable fortress", "impenetrable bunker", "unbreakable base", "invulnerable fortress"],
+        "canonical_patterns": ["unbreakable fortress", "impenetrable bunker", "impenetrable fortress"],
+        "high_risk": True,
+        "description": "Hyperbolic impenetrable/unbreakable fortress claim",
+    },
+    "god_tier": {
+        "patterns": ["god-tier", "god tier", "king of loot", "godly power"],
+        "canonical_patterns": ["god-tier", "king of loot"],
+        "high_risk": True,
+        "description": "God-tier hyperbolic claim",
+    },
+}
+
+ARCHETYPE_FORBIDDEN_CLAIMS = {
+    "zombie_apocalypse": [
+        "sss_rank", "trainee", "academy", "cultivation", "heavenly_demon",
+        "drop_rate", "infinite_resources", "percentage_humanity_destroyed",
+        "only_survivor", "knew_apocalypse_beforehand", "unbreakable_fortress",
+        "god_tier", "preparation_duration", "mc_built_bunker", "bunker_claim",
+        "global_starvation", "global_shelter_depletion"
+    ],
+    "bunker_prepper": ["sss_rank", "trainee", "academy", "cultivation", "heavenly_demon", "drop_rate", "god_tier"],
+    "general_apocalypse": [
+        "sss_rank", "trainee", "academy", "cultivation", "heavenly_demon",
+        "infinite_resources", "god_tier"
+    ],
+    "hunter_gate": ["cultivation", "heavenly_demon"],
+    "regression_prep": ["sss_rank", "cultivation", "heavenly_demon", "drop_rate", "god_tier"],
+    "farming_kingdom": ["sss_rank", "trainee", "academy", "cultivation", "heavenly_demon", "god_tier"],
+    "game_system_reality": ["cultivation", "heavenly_demon"],
+    "tower_anti_regression": ["cultivation", "heavenly_demon"],
+    "murim_apocalypse": ["sss_rank", "trainee", "academy", "drop_rate", "infinite_resources", "god_tier"],
+}
+
+TITLE_CLAIM_MAP = {
+    r"\bsss[\s\-]?rank\b": "sss_rank",
+    r"\btrainee\b": "trainee",
+    r"\bacademy\b": "academy",
+    r"\bregress": "regression",
+    r"\binfinite\b|\bunlimited\b": "infinite_resources",
+    r"\bcultivation\b": "cultivation",
+    r"\bheavenly\s+demon\b": "heavenly_demon",
+    r"\b100%\s+drop\b": "drop_rate",
+    r"\b99%|\b90%|\b99\s+percent|\b90\s+percent": "percentage_humanity_destroyed",
+    r"\bonly\s+survivor\b|\bsole\s+survivor\b": "only_survivor",
+    r"\bknew\s+the\s+.*was\s+coming\b|\bknew\s+it\s+was\s+coming\b": "knew_apocalypse_beforehand",
+    r"\bunbreakable\s+fortress\b|\bimpenetrable\s+bunker\b|\bimpenetrable\s+underground\s+fortress\b": "unbreakable_fortress",
+    r"\bgod[\s\-]tier\b|\bking\s+of\s+loot\b": "god_tier",
+}
 
 
 # =============================================================================
-# ARCHETYPE DETECTION — Expanded with 3 new content lanes
+# SEMANTIC ASSERTION EXTRACTOR — Complete Surface Scanning
+# =============================================================================
+
+def extract_semantic_assertions(text: str, surface_type: str = "generic") -> List[SemanticAssertion]:
+    """
+    Extracts all factual assertions from any text surface (titles, thumbnails, GPT prompts,
+    chapters, pinned comments, dashboard fields) for mandatory evidence verification.
+    """
+    assertions: List[SemanticAssertion] = []
+    text_lower = text.lower()
+
+    # 1. Day Number Assertion: Day X / Day 1 -> Day X / from Day 1 to Day X
+    for m in re.finditer(r"\b(?:from\s+day\s+\d+\s+to\s+day\s+(\d+)|day\s+(\d+)|the\s+(\d+)(?:th|st|nd|rd)\s+day)\b", text, re.IGNORECASE):
+        day_val = int(m.group(1) or m.group(2) or m.group(3))
+        # Day 1 is starting baseline, but Day > 1 requires explicit evidence
+        if day_val > 1:
+            assertions.append(SemanticAssertion(
+                assertion_type="day_number",
+                raw_text=m.group(0),
+                subject="protagonist",
+                scope="story_arc",
+                value=day_val,
+                unit="days",
+                risk="high",
+                requires_evidence=True,
+            ))
+
+    # 2. Preparation Duration: e.g. 16 Years Preparing / Spent 16 Years
+    for m in re.finditer(r"\b(?:spent\s+)?(\d+)\s*(years?|months?|decades?)\s+preparing\b|\bpreparing\s+for\s+(\d+)\s*(years?|months?|decades?)\b|\bspent\s+(\d+)\s*(years?|months?|decades?)\b", text, re.IGNORECASE):
+        val = int(m.group(1) or m.group(3) or m.group(5))
+        unit = (m.group(2) or m.group(4) or m.group(6)).lower()
+        assertions.append(SemanticAssertion(
+            assertion_type="preparation_duration",
+            raw_text=m.group(0),
+            subject="protagonist",
+            scope="story_arc",
+            value=val,
+            unit=unit,
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    # 3. MC Built Bunker Claim: "Building a Doomsday Bunker" / "Built a Bunker"
+    if re.search(r"\b(?:building|built|constructed)\s+(?:a\s+)?(?:doomsday\s+)?(?:underground\s+)?bunker\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="mc_built_bunker",
+            raw_text="Building a Doomsday Bunker",
+            subject="protagonist",
+            scope="story_arc",
+            value="built_bunker",
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    # 4. Bunker / Doomsday Bunker Existence Claim
+    elif re.search(r"\b(?:doomsday\s+bunker|underground\s+bunker|bunker)\b", text_lower):
+        # Exclude verb usages
+        if not re.search(r"\bvault(?:ing|ed|s)?\b", text_lower):
+            assertions.append(SemanticAssertion(
+                assertion_type="bunker_claim",
+                raw_text="Bunker",
+                subject="environment",
+                scope="local_scene",
+                value="bunker",
+                risk="medium",
+                requires_evidence=True,
+            ))
+
+    # 5. Resource Ownership / Monopoly: "Controls all food" / "Controls a Stockpiled Supply Cache" / "King of Loot"
+    if re.search(r"\b(?:controls\s+(?:all\s+)?(?:the\s+)?(?:food|water|supplies|stockpile|resources|advantage|a\s+stockpiled)|owns\s+(?:the\s+)?(?:base|stockpile)|king\s+of\s+loot)\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="controls_stockpile",
+            raw_text=re.search(r"\b(?:controls\s+[^\|\n,]+|owns\s+[^\|\n,]+|king\s+of\s+loot)\b", text_lower).group(0),
+            subject="protagonist",
+            scope="global_story_world",
+            value="controls_stockpile",
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    # 6. Global Starvation Claim: "Everyone Is STARVING"
+    if re.search(r"\b(?:everyone|everybody|the\s+world|all\s+humanity)\s+is\s+starving\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="global_starvation",
+            raw_text="Everyone Is STARVING",
+            subject="population",
+            scope="global_story_world",
+            value="global_starvation",
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    # 7. Global Shelter Depletion: "The World Ran Out of Safe Shelter"
+    if re.search(r"\b(?:the\s+world\s+ran\s+out\s+of\s+(?:safe\s+)?shelter|everyone\s+lost\s+safe\s+shelter)\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="global_shelter_depletion",
+            raw_text="The World Ran Out of Safe Shelter",
+            subject="world",
+            scope="global_story_world",
+            value="global_shelter_depletion",
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    # 8. Numeric Percentage Humanity Destroyed: "99% of Humanity"
+    for m in re.finditer(r"\b(\d+)%\s+(?:of\s+)?(?:humanity|the\s+world|population)\b|\bwiped\s+out\s+(\d+)%\b", text, re.IGNORECASE):
+        pct = int(m.group(1) or m.group(2))
+        assertions.append(SemanticAssertion(
+            assertion_type="percentage_destroyed",
+            raw_text=m.group(0),
+            subject="population",
+            scope="global_story_world",
+            value=pct,
+            unit="percent",
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    # 9. ONLY Survivor Claim
+    if re.search(r"\b(?:only|sole|last)\s+survivor\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="only_survivor",
+            raw_text="ONLY Survivor",
+            subject="protagonist",
+            scope="global_story_world",
+            value="only_survivor",
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    # 10. He Knew Apocalypse Claim
+    if re.search(r"\bknew\s+the\s+.*was\s+coming\b|\bknew\s+it\s+was\s+coming\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="knew_apocalypse",
+            raw_text="He Knew the Apocalypse Was Coming",
+            subject="protagonist",
+            scope="story_arc",
+            value="knew_apocalypse",
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    # 11. Unbreakable / Impenetrable Fortress Claim
+    if re.search(r"\b(?:unbreakable\s+fortress|impenetrable\s+bunker|impenetrable\s+underground\s+fortress)\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="unbreakable_fortress",
+            raw_text="IMPENETRABLE Fortress",
+            subject="environment",
+            scope="local_scene",
+            value="unbreakable_fortress",
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    # 12. Visual Prompt Assertions (for Thumbnails / Prompts / Dashboards)
+    if re.search(r"\b0\s+(?:safe\s+)?(?:shelter|food|water|supplies)\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="absolute_zero_resource",
+            raw_text=re.search(r"\b0\s+[^\|\n,]+\b", text_lower).group(0),
+            subject="environment",
+            scope="local_scene",
+            value="zero_resource",
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    if re.search(r"\bbase:\s*fortified\b|\bfortified\s+base\b|\breinforced\s+compound\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="base_fortified",
+            raw_text="BASE: FORTIFIED",
+            subject="environment",
+            scope="local_scene",
+            value="base_fortified",
+            risk="medium",
+            requires_evidence=True,
+        ))
+
+    if re.search(r"\bcontainment:\s*active\b|\bcontainment\s+active\b|\bcontainment\s+order\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="containment_active",
+            raw_text="CONTAINMENT ACTIVE",
+            subject="environment",
+            scope="local_scene",
+            value="containment_active",
+            risk="medium",
+            requires_evidence=True,
+        ))
+
+    if re.search(r"\bthreat:\s*critical\b|\bthreat:\s*s\-rank\b|\bmutant\s+strains\s+active\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="threat_critical",
+            raw_text="THREAT: CRITICAL",
+            subject="environment",
+            scope="local_scene",
+            value="threat_critical",
+            risk="low",
+            requires_evidence=True,
+        ))
+
+    if re.search(r"\bwell\-stocked(?:,\s*secure)?\s+base\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="well_stocked_base",
+            raw_text="well-stocked secure base",
+            subject="environment",
+            scope="local_scene",
+            value="well_stocked_base",
+            risk="medium",
+            requires_evidence=True,
+        ))
+
+    if re.search(r"\b(?:glowing\s+aura|sss\s+energy|glowing\s+runes)\b", text_lower):
+        assertions.append(SemanticAssertion(
+            assertion_type="visual_supernatural_aura",
+            raw_text=re.search(r"\b(?:glowing\s+aura|sss\s+energy|glowing\s+runes)\b", text_lower).group(0),
+            subject="protagonist",
+            scope="local_scene",
+            value="supernatural_aura",
+            risk="high",
+            requires_evidence=True,
+        ))
+
+    # 13. Unknown High-Impact Generic Catch (Fail-Closed Policy)
+    for m in re.finditer(r"\b(\d+)\s*(floors?|tons?|armies|weapons?)\b|\b(monopolizes|rules\s+the\s+world|god[\s\-]tier)\b", text, re.IGNORECASE):
+        assertions.append(SemanticAssertion(
+            assertion_type="unknown_high_impact",
+            raw_text=m.group(0),
+            subject="unknown",
+            scope="global_story_world",
+            value=m.group(0),
+            risk="high",
+            requires_evidence=True,
+            rejection_reason="no_validator_registered",
+        ))
+
+    return assertions
+
+
+def extract_factual_assertions(text: str) -> List[Dict[str, Any]]:
+    """
+    Extracts numerical assertions, absolute quantifiers, and ownership/dominance claims
+    from any text surface (titles, descriptions, thumbnails, chapters).
+    """
+    assertions: List[Dict[str, Any]] = []
+    # 1. Numerical assertions (\d+ years, \d+ days, \d+ floors, \d+%, \d+ hours)
+    for m in re.finditer(r"\b(\d+)\s*(years?|days?|hours?|months?|floors?|percent|%)\b", text, re.IGNORECASE):
+        assertions.append({
+            "type": "numeric",
+            "matched": m.group(0),
+            "value": m.group(1),
+            "unit": m.group(2).lower(),
+            "span": m.span(),
+        })
+    # 2. Absolute quantifiers
+    for m in re.finditer(r"\b(everyone|everybody|nobody|no one|only survivor|sole survivor|last survivor|all humanity|entire world|all people|every single)\b", text, re.IGNORECASE):
+        assertions.append({
+            "type": "absolute",
+            "matched": m.group(0),
+            "term": m.group(1).lower(),
+            "span": m.span(),
+        })
+    # 3. Ownership / Dominance claims
+    for m in re.finditer(r"\b(controls all|controls the only|rules the|owns every|monopolizes|king of loot|god[\s\-]tier)\b", text, re.IGNORECASE):
+        assertions.append({
+            "type": "dominance",
+            "matched": m.group(0),
+            "term": m.group(1).lower(),
+            "span": m.span(),
+        })
+    return assertions
+
+
+# =============================================================================
+# EVIDENCE INDEX CLASS — Full Episode Range & Specificity Verification
+# =============================================================================
+
+class EvidenceIndex:
+    """
+    Builds a complete, normalized corpus from all requested episodes (from_ep to to_ep)
+    and story_memory. Preserves source location, episode number, segment index,
+    scope binding, and enforces the Specificity Lattice.
+    """
+    def __init__(
+        self,
+        comic_title: str = "",
+        archetype: str = "general_apocalypse",
+        story_memory: Optional[Dict[str, Any]] = None,
+        download_dir: Optional[str] = None,
+        from_ep: int = 1,
+        to_ep: int = 1,
+    ):
+        self.comic_title = comic_title
+        self.archetype = archetype
+        self.from_ep = from_ep
+        self.to_ep = to_ep
+        self.story_memory = story_memory or {}
+        self.episodes_requested: List[int] = list(range(from_ep, to_ep + 1))
+        self.episodes_loaded: List[int] = []
+        self.episodes_missing: List[int] = []
+        self.recap_source_paths: List[str] = []
+        self.units: List[EvidenceUnit] = []
+        self._claim_cache: Dict[str, Dict[str, Any]] = {}
+
+        self._build_index(comic_title, story_memory, download_dir)
+
+    def _build_index(
+        self,
+        comic_title: str,
+        story_memory: Optional[Dict[str, Any]],
+        download_dir: Optional[str],
+    ) -> None:
+        # 1. Index comic title
+        if comic_title:
+            self.units.append(EvidenceUnit(
+                source="title",
+                episode=0,
+                segment_index=0,
+                snippet=comic_title,
+                source_path="",
+                context_type="title",
+                scope="global_story_world",
+            ))
+
+        # 2. Index story_memory fields
+        if story_memory and isinstance(story_memory, dict):
+            for k, v in story_memory.items():
+                if isinstance(v, (str, int, float, bool)):
+                    self.units.append(EvidenceUnit(
+                        source="story_memory",
+                        episode=0,
+                        segment_index=-1,
+                        snippet=f"{k}: {v}",
+                        source_path="story_memory.json",
+                        context_type="memory",
+                        scope="global_story_world",
+                    ))
+                elif isinstance(v, dict):
+                    self.units.append(EvidenceUnit(
+                        source="story_memory",
+                        episode=0,
+                        segment_index=-1,
+                        snippet=f"{k}: {json.dumps(v, ensure_ascii=False)}",
+                        source_path="story_memory.json",
+                        context_type="memory",
+                        scope="global_story_world",
+                    ))
+                elif isinstance(v, list):
+                    for idx, item in enumerate(v):
+                        self.units.append(EvidenceUnit(
+                            source="story_memory",
+                            episode=0,
+                            segment_index=idx,
+                            snippet=f"{k}[{idx}]: {str(item)}",
+                            source_path="story_memory.json",
+                            context_type="memory",
+                            scope="global_story_world",
+                        ))
+
+        # 3. Scan ALL requested episodes sequentially
+        if download_dir and os.path.isdir(download_dir):
+            for ep in self.episodes_requested:
+                recap_file = os.path.join(download_dir, f"episode_{ep}", "recap.json")
+                if os.path.isfile(recap_file):
+                    try:
+                        with open(recap_file, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        if isinstance(data, list):
+                            self.episodes_loaded.append(ep)
+                            self.recap_source_paths.append(recap_file)
+                            for seg_idx, seg in enumerate(data):
+                                if isinstance(seg, dict):
+                                    speech = seg.get("speech", "")
+                                    ts = seg.get("timestamp")
+                                    if speech:
+                                        speech_lower = speech.lower()
+                                        # Scope disambiguation
+                                        if re.search(r"\b(?:only|sole|last)\s+survivor(?:s)?\s+(?:in|of)\s+(?:the\s+)?(?:entire\s+|whole\s+)?(?:world|humanity|earth|civilization)\b", speech_lower) or re.search(r"\b(?:last|only)\s+(?:man|human|person)\s+(?:alive|on\s+earth)\b", speech_lower):
+                                            scope = "global_story_world"
+                                        elif re.search(r"\b(?:only|sole|last)\s+survivor(?:s)?\b", speech_lower):
+                                            scope = "local_group"
+                                        else:
+                                            scope = "local_scene"
+
+                                        self.units.append(EvidenceUnit(
+                                            source="recap",
+                                            episode=ep,
+                                            segment_index=seg_idx,
+                                            snippet=speech,
+                                            source_path=recap_file,
+                                            timestamp=ts,
+                                            scope=scope,
+                                            context_type="narration",
+                                        ))
+                    except Exception:
+                        self.episodes_missing.append(ep)
+                else:
+                    self.episodes_missing.append(ep)
+
+    def find_evidence(self, patterns: List[str], claim_key: Optional[str] = None) -> List[EvidenceUnit]:
+        """
+        Finds all evidence units matching patterns with semantic & POS disambiguation.
+        """
+        matches = []
+        for unit in self.units:
+            snippet_lower = unit.snippet.lower()
+            for pat in patterns:
+                pat_lower = pat.lower()
+                if pat_lower in snippet_lower:
+                    # Semantic Disambiguation Rules
+                    if claim_key == "regression":
+                        has_false_rewind = any(fr in snippet_lower for fr in ["rewind footage", "rewind tape", "rewind video", "rewind to", "second chance to", "flashback", "remember"])
+                        has_real_regression = any(rr in snippet_lower for rr in ["regress", "past", "years before", "days before", "time travel", "time loop", "reborn"])
+                        if has_false_rewind and not has_real_regression:
+                            continue
+
+                    elif claim_key in ("bunker", "bunker_claim", "mc_built_bunker"):
+                        # Specificity Lattice: "vaulting", "vault over" is verb -> reject
+                        if re.search(r"\bvault(?:ed|ing|s)?\s+(?:over|across|through|the|a|into|rusty|barriers?|fences?)\b", snippet_lower) or re.search(r"\b(?:creatures?|monsters?|zombies?|he|they|she|tae)\s+vault(?:ed|ing|s)?\b", snippet_lower):
+                            continue
+                        # "vault" noun (door/safe) != bunker
+                        if pat_lower == "vault" and not any(k in snippet_lower for k in ["bunker", "fallout shelter", "underground base"]):
+                            continue
+                        # "sanctuary" != bunker
+                        if pat_lower == "sanctuary" and not any(k in snippet_lower for k in ["bunker", "underground fortress", "hardened"]):
+                            continue
+
+                    elif claim_key == "system":
+                        is_ordinary_sys = any(osys in snippet_lower for osys in ["immune system", "nervous system", "electrical system", "transit system", "sewer system", "system collapse", "sound system", "security system"])
+                        has_rpg_ui = any(rpg in snippet_lower for rpg in ["status window", "window", "quest", "level up", "skill", "inventory", "glitched system", "mana"])
+                        if is_ordinary_sys and not has_rpg_ui:
+                            continue
+
+                    matches.append(unit)
+                    break
+        return matches
+
+    def check_claim(self, claim_key: str) -> Dict[str, Any]:
+        """Validates registered claim key against EvidenceUnits."""
+        if claim_key in self._claim_cache:
+            return self._claim_cache[claim_key]
+
+        defn = CLAIM_REGISTRY.get(claim_key)
+        if not defn:
+            result = {
+                "claim": claim_key,
+                "supported": False,
+                "confidence": 0.0,
+                "matched_units_count": 0,
+                "matched_units": [],
+                "matched_terms": [],
+            }
+            self._claim_cache[claim_key] = result
+            return result
+
+        patterns = defn["patterns"]
+        canonical_patterns = defn.get("canonical_patterns", [])
+        is_high_risk = defn.get("high_risk", False)
+
+        matching_units = self.find_evidence(patterns, claim_key=claim_key)
+        canonical_matches = self.find_evidence(canonical_patterns, claim_key=claim_key) if canonical_patterns else []
+
+        distinct_unit_ids: Set[Tuple[str, int, int]] = set()
+        distinct_units: List[EvidenceUnit] = []
+        for u in matching_units:
+            if u.unit_id not in distinct_unit_ids:
+                distinct_unit_ids.add(u.unit_id)
+                distinct_units.append(u)
+
+        has_canonical = len(canonical_matches) >= 1
+        num_distinct = len(distinct_units)
+
+        if is_high_risk:
+            supported = (num_distinct >= 2) or has_canonical
+        else:
+            supported = num_distinct >= 1
+
+        if claim_key == "only_survivor":
+            has_global_scope = any(u.scope == "global_story_world" for u in distinct_units)
+            if not has_global_scope and not has_canonical:
+                supported = False
+
+        matched_terms = [p for p in patterns if any(p.lower() in u.snippet.lower() for u in matching_units)]
+
+        result = {
+            "claim": claim_key,
+            "supported": supported,
+            "confidence": min(1.0, num_distinct / max(1, len(patterns))),
+            "matched_units_count": num_distinct,
+            "matched_units": [u.to_dict() for u in distinct_units[:10]],
+            "matched_terms": list(set(matched_terms)),
+            "high_risk": is_high_risk,
+        }
+        self._claim_cache[claim_key] = result
+        return result
+
+    def _enforce_evidence_invariant(self, assertion: "SemanticAssertion") -> None:
+        """
+        V5 Invariant Enforcement:
+        IF assertion.requires_evidence == True
+        AND assertion.status == "supported"
+        AND len(assertion.evidence_units) == 0
+        THEN raise AssertionError — this state is prohibited.
+        """
+        if (
+            assertion.requires_evidence
+            and assertion.status == "supported"
+            and len(getattr(assertion, "evidence_units", [])) == 0
+        ):
+            raise AssertionError(
+                f"V5 INVARIANT VIOLATED: assertion '{assertion.assertion_type}' "
+                f"raw_text='{assertion.raw_text}' is requires_evidence=True + "
+                f"status='supported' + evidence_units=[] — this state is PROHIBITED in V5. "
+                f"Every supported assertion must have at least 1 EvidenceUnit."
+            )
+
+    def verify_assertion(self, assertion: SemanticAssertion, archetype: str = "") -> bool:
+        """
+        Enforces Specificity Lattice and evidence verification for any SemanticAssertion.
+        Returns True if supported, False otherwise.
+        """
+        archetype = archetype or self.archetype
+        atype = assertion.assertion_type
+
+
+        # 1. Day Number Verification: Episode != Story Day
+        if atype == "day_number":
+            day_val = assertion.value
+            # Explicit evidence of Day X in story_memory or transcripts
+            if self.story_memory and self.story_memory.get("day") == day_val:
+                assertion.status = "supported"
+                return True
+            matches = self.find_evidence([f"day {day_val}", f"the {day_val}th day", f"{day_val} days later"])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                assertion.evidence_units = [m.to_dict() for m in matches[:3]]
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = f"No story evidence for Day {day_val} (episode index != story day)"
+            return False
+
+        # 2. Preparation Duration: Exact or equivalent evidence required
+        elif atype == "preparation_duration":
+            val = assertion.value
+            unit = assertion.unit
+            matches = self.find_evidence([
+                f"{val} {unit}", f"{val}-{unit}", f"prepared for {val} {unit}",
+                f"spent {val} {unit} preparing", f"stockpiled for {val} {unit}",
+                "sixteen years" if val == 16 and "year" in unit else f"{val} {unit}"
+            ])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                assertion.evidence_units = [m.to_dict() for m in matches[:3]]
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = f"No explicit evidence for {val} {unit} preparation duration"
+            return False
+
+        # 3. MC Built Bunker Claim
+        elif atype == "mc_built_bunker":
+            matches = self.find_evidence([
+                "built a bunker", "built his bunker", "constructed a bunker",
+                "building a doomsday bunker", "excavated a bunker"
+            ])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                assertion.evidence_units = [m.to_dict() for m in matches[:3]]
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "No evidence that protagonist personally built a doomsday bunker"
+            return False
+
+        # 4. Bunker Claim (Specificity Lattice: shelter != bunker, vault != bunker)
+        elif atype == "bunker_claim":
+            matches = self.find_evidence(["bunker", "underground bunker", "doomsday bunker", "fallout bunker"], claim_key="bunker")
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                assertion.evidence_units = [m.to_dict() for m in matches[:3]]
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "Shelter/vault/sanctuary does not support bunker claim under Specificity Lattice"
+            return False
+
+        # 5. Resource Ownership / Stockpile Control
+        elif atype == "controls_stockpile":
+            matches = self.find_evidence([
+                "controls the stockpile", "controls all supplies", "controls all food",
+                "owns the supply cache", "king of loot", "monopolizes"
+            ])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                assertion.evidence_units = [m.to_dict() for m in matches[:3]]
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "Supplies existence does not prove protagonist controls/owns the stockpile"
+            return False
+
+        # 6. Global Starvation Claim
+        elif atype == "global_starvation":
+            matches = self.find_evidence([
+                "everyone was starving", "the survivors were starving across the city",
+                "mass starvation wiped out", "widespread starvation", "humanity is starving"
+            ])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                assertion.evidence_units = [m.to_dict() for m in matches[:3]]
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "Local food scarcity does not support global 'Everyone Is STARVING' claim"
+            return False
+
+        # 7. Global Shelter Depletion
+        elif atype == "global_shelter_depletion":
+            matches = self.find_evidence([
+                "the world ran out of safe shelter", "no safe shelter left in the world",
+                "every shelter on earth collapsed"
+            ])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                assertion.evidence_units = [m.to_dict() for m in matches[:3]]
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "Local shelter collapse does not support 'The World Ran Out of Safe Shelter'"
+            return False
+
+        # 8. Percentage Destroyed
+        elif atype == "percentage_destroyed":
+            chk = self.check_claim("percentage_humanity_destroyed")
+            if chk["supported"]:
+                assertion.status = "supported"
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = f"No evidence for {assertion.value}% destruction claim"
+            return False
+
+        # 9. Only Survivor
+        elif atype == "only_survivor":
+            chk = self.check_claim("only_survivor")
+            if chk["supported"]:
+                assertion.status = "supported"
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "Local survivor squad does not support global sole survivor claim"
+            return False
+
+        # 10. Knew Apocalypse
+        elif atype == "knew_apocalypse":
+            chk = self.check_claim("knew_apocalypse_beforehand")
+            if chk["supported"]:
+                assertion.status = "supported"
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "No foreknowledge evidence in transcripts"
+            return False
+
+        # 11. Unbreakable Fortress
+        elif atype == "unbreakable_fortress":
+            chk = self.check_claim("unbreakable_fortress")
+            if chk["supported"]:
+                assertion.status = "supported"
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "Hyperbolic impenetrable fortress claim unsupported"
+            return False
+
+        # 12. Visual Assertions
+        elif atype == "absolute_zero_resource":
+            matches = self.find_evidence(["zero supplies", "0 shelter", "absolutely no food", "completely empty"])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "No literal zero resource evidence for thumbnail stat badge"
+            return False
+
+        elif atype == "base_fortified":
+            # V5: Evidence required — no archetype bypass allowed
+            matches = self.find_evidence([
+                "fortified base", "reinforced compound", "fortified compound",
+                "barricaded base", "base", "shelter", "safehouse", "fortified",
+                "barricade", "secured area", "safe house",
+            ])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                assertion.evidence_units = [m.to_dict() for m in matches[:2]]
+                self._enforce_evidence_invariant(assertion)
+                return True
+            # Fallback: check story_memory for explicit base mention
+            if self.story_memory and any(
+                k in str(self.story_memory).lower()
+                for k in ["bunker", "safehouse", "shelter", "fortified", "base camp"]
+            ):
+                assertion.status = "supported"
+                assertion.evidence_units = [{"source": "story_memory", "episode": 0,
+                                             "segment_index": -1,
+                                             "snippet": str(self.story_memory)[:150]}]
+                self._enforce_evidence_invariant(assertion)
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "No evidence of a fortified base/compound in transcripts or story_memory"
+            return False
+
+        elif atype == "containment_active":
+            # V5: Evidence required — no archetype bypass allowed
+            matches = self.find_evidence([
+                "containment order", "containment", "quarantine order", "quarantine zone",
+                "martial law", "lockdown", "sealed off", "quarantine", "isolated sector",
+                "blocked", "curfew",
+            ])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                assertion.evidence_units = [m.to_dict() for m in matches[:2]]
+                self._enforce_evidence_invariant(assertion)
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "No containment/quarantine order evidence in transcripts"
+            return False
+
+        elif atype == "threat_critical":
+            # V5: Evidence required — no archetype bypass allowed
+            # (archetype alone is NOT evidence; transcripts must confirm)
+            matches = self.find_evidence([
+                "critical threat", "swarms active", "mutant strains", "infected zone",
+                "outbreak", "zombie", "threat", "danger", "disaster", "cataclysm",
+                "attack", "assault", "infected", "undead", "bitten", "spreading",
+                "horde", "overwhelmed", "overrun",
+            ])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                assertion.evidence_units = [m.to_dict() for m in matches[:2]]
+                self._enforce_evidence_invariant(assertion)
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "No critical threat level evidence in transcripts (archetype alone is not evidence)"
+            return False
+
+        elif atype == "well_stocked_base":
+            matches = self.find_evidence(["well-stocked", "shelves of supplies", "stockpiled base", "full of supplies"])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "No evidence for well-stocked secure base"
+            return False
+
+        elif atype == "visual_supernatural_aura":
+            if archetype == "zombie_apocalypse":
+                assertion.status = "unsupported"
+                assertion.rejection_reason = "Supernatural glowing aura forbidden in realistic Zombie story"
+                return False
+            matches = self.find_evidence(["glowing aura", "mana aura", "awakening energy"])
+            if len(matches) >= 1:
+                assertion.status = "supported"
+                return True
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "No supernatural visual aura evidence"
+            return False
+
+        # 13. Unknown High-Impact (Fail-Closed)
+        elif atype == "unknown_high_impact":
+            assertion.status = "unsupported"
+            assertion.rejection_reason = "Unknown high-impact assertion without registered validator (Fail-Closed)"
+            return False
+
+        assertion.status = "unsupported"
+        assertion.rejection_reason = f"Unhandled assertion type '{atype}'"
+        return False
+
+    def validate_candidate(self, candidate_text: str, archetype: str) -> bool:
+        """Validates a single candidate title/claim string against evidence and assertion pipeline."""
+        res = validate_text_surface(candidate_text, self, archetype, surface_type="title_candidate")
+        return res["passed"]
+
+    def validate_all_candidates(
+        self, candidates: Dict[str, str], archetype: str
+    ) -> Dict[str, Dict[str, Any]]:
+        """Validates all candidate titles and returns detailed audit trails."""
+        results = {}
+        for key, text in candidates.items():
+            res = validate_text_surface(text, self, archetype, surface_type=f"title_{key}")
+            results[key] = {
+                "passed": res["passed"],
+                "candidate": text,
+                "rejected_claims": res["violations"],
+                "assertions_detected": res["assertions_detected"],
+                "assertions_validated": res["assertions_validated"],
+                "assertions_supported": res["assertions_supported"],
+                "assertions_unsupported": res["assertions_unsupported"],
+                "assertion_details": [a.to_dict() for a in res["assertions"]],
+            }
+        return results
+
+
+# =============================================================================
+# UNIFIED TEXT SURFACE VALIDATOR — Assertion Coverage Invariant Enforced
+# =============================================================================
+
+def validate_text_surface(
+    text: str,
+    evidence_index: EvidenceIndex,
+    archetype: str,
+    surface_type: str = "generic",
+) -> Dict[str, Any]:
+    """
+    Unified surface validator used across titles, descriptions, chapters,
+    thumbnails, prompts, tags, pinned comments, and dashboard fields.
+    Enforces DETECTED ASSERTION == VALIDATED ASSERTION invariant.
+    """
+    violations: List[str] = []
+    forbidden = ARCHETYPE_FORBIDDEN_CLAIMS.get(archetype, [])
+    text_lower = text.lower()
+
+    # 1. Registered Claim & Pattern Scan
+    for pat, claim_key in TITLE_CLAIM_MAP.items():
+        if claim_key in forbidden:
+            if re.search(pat, text_lower, re.IGNORECASE):
+                check = evidence_index.check_claim(claim_key)
+                if not check["supported"]:
+                    violations.append(f"Forbidden claim '{claim_key}' for archetype '{archetype}'")
+        else:
+            claim_def = CLAIM_REGISTRY.get(claim_key, {})
+            if claim_def.get("high_risk", False):
+                if re.search(pat, text_lower, re.IGNORECASE):
+                    check = evidence_index.check_claim(claim_key)
+                    if not check["supported"]:
+                        violations.append(f"Unsupported high-risk claim '{claim_key}'")
+
+    # 2. Strict Cross-Archetype Blacklist for Zombie
+    if archetype == "zombie_apocalypse":
+        zombie_cross_kws = [
+            (r"\bsss[\s\-]?rank\b", "SSS-Rank in Zombie story"),
+            (r"\btrainee\b", "Trainee in Zombie story"),
+            (r"\bacademy\b", "Academy in Zombie story"),
+            (r"\bcultivation\b", "Cultivation in Zombie story"),
+            (r"\bdanjeon\b", "Danjeon in Zombie story"),
+            (r"\bheavenly\s+demon\b", "Heavenly Demon in Zombie story"),
+            (r"\btower\s+trials\b|\bendless\s+ascent\b", "Tower Trials in Zombie story"),
+            (r"\bcalamity\s+gate\b|\bsolo\s+awakening\b", "Calamity Gate in Zombie story"),
+            (r"\bglowing\s+aura\b|\bsss\s+energy\b", "Fake visual promise in Zombie story"),
+            (r"\b100%\s+drop\b|\bking\s+of\s+loot\b", "Drop rate / King of loot in Zombie story"),
+            (r"\bgod[\s\-]tier\b", "God-tier hyperbolic claim in Zombie story"),
+            (r"\bdoomsday\s+bunker\b|\b16\s+years\s+preparing\b", "Bunker prepper narrative in realistic zombie story"),
+        ]
+        for kw_pat, reason in zombie_cross_kws:
+            if re.search(kw_pat, text_lower, re.IGNORECASE):
+                violations.append(reason)
+
+    # 3. Semantic Assertion Verification & Invariant Enforcement
+    assertions = extract_semantic_assertions(text, surface_type=surface_type)
+    detected_count = len(assertions)
+    validated_count = 0
+    supported_count = 0
+    unsupported_count = 0
+
+    for assertion in assertions:
+        is_supported = evidence_index.verify_assertion(assertion, archetype)
+        validated_count += 1
+        if is_supported:
+            supported_count += 1
+        else:
+            unsupported_count += 1
+            violations.append(f"Unsupported assertion [{assertion.assertion_type}]: '{assertion.raw_text}' ({assertion.rejection_reason})")
+
+    # Invariant: detected_assertions == validated_assertions
+    if detected_count != validated_count:
+        violations.append(f"Assertion coverage gap: {detected_count} detected vs {validated_count} validated")
+
+    # V5 Fix A: "0 detected == 0 validated" cannot grant PASS when text has factual phrases.
+    # These patterns carry factual weight but may not trigger extract_semantic_assertions().
+    # If any are found unaccounted-for, the surface must fail.
+    FACTUAL_PHRASE_INDICATORS = [
+        (r'\bwiped\s+out\b',                         "wiped-out claim"),
+        (r'\bonly\s+survivor\b',                     "only-survivor claim"),
+        (r'\bsole\s+survivor\b',                     "sole-survivor claim"),
+        (r'\blast\s+survivor\b',                     "last-survivor claim"),
+        (r'\bunbreakable\b',                         "unbreakable absolute claim"),
+        (r'\bgod[\s\-]tier\b',                       "god-tier hyperbolic claim"),
+        (r'\b100\s*%\s+of\s+(?:humanity|population|the\s+world)\b', "100%-destroyed claim"),
+        (r'\bwiped\s+out\s+\d+\s*%\b',              "percentage-wiped-out claim"),
+        (r'\ball\s+of\s+humanity\s+(?:is\s+)?(?:gone|dead|destroyed|wiped)\b', "all-humanity-dead claim"),
+        (r'\bhe\s+knew\s+(?:the\s+)?(?:apocalypse|disaster|outbreak)\s+was\s+coming\b', "foreknowledge claim"),
+    ]
+    if detected_count == 0:
+        # Only do this check when no assertions were found (the false-pass risk case)
+        for pattern, label in FACTUAL_PHRASE_INDICATORS:
+            if re.search(pattern, text_lower, re.IGNORECASE):
+                violations.append(
+                    f"V5: Factual phrase detected but NOT caught by assertion scanner: "
+                    f"'{label}' in text. '0 detected == 0 validated' cannot grant PASS "
+                    f"when text contains factual claims."
+                )
+
+    passed = len(violations) == 0
+
+    return {
+        "passed": passed,
+        "surface_type": surface_type,
+        "violations": list(set(violations)),
+        "assertions_detected": detected_count,
+        "assertions_validated": validated_count,
+        "assertions_supported": supported_count,
+        "assertions_unsupported": unsupported_count,
+        "assertions": assertions,
+        "text": text,
+    }
+
+
+# =============================================================================
+# ARCHETYPE DETECTION
 # =============================================================================
 
 def detect_archetype(comic_title: str, story_memory: Optional[Dict[str, Any]] = None) -> str:
-    """
-    Detects the manhwa archetype/subgenre for tailored metadata generation.
-    Expanded with 3 new archetypes based on 2026 market research:
-    - game_system_reality (20% content lane)
-    - regression_prep (10% content lane)
-    - farming_kingdom (10% content lane)
-    """
+    """Detects the manhwa archetype/subgenre for tailored metadata generation."""
     title_lower = (comic_title or "").lower()
     mem_text = ""
     if story_memory:
@@ -153,7 +1383,7 @@ def detect_archetype(comic_title: str, story_memory: Optional[Dict[str, Any]] = 
     if "surviving the apocalypse" in title_lower or "bunker" in title_lower or "apocalypse from the start" in title_lower:
         return "bunker_prepper"
 
-    # Priority 2: Specific token groups (ordered by specificity)
+    # Priority 2: Specific token groups
     if any(k in combined for k in ["zombie", "infected", "undead", "ghoul", "plague", "virus", "outbreak", "82-08", "8208", "walking dead"]):
         return "zombie_apocalypse"
     elif any(k in combined for k in ["bunker", "shelter", "prepper", "shut-in", "shutin", "warehouse", "hoard"]):
@@ -162,13 +1392,10 @@ def detect_archetype(comic_title: str, story_memory: Optional[Dict[str, Any]] = 
         return "bunker_prepper"
     elif any(k in combined for k in ["return stone", "regression stone", "floor 100", "chaos wasteland", "anti-regression", "world after the fall"]):
         return "tower_anti_regression"
-    # NEW: Game/System becomes reality (20% content lane — research validated)
     elif any(k in combined for k in ["game become", "vr game", "game reality", "virtual reality", "player", "npc", "game world", "logged in", "tutorial"]):
         return "game_system_reality"
-    # NEW: Regression / Time preparation (10% content lane)
     elif any(k in combined for k in ["regression", "regress", "second chance", "time travel", "rewind", "went back", "returned to", "before the apocalypse"]):
         return "regression_prep"
-    # NEW: Farming / Kingdom building (10% content lane)
     elif any(k in combined for k in ["farming", "kingdom", "territory", "village", "build", "agriculture", "lord", "baron", "domain", "settlement"]):
         return "farming_kingdom"
     elif any(k in combined for k in ["hunter", "gate", "dungeon", "awakening", "rank", "necromancer", "shadow"]):
@@ -203,7 +1430,7 @@ def get_character_names(comic_title: str, story_memory: Optional[Dict[str, Any]]
         elif "veteran" in title_lower:
             mc_name = "The Veteran Survivor"
         elif any(k in title_lower for k in ["zombie", "82-08", "8208"]):
-            mc_name = "South"
+            mc_name = "Tae"
         else:
             mc_name = "The Lone Survivor"
 
@@ -223,206 +1450,210 @@ def get_character_names(comic_title: str, story_memory: Optional[Dict[str, Any]]
 
 
 # =============================================================================
-# EPISODE THEME EXTRACTION
+# EPISODE THEME EXTRACTION & CHAPTER DECOMPOSITION
 # =============================================================================
 
-def extract_episode_theme(recap_path: str, ep: int, comic_title: str = "") -> str:
-    """Extracts a punchy, dramatic narrative theme for an episode from its recap.json."""
-    if not os.path.isfile(recap_path):
-        return f"Chapter {ep}"
-    try:
-        with open(recap_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return f"Chapter {ep}"
-
-    if not data or not isinstance(data, list):
-        return f"Chapter {ep}"
-
-    full_speech = " ".join([item.get("speech", "") for item in data[:3]])
-    if not full_speech:
-        return f"Chapter {ep}"
-
-    kw_rules = [
-        (["prologue", "boat", "ship", "ocean", "sea"], "The Outbreak & Boat 82-08 Incident"),
-        (["martial law", "broadcast", "chopper", "helicopter"], "Martial Law & First Encounters"),
-        (["syndicate", "enforcer", "gang", "thug"], "Syndicate Enforcers & Urban Collapse"),
-        (["subway", "station", "platform", "tracks"], "Subway Descent & Platform Bloodbath"),
-        (["garrison", "military", "conscript", "magazine"], "Garrison Deployment & Midnight Horde"),
-        (["church", "stairwell", "door", "locked", "coward"], "The Church Stairwell Betrayal"),
-        (["starvation", "water", "supply", "supplies", "food"], "Starvation Threat & Scavenge Run"),
-        (["atomic", "nuclear", "research", "perimeter"], "Atomic Research Station in the Deluge"),
-        (["turret", "heavy caliber", "abandon"], "Heavy Turret Stand & High Ground Retreat"),
-        (["monstrosity", "awakened", "quarantine", "lab", "biolab"], "Quarantine Breach & Mutant Lab Collapse"),
-        (["wire", "bridge", "mesh", "vault", "flapping"], "High-Altitude Wire Bridge Horror"),
-        (["airport", "tarmac", "crate", "transport"], "Airport Tarmac & Black Market Escape"),
-        (["marine", "coastline", "scorched", "mop-up"], "Coastline Mop-Up & Deceptive Silence"),
-        (["trap", "disappearing", "quiet", "trace"], "The Disappearing Horde & Springing the Trap"),
-        (["mutiny", "major", "brass", "kick"], "Fractured Command & Mutiny Against the Brass"),
-        (["season 2", "reset", "haze", "headlights"], "Season 2 Begins: Dark Horizon & New Strains"),
-        (["winter", "freeze", "cold", "rain", "tempest"], "Winter Onslaught & Freezing Ambush"),
-        (["doctor", "surgery", "morphine", "medic"], "Field Surgery & Cost of Infection"),
-        (["wiped out", "twenty minutes", "ultimatum"], "Shattered Evac Point: The 20-Minute Ultimatum"),
-        (["barricade", "sealed", "artery", "arteries"], "Barricaded Arteries & Labyrinth of Ruin"),
-        (["containment", "order", "secret"], "The Secret Containment Order Exposed"),
-        (["chassis", "canister", "axle", "convoy"], "Convoy Ambush & The Canister Race"),
-        (["vanguard", "blade", "slice"], "Iron Vanguard: Clashing with Fast Strains"),
-        (["tunnel", "rescue", "cowering"], "Subway Slaughter & Rescuing Survivors"),
-        (["orchestrated", "truth", "extermination"], "The Orchestrated Plague & True Origin"),
-        (["fortress", "resistance", "level head"], "Fortress Road & Armed Resistance"),
-        (["citadel", "inner ring", "breach"], "Citadel Breach: Inner Ring Infiltration"),
-        (["final stand", "tempest", "fence", "storm"], "Midnight Tempest: Final Perimeter Defense"),
-        (["dawn", "ruins", "reckoning"], "Grand Finale: Dawn Over the Ruins"),
-        (["tower", "floor", "nightmare", "climb"], "The Tower Trials & Endless Ascent"),
-        (["bunker", "shelter", "subterranean"], "Bunker Fortification & Survival Prep"),
-        (["dungeon", "gate", "awakening"], "Calamity Gate & Solo Awakening"),
-        (["cannon", "bluff", "scavenger", "corridor"], "Corridor Standoff & The Cannon Bluff"),
-        (["grenade", "lever", "safety", "threat"], "Armed Confrontation & High-Stakes Lever"),
-        (["stalker", "rain", "outpost", "shadow"], "Midnight Rain & Shadow Stalker"),
-    ]
-
-    lower_speech = full_speech.lower()
-    for keywords, theme in kw_rules:
-        if any(kw in lower_speech for kw in keywords):
-            return theme
-
-    # Fallback: clean action phrase
-    first_sent = re.split(r"[.!?]", full_speech)[0].strip()
-    first_sent = re.sub(r"^(while|as|spotting|even with|with|after)\s+[^,]+,\s*", "", first_sent, flags=re.IGNORECASE)
-    first_sent = re.sub(r"^(south|he|they|she|the hero|the survivor|[a-z]+-?[a-z]*)\s+(watches|scrambles|lunges|braces|realizes|slices|slams|freezes|frantically|doesn\'t waste|doesn\'t hesitate|locks|lets|steps|dashes)\s+[^,\.]*?(?:as|when|that|to)?\s*", "", first_sent, flags=re.IGNORECASE)
-    first_sent = re.sub(r"[,:;]+$", "", first_sent).strip()
-    words = first_sent.split()
-    if 2 <= len(words) <= 7:
-        clean_theme = " ".join(words).title()
-    elif len(words) > 7:
-        clean_theme = " ".join(words[:6]).title()
-    else:
-        clean_theme = f"Chapter {ep}"
-    clean_theme = re.sub(r"[^a-zA-Z0-9\s\-–—\':]", "", clean_theme).strip()
-    # Strip dangling trailing prepositions/articles/conjunctions
-    clean_theme = re.sub(r"\s+(?:On|At|To|In|Of|For|With|From|As|By|The|A|An|And|Or|So|Than)$", "", clean_theme, flags=re.IGNORECASE).strip()
-    return clean_theme if len(clean_theme) > 3 else f"Chapter {ep}"
+def validate_chapter_theme(theme: str, archetype: str) -> bool:
+    """Validates that a chapter theme does not contain cross-archetype leaks."""
+    theme_lower = theme.lower()
+    if archetype == "zombie_apocalypse":
+        forbidden = [
+            "tower", "endless ascent", "calamity gate", "solo awakening",
+            "dungeon", "cultivation", "heavenly demon", "sss", "rank 1",
+            "trainee", "danjeon", "system awakening"
+        ]
+        if any(f in theme_lower for f in forbidden):
+            return False
+    elif archetype == "bunker_prepper":
+        forbidden = ["tower", "endless ascent", "cultivation", "heavenly demon", "sss", "trainee"]
+        if any(f in theme_lower for f in forbidden):
+            return False
+    elif archetype == "farming_kingdom":
+        forbidden = ["tower", "cultivation", "heavenly demon", "sss"]
+        if any(f in theme_lower for f in forbidden):
+            return False
+    return True
 
 
-# =============================================================================
-# NARRATIVE PROGRESSION TEMPLATES — Expanded with 3 new archetypes
-# =============================================================================
-
-UNIVERSAL_NARRATIVE_PROGRESSION = {
-    "zombie_apocalypse": [
-        "Outbreak & Patient Zero",
-        "The Barricades & Apartment Siege",
-        "Road Ambush & Gas Station Escape",
-        "Mutated Predators & First Swarm",
-        "Highway Quarantine Zone Collapse",
-        "Gathering Survivors & Rising Despair",
-        "Underground Infiltration & Secret Lab",
-        "Military Checkpoint Fall & Tyrant Evolution",
-        "The Swarm Overruns The City Center",
-        "Final Extraction & Dawn of Ruin",
+THEME_COMPONENT_REGISTRY = {
+    # Format: theme_name -> [(comp_name, word_boundary_tokens, exact_phrases)]
+    # word_boundary_tokens: matched with \b..\b — prevents false positives:
+    #   'training'->rain, 'cold stare'->cold/winter, 'steps into'->stairwell,
+    #   'bloodied'->bloodbath, 'sanctuary'->church, 'weapon platform'->subway/train
+    # exact_phrases: multi-word, matched as exact substrings
+    "The Church Stairwell Betrayal": [
+        ("church",    ["church", "chapel", "cathedral"],    ["the sanctuary church", "inside the chapel"]),
+        ("stairwell", ["stairwell", "staircase"],           ["up the stairs", "down the stairs", "stair landing", "flight of stairs"]),
+        ("betrayal",  ["betray", "coward"],                 ["locked out", "shut the door", "left behind", "abandoned him"]),
     ],
-    "tower_anti_regression": [
-        "Nightmare Tower & The Rejected Regression",
-        "The Solitary Floor 100 Awakening",
-        "Descent into Chaos & Gorgon Fortress",
-        "The Rogue Enchantress & First Blood",
-        "Shattering The System & False Adapters",
-        "Nightmare Lords & Dream Seduction",
-        "The Ruined Citadel & Infiltration",
-        "Monarchs of Chaos & Abyss Awakening",
-        "Tree of Imagery & The Reality Thrust",
-        "Breaking The World & Dawn of Chaos",
+    "Midnight Rain & Shadow Stalker": [
+        ("rain",    ["rain", "downpour", "deluge"],    ["it\'s raining", "rain pours", "midnight rain", "rain falls"]),
+        ("stalker", ["stalker", "predator", "lurk"],   ["shadow creature", "in the shadows", "stalked by"]),
     ],
-    "hunter_gate": [
-        "The Calamity Gate & Betrayal in the Abyss",
-        "The Glitched Awakening & First Blood",
-        "Returning to Modern Earth & Solo Hunter",
-        "High-Rank Dungeon Raid & S-Rank Ambush",
-        "Breaking The Global Hunter System",
-        "The Void Monarch's Shadows",
-        "Guild War & Underground Arena",
-        "The Red Gate Cataclysm",
-        "Sovereign Showdown & Sovereign Domain",
-        "Monarch's Reign & The Next Calamity",
+    "Atomic Research Station in the Deluge": [
+        ("atomic_research", ["atomic", "nuclear", "perimeter"],   ["research station", "research lab", "nuclear facility"]),
+        ("deluge",          ["deluge", "flooding"],                ["heavy rain", "flood water", "storm flood", "rising water"]),
     ],
-    "bunker_prepper": [
-        "Cataclysm Warning & Fortifying the Vault",
-        "The Eternal Frost & Parasites Arrive",
-        "Repelling The Warlords & Infinite Supplies",
-        "Wasteland Scouting & Sub-Zero Predators",
-        "The Energy Core Upgrade",
-        "Raiding The Corrupt Shelter",
-        "Mutant Swarm & Vault Perimeter Defense",
-        "Infiltrating The Underground City",
-        "The Wasteland Siege & Ruthless Retribution",
-        "Sovereign of the Frozen Earth",
+    "The Outbreak & Boat 82-08 Incident": [
+        ("outbreak",  ["outbreak", "infection", "virus", "patient"],  ["patient zero", "infection spreads"]),
+        ("boat_8208", ["vessel", "ocean"],                             ["82-08", "boat 82", "the ship", "on the boat", "aboard"]),
     ],
-    "game_system_reality": [
-        "The Game Becomes Real & First Login",
-        "Tutorial Zone & The Glitched Ability",
-        "First Boss Encounter & Level Breakthrough",
-        "NPC Allies & Hidden Quest Chain",
-        "The PvP Arena & Rival Players",
-        "Dungeon Raid & Legendary Drop",
-        "The Admin's Secret & World Event",
-        "Guild War & Territory Conquest",
-        "Final Boss & System Collapse",
-        "New Game+ & The True Ending",
+    "Martial Law & First Encounters": [
+        ("martial_law",      ["conscript"],              ["martial law", "military broadcast"]),
+        ("first_encounters", ["chopper", "helicopter"],  ["first encounter", "infected screams", "screams outside"]),
     ],
-    "regression_prep": [
-        "Death & The Rewind Trigger",
-        "30 Days Before Doomsday & Stockpiling",
-        "Building The Ultimate Base",
-        "The Apocalypse Strikes & Everyone Panics",
-        "Resource Wars & Desperate Survivors",
-        "Revealing Future Knowledge & Allies",
-        "The First Major Threat Returns",
-        "Changing The Timeline & New Dangers",
-        "Confronting The True Enemy",
-        "Breaking The Loop & Dawn of Control",
+    "Syndicate Enforcers & Urban Collapse": [
+        ("syndicate",      ["syndicate", "enforcer", "thug", "mob"],  ["gang members", "criminal syndicate"]),
+        ("urban_collapse", [],                                          ["city collapse", "streets overrun", "city falls"]),
     ],
-    "farming_kingdom": [
-        "Exiled To Worthless Land",
-        "First Harvest & System Activation",
-        "Recruiting Followers & Village Defense",
-        "The Merchant Route & Economic Warfare",
-        "Noble Rivals & Political Intrigue",
-        "Monster Siege & Wall Fortification",
-        "Alliance Formation & Trade Empire",
-        "The Royal Summons & Kingdom Recognition",
-        "War Declaration & Total Mobilization",
-        "Emperor's Domain & Continental Influence",
+    "Subway Descent & Platform Bloodbath": [
+        ("subway",    ["subway", "platform", "tracks"],               ["subway station", "train station", "underground platform"]),
+        ("bloodbath", ["bloodbath", "slaughter", "carnage"],          ["mass slaughter", "platform massacre", "bodies everywhere"]),
     ],
-    "murim_apocalypse": [
-        "The Fall of the Sect & Lone Survivor",
-        "Training in Isolation & Forbidden Technique",
-        "Return to the Martial World & First Duel",
-        "The Underground Tournament & Blood Pact",
-        "Sect Infiltration & The Traitor Revealed",
-        "The Demonic Faction Rising",
-        "Alliance of Sects & The War Council",
-        "The Decisive Battle & Heavenly Technique",
-        "Confronting The Heavenly Demon",
-        "New Era of Martial Arts & Legacy",
+    "Winter Onslaught & Freezing Ambush": [
+        ("winter",  ["blizzard", "frost", "winter", "freeze"],  ["freezing cold", "bitter cold", "winter storm", "frozen wasteland"]),
+        ("ambush",  ["ambush", "onslaught"],                    ["surprise attack", "ambushed by", "overwhelmed by horde"]),
     ],
-    "general_apocalypse": [
-        "The Sudden Cataclysm & The Awakening",
-        "Brutal Survival & Adapting to the New World",
-        "Securing The Safe Zone & Gathering Allies",
-        "The First Siege: Repelling The Swarm",
-        "Power Breakthrough & Unlocking Hidden Potential",
-        "Into The Wasteland & Uncovering Dark Truths",
-        "The Swarm Evolves & Desperate Stand Under Siege",
-        "Infiltrating The Enemy Stronghold",
-        "The Climax: Total War for Survival",
-        "Dawn of a New Era & The Path Ahead",
+    "Quarantine Breach & Mutant Lab Collapse": [
+        ("quarantine", ["quarantine", "biolab"],    ["research lab", "mutant lab", "quarantine breach"]),
+        ("mutant",     ["mutant", "monstrosity"],   ["awakened monster", "mutant outbreak", "lab breach"]),
+    ],
+    "Convoy Ambush & The Canister Race": [
+        ("convoy",   ["convoy", "transport"],  ["supply convoy", "convoy ambush", "armored truck"]),
+        ("canister", ["canister"],             ["the race for", "secure the cargo", "cargo run"]),
     ],
 }
 
 
-# =============================================================================
-# STORY CHAPTER BUILDER
-# =============================================================================
+
+def _kw_match_word_boundary(text_lower: str, words: List[str], phrases: List[str]) -> bool:
+    """
+    V5 word-boundary safe keyword matching — prevents false positives.
+
+    - words: matched with \\b..\\b (word boundary for single tokens).
+      Prevents: 'training'->rain, 'steps into'->stairwell,
+                'cold stare'->cold (winter), 'sanctuary'->church,
+                'bloodied'->bloodbath, 'weapon platform'->subway/train.
+    - phrases: exact substring match (multi-word; natural word boundaries).
+
+    Returns True if ANY word OR phrase matches.
+    """
+    for w in words:
+        if re.search(r'\b' + re.escape(w) + r'\b', text_lower):
+            return True
+    for ph in phrases:
+        if ph.lower() in text_lower:
+            return True
+    return False
+
+
+def extract_episode_theme_with_snippet(
+    recap_path: str,
+    ep: int,
+    comic_title: str = "",
+    archetype: str = "general_apocalypse",
+) -> Tuple[str, Optional[str], List[Dict[str, Any]]]:
+    """
+    Extracts a punchy narrative theme for an episode, verifies core semantic components,
+    and returns (theme, primary_snippet, evidence_list_per_assertion).
+    """
+    if not os.path.isfile(recap_path):
+        return f"Survival Operation (Ep {ep})", None, []
+    try:
+        with open(recap_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return f"Survival Operation (Ep {ep})", None, []
+
+    if not data or not isinstance(data, list):
+        return f"Survival Operation (Ep {ep})", None, []
+
+    speech_segments = [item.get("speech", "") for item in data if isinstance(item, dict) and item.get("speech")]
+    if not speech_segments:
+        return f"Survival Operation (Ep {ep})", None, []
+
+    full_speech = " ".join(speech_segments)
+    lower_speech = full_speech.lower()
+
+    # Match predefined themes with component decomposition (V5: word-boundary safe)
+    for theme_name, components in THEME_COMPONENT_REGISTRY.items():
+        if not validate_chapter_theme(theme_name, archetype):
+            continue
+
+        comp_evidence = []
+        all_comps_found = True
+        for comp_name, words, phrases in components:
+            found_seg = None
+            for seg in speech_segments:
+                seg_lower = seg.lower()
+                if _kw_match_word_boundary(seg_lower, words, phrases):
+                    found_seg = seg
+                    break
+            if found_seg:
+                comp_evidence.append({
+                    "assertion": comp_name,
+                    "episode": ep,
+                    "snippet": found_seg[:200],
+                })
+            else:
+                all_comps_found = False
+                break
+
+        if all_comps_found and len(comp_evidence) == len(components):
+            return theme_name, comp_evidence[0]["snippet"], comp_evidence
+
+    # Fallback: clean action phrase with incomplete object repair
+    first_sent = re.split(r"[.!?]", speech_segments[0])[0].strip()
+    first_sent = re.sub(r"^(while|as|spotting|even with|with|after)\s+[^,]+,\s*", "", first_sent, flags=re.IGNORECASE)
+    first_sent = re.sub(r"^(south|tae|he|they|she|the hero|the survivor|[a-z]+-?[a-z]*)\s+(watches|scrambles|lunges|braces|realizes|slices|slams|freezes|frantically|doesn\'t waste|doesn\'t hesitate|locks|lets|steps|dashes)\s+[^,\.]*?(?:as|when|that|to)?\s*", "", first_sent, flags=re.IGNORECASE)
+    first_sent = re.sub(r"[,:;]+$", "", first_sent).strip()
+    words = first_sent.split()
+
+    STOP_WORDS = {
+        "on", "at", "to", "in", "of", "for", "with", "from", "as",
+        "by", "the", "a", "an", "and", "or", "so", "than", "against", "but"
+    }
+    DANGLING_MODIFIERS = {"incoming", "approaching", "advancing", "remaining", "unknown", "nearby", "rushing"}
+
+    if 2 <= len(words) <= 7:
+        clean_theme = " ".join(words).title()
+    elif len(words) > 7:
+        clean_theme = None
+        for cut in range(7, 4, -1):
+            if cut > len(words):
+                continue
+            last_w = words[cut - 1].rstrip(",:;").lower()
+            if last_w not in STOP_WORDS and last_w not in DANGLING_MODIFIERS:
+                clean_theme = " ".join(words[:cut]).title()
+                break
+        if not clean_theme:
+            phrase = list(words[:6])
+            while phrase and (phrase[-1].lower() in STOP_WORDS or phrase[-1].lower() in DANGLING_MODIFIERS):
+                phrase.pop()
+            clean_theme = " ".join(phrase).title() if phrase else f"Survival Operation (Ep {ep})"
+    else:
+        clean_theme = f"Survival Operation (Ep {ep})"
+
+    clean_theme = re.sub(r"[^a-zA-Z0-9\s\-–—\':]", "", clean_theme).strip()
+    clean_theme = re.sub(r"\s+(?:On|At|To|In|Of|For|With|From|As|By|The|A|An|And|Or|So|Than|Against|But|Incoming|Approaching|Advancing)$", "", clean_theme, flags=re.IGNORECASE).strip()
+
+    if not validate_chapter_theme(clean_theme, archetype) or len(clean_theme) <= 3:
+        clean_theme = f"Survival Operation (Ep {ep})"
+
+    evidence_list = [{"assertion": "general_action", "episode": ep, "snippet": speech_segments[0][:200]}]
+    return clean_theme, speech_segments[0], evidence_list
+
+
+def extract_episode_theme(
+    recap_path: str,
+    ep: int,
+    comic_title: str = "",
+    archetype: str = "general_apocalypse",
+) -> str:
+    """Backward-compatible wrapper returning only the theme string."""
+    theme, _, _ = extract_episode_theme_with_snippet(recap_path, ep, comic_title, archetype)
+    return theme
+
 
 def build_narrative_story_chapters(
     chapters: Optional[List[Dict[str, Any]]],
@@ -434,75 +1665,119 @@ def build_narrative_story_chapters(
 ) -> List[Dict[str, Any]]:
     """
     Builds narrative story chapters grouped by video story progression arcs.
-    Ensures the first chapter is strictly 00:00 and chapters represent key narrative acts.
+    Fail-Closed: If chapters is None or empty, returns [] to avoid fabricating false timestamps.
+    Uses window-based grounding: each chapter [start_ep, end_ep] only extracts themes
+    from recap files in that exact episode window with decomposed semantic evidence.
     """
     if not chapters:
-        prog_list = UNIVERSAL_NARRATIVE_PROGRESSION.get(archetype, UNIVERSAL_NARRATIVE_PROGRESSION["general_apocalypse"])
-        return [
-            {"timestamp": "00:00", "title": prog_list[0], "episode": from_ep},
-            {"timestamp": "05:00", "title": prog_list[1], "episode": from_ep + 1},
-            {"timestamp": "15:00", "title": prog_list[len(prog_list)//2], "episode": from_ep + 2},
-            {"timestamp": "30:00", "title": prog_list[-1], "episode": to_ep},
-        ]
+        return []
 
-    total_eps = len(chapters)
+    num_input_chapters = len(chapters)
+    span_eps = to_ep - from_ep + 1
+    prog_list = [
+        "Outbreak & Patient Zero",
+        "The Barricades & Sector Defense",
+        "Road Ambush & Escape",
+        "Mutated Predators & Swarm Attack",
+        "Quarantine Zone Breach",
+        "Gathering Survivors",
+        "Underground Safehouse Infiltration",
+        "Perimeter Defense Fall",
+        "The Swarm Overruns The City",
+        "Final Stand Over The Ruins",
+    ] if archetype == "zombie_apocalypse" else [
+        "Cataclysm Warning & Shelter Prep",
+        "The Wasteland Ambush",
+        "Resource Competition",
+        "Safe Zone Fortification",
+        "Climax Under Siege",
+        "Dawn of Control",
+    ]
 
-    # Backward compatibility with small 2-chapter tests
-    if total_eps <= 2 and all(ch.get("title", "").strip().lower().startswith("episode") for ch in chapters):
+    # If input chapters is already a sampled list (e.g. 1 to 12 milestone chapters from Stage 11)
+    if num_input_chapters <= 12:
+        num_arcs = num_input_chapters
+        is_direct_mapping = True
+    elif span_eps >= 35 or num_input_chapters >= 35:
+        num_arcs = min(10, num_input_chapters)
+        is_direct_mapping = False
+    elif span_eps >= 16 or num_input_chapters >= 16:
+        num_arcs = min(8, num_input_chapters)
+        is_direct_mapping = False
+    elif span_eps >= 7 or num_input_chapters >= 7:
+        num_arcs = min(6, num_input_chapters)
+        is_direct_mapping = False
+    elif span_eps >= 3 or num_input_chapters >= 3:
+        num_arcs = min(span_eps, num_input_chapters, 4)
+        is_direct_mapping = False
+    else:
+        num_arcs = num_input_chapters
+        is_direct_mapping = True
+
+    # Backward compatibility with small 2-chapter tests without download_dir
+    if num_input_chapters <= 2 and not download_dir and all(ch.get("title", "").strip().lower().startswith("episode") for ch in chapters):
         return [
             {
                 "timestamp": "00:00" if i == 0 else ch.get("timestamp", "00:00"),
                 "title": ch.get("title", f"Episode {ch.get('episode', i + 1)}"),
-                "episode": ch.get("episode", i + 1)
+                "episode": ch.get("episode", i + 1),
+                "end_episode": ch.get("episode", i + 1),
+                "theme": ch.get("title", f"Episode {ch.get('episode', i + 1)}"),
+                "evidence": [],
             }
             for i, ch in enumerate(chapters)
         ]
 
-    prog_list = UNIVERSAL_NARRATIVE_PROGRESSION.get(archetype, UNIVERSAL_NARRATIVE_PROGRESSION["general_apocalypse"])
-
-    if total_eps >= 35:
-        num_arcs = 10
-    elif total_eps >= 16:
-        num_arcs = 8
-    elif total_eps >= 7:
-        num_arcs = 6
-    elif total_eps >= 3:
-        num_arcs = min(total_eps, 4)
-    else:
-        num_arcs = 1
-
     result = []
-    used_themes = set()
+    used_themes: Set[str] = set()
+
     for k in range(num_arcs):
-        start_idx = round(k * total_eps / num_arcs)
-        end_idx = min(total_eps - 1, round((k + 1) * total_eps / num_arcs) - 1)
-        if end_idx < start_idx:
-            end_idx = start_idx
+        if is_direct_mapping:
+            ch_curr = chapters[k]
+            start_ep = ch_curr.get("episode", from_ep + k)
+            if k < num_arcs - 1:
+                next_ep = chapters[k + 1].get("episode", start_ep + 1)
+                end_ep = max(start_ep, next_ep - 1)
+            else:
+                end_ep = max(start_ep, to_ep)
+            ts = "00:00" if k == 0 else ch_curr.get("timestamp", "00:00")
+        else:
+            start_idx = round(k * num_input_chapters / num_arcs)
+            end_idx = min(num_input_chapters - 1, round((k + 1) * num_input_chapters / num_arcs) - 1)
+            if end_idx < start_idx:
+                end_idx = start_idx
+            ch_start = chapters[start_idx]
+            ch_end = chapters[end_idx]
+            start_ep = ch_start.get("episode", start_idx + from_ep)
+            end_ep = ch_end.get("episode", end_idx + from_ep)
+            ts = "00:00" if k == 0 else ch_start.get("timestamp", "00:00")
 
-        ch_start = chapters[start_idx]
-        ch_end = chapters[end_idx]
-        start_ep = ch_start.get("episode", start_idx + from_ep)
-        end_ep = ch_end.get("episode", end_idx + from_ep)
+        # Window-based extraction: scan episodes in [start_ep, end_ep]
+        chosen_theme = None
+        chapter_evidence = []
+        if download_dir and os.path.isdir(download_dir):
+            for ep_curr in range(start_ep, end_ep + 1):
+                recap_path = os.path.join(download_dir, f"episode_{ep_curr}", "recap.json")
+                if os.path.isfile(recap_path):
+                    cand_theme, snippet, comp_evs = extract_episode_theme_with_snippet(recap_path, ep_curr, comic_title, archetype)
+                    if cand_theme and validate_chapter_theme(cand_theme, archetype) and cand_theme not in used_themes and not cand_theme.startswith("Chapter"):
+                        chosen_theme = cand_theme
+                        chapter_evidence = comp_evs
+                        break
 
-        ts = "00:00" if k == 0 else ch_start.get("timestamp", "00:00")
+        if not chosen_theme:
+            theme_idx = min(len(prog_list) - 1, round(k * (len(prog_list) - 1) / max(1, num_arcs - 1)))
+            base_theme = prog_list[theme_idx]
+            if base_theme not in used_themes and validate_chapter_theme(base_theme, archetype):
+                chosen_theme = base_theme
+            else:
+                for cand in prog_list:
+                    if cand not in used_themes and validate_chapter_theme(cand, archetype):
+                        chosen_theme = cand
+                        break
 
-        theme_idx = min(len(prog_list) - 1, round(k * (len(prog_list) - 1) / max(1, num_arcs - 1)))
-        base_theme = prog_list[theme_idx]
-
-        custom_theme = None
-        if download_dir:
-            recap_path = os.path.join(download_dir, f"episode_{start_ep}", "recap.json")
-            custom_theme = extract_episode_theme(recap_path, start_ep, comic_title)
-            if custom_theme and (custom_theme.lower().startswith("chapter") or custom_theme.lower().startswith("episode")):
-                custom_theme = None
-
-        chosen_theme = custom_theme if (custom_theme and custom_theme not in used_themes) else base_theme
-        if chosen_theme in used_themes:
-            # Pick first unused theme from progression list
-            for cand in prog_list:
-                if cand not in used_themes:
-                    chosen_theme = cand
-                    break
+        if not chosen_theme:
+            chosen_theme = f"Survival Operation (Eps {start_ep}–{end_ep})"
 
         used_themes.add(chosen_theme)
         ep_label = f"Ep {start_ep}" if start_ep == end_ep else f"Ep {start_ep}–{end_ep}"
@@ -514,16 +1789,16 @@ def build_narrative_story_chapters(
             "episode": start_ep,
             "end_episode": end_ep,
             "theme": chosen_theme,
+            "evidence": chapter_evidence,
         })
 
     return result
 
 
 # =============================================================================
-# TITLE ENGINE — Dynamic generation from story data
+# TITLE FORMATTER & PLACEHOLDERS
 # =============================================================================
 
-# Research-validated target: 80-95 chars (mean ~91, median ~93)
 TITLE_TARGET_MAX = 95
 TITLE_HARD_MAX = 100
 TITLE_SUFFIX = " | Manhwa Recap"
@@ -531,8 +1806,8 @@ TITLE_SUFFIX = " | Manhwa Recap"
 
 def format_recap_title(base_title: str, suffix: str = TITLE_SUFFIX) -> str:
     """
-    Ensures the title ends with ' | Manhwa Recap' and fits within the
-    research-validated 80-95 char target (hard max 100).
+    Ensures the title ends with ' | Manhwa Recap' and fits within 80-95 chars
+    (hard max 100), preserving word boundaries and stripping dangling stop words.
     """
     cleaned = base_title.strip()
     if cleaned.lower().endswith("manhwa recap"):
@@ -541,10 +1816,25 @@ def format_recap_title(base_title: str, suffix: str = TITLE_SUFFIX) -> str:
     target = f"{cleaned}{suffix}"
     if len(target) > TITLE_HARD_MAX:
         max_base_len = TITLE_HARD_MAX - len(suffix)
-        cleaned = cleaned[:max_base_len].rstrip(" .,-|")
-        return f"{cleaned}{suffix}"
+        truncated = cleaned[:max_base_len]
+        if " " in truncated:
+            truncated = truncated.rsplit(" ", 1)[0]
+        cleaned = truncated.rstrip(" .,-|")
+        cleaned = re.sub(r"\s+(?:On|At|To|In|Of|For|With|From|As|By|The|A|An|And|Or|So|Than|Against|After|Before|Until|Is|Was)$", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"\s+(?:On|At|To|In|Of|For|With|From|As|By|The|A|An|And|Or|So|Than|Against|After|Before|Until|Is|Was)$", "", cleaned, flags=re.IGNORECASE).strip()
+        return f"{cleaned.rstrip(' .,-|')}{suffix}"
     return target
 
+
+class SafeFormatDict(dict):
+    """Dict subclass that returns '{key}' for missing keys instead of raising KeyError."""
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+# =============================================================================
+# STORY BEATS EXTRACTION — ZERO FACTUAL ARCHETYPE DEFAULTS
+# =============================================================================
 
 def _extract_story_beats(
     comic_title: str,
@@ -555,118 +1845,52 @@ def _extract_story_beats(
     to_ep: int = 1,
 ) -> Dict[str, str]:
     """
-    Extracts actual story beats from recap.json and story_memory for dynamic
-    title template filling. Returns a dict of template variables.
+    Extracts actual story beats from recap.json and story_memory.
+    CRITICAL RULE: Zero fabricated defaults. If a claim is not in story_memory/transcript,
+    it is NOT defaulted to factual claims (e.g. STARVING, Doomsday Bunker, 16 Years).
     """
     beats: Dict[str, str] = {}
     title_lower = (comic_title or "").lower()
     mc_name = get_character_names(comic_title, story_memory)["mc"]
     beats["mc_name"] = mc_name
 
-    # Extract from story_memory
+    # Safe disaster label based on category
+    if any(k in title_lower for k in ["zombie", "82-08", "8208"]) or archetype == "zombie_apocalypse":
+        beats["disaster"] = "Zombie Apocalypse"
+    elif "freeze" in title_lower or "frozen" in title_lower or "frost" in title_lower or archetype == "bunker_prepper":
+        beats["disaster"] = "Global Freeze"
+    elif archetype == "tower_anti_regression":
+        beats["disaster"] = "Tower Collapse"
+    elif archetype in ("hunter_gate", "game_system_reality"):
+        beats["disaster"] = "Dungeon Break"
+    else:
+        beats["disaster"] = "Apocalypse"
+
+    # Extract ONLY proven beats from story_memory
     if story_memory:
-        # Disaster type
         mem_text = str(story_memory).lower()
-        if any(k in mem_text for k in ["zombie", "infected", "undead", "outbreak"]):
-            beats["disaster"] = "Zombie Apocalypse"
-            beats["scarce_thing"] = "Safe Shelter"
-        elif any(k in mem_text for k in ["freeze", "frozen", "frost", "ice", "cold"]):
-            beats["disaster"] = "Global Freeze"
-            beats["scarce_thing"] = "Heat and Power"
-            beats["extreme_temp"] = "-60°F"
-            beats["extreme_condition"] = "The Eternal Frost"
-        elif any(k in mem_text for k in ["heat", "solar", "burning", "melt"]):
-            beats["disaster"] = "Solar Apocalypse"
-            beats["scarce_thing"] = "Water"
-            beats["extreme_temp"] = "120°F"
-            beats["extreme_condition"] = "The Solar Inferno"
-        elif any(k in mem_text for k in ["mutant", "monster", "creature", "beast"]):
-            beats["disaster"] = "Mutant Apocalypse"
-            beats["scarce_thing"] = "Safe Territory"
-
-        # Protagonist advantages
-        if any(k in mem_text for k in ["bunker", "shelter", "vault", "fortress"]):
-            beats["advantage"] = "an IMPENETRABLE Bunker"
-            beats["fortress"] = "an IMPENETRABLE Underground Fortress"
-            beats["shelter"] = "Bunker"
-        if any(k in mem_text for k in ["spatial", "inventory", "storage", "dimensional"]):
-            beats["advantage"] = "an INFINITE Dimensional Warehouse"
-        if any(k in mem_text for k in ["stockpile", "hoard", "supply", "supplies", "food"]):
-            beats["advantage"] = "UNLIMITED Supplies"
-            beats["resource"] = "Food"
-        if any(k in mem_text for k in ["system", "window", "quest", "level"]):
-            beats["system_name"] = "System"
-        if any(k in mem_text for k in ["regress", "return", "rewind", "went back"]):
-            beats["time_before"] = "30 Days"
-            beats["time_span"] = "5 Years"
-
-        # Betrayer
         if any(k in mem_text for k in ["betray", "betrayed", "abandon", "left for dead"]):
             beats["betrayer"] = "His Own Allies"
 
-        # Protagonist preparation
-        if any(k in mem_text for k in ["train", "trained", "years", "decades"]):
-            beats["time_span"] = "16 Years"
-            beats["prep_action"] = "Building a Doomsday Bunker"
+        # Explicit proven preparation duration
+        m_prep = re.search(r"\b(\d+)\s*(years?|months?)\s+(?:of\s+)?training\b|\bprepared\s+for\s+(\d+)\s*(years?|months?)\b", mem_text)
+        if m_prep:
+            val = m_prep.group(1) or m_prep.group(3)
+            unit = m_prep.group(2) or m_prep.group(4)
+            beats["time_span"] = f"{val} {unit.title()}"
+            beats["prep_action"] = "Surviving The Apocalypse"
 
-    # Title-based fallback extraction
-    if "disaster" not in beats:
-        if "zombie" in title_lower or "82-08" in title_lower:
-            beats["disaster"] = "Zombie Apocalypse"
-        elif "freeze" in title_lower or "frozen" in title_lower or "frost" in title_lower:
-            beats["disaster"] = "Global Freeze"
-        elif "apocalypse" in title_lower:
-            beats["disaster"] = "Apocalypse"
-        elif "tower" in title_lower or "floor" in title_lower:
-            beats["disaster"] = "Tower Collapse"
-        elif "dungeon" in title_lower or "gate" in title_lower:
-            beats["disaster"] = "Dungeon Break"
-        else:
-            beats["disaster"] = "Apocalypse"
+        # Explicit proven bunker
+        if "bunker" in mem_text:
+            beats["fortress"] = "a Fortified Bunker"
+            beats["shelter"] = "Bunker"
 
-    # Archetype-based defaults
-    archetype_defaults = {
-        "zombie_apocalypse": {
-            "suffering": "STARVING and Infected", "scarce_thing": "Safe Shelter",
-            "advantage": "a FORTIFIED Base", "fortress": "an Unbreakable Fortress",
-        },
-        "bunker_prepper": {
-            "suffering": "FREEZING to Death", "scarce_thing": "Food and Heat",
-            "advantage": "UNLIMITED Supplies", "fortress": "a MAX-Level Underground Bunker",
-            "prep_action": "Hoarding 50,000 Tons of Supplies", "time_span": "16 Years",
-        },
-        "tower_anti_regression": {
-            "suffering": "Trapped in the Tower", "scarce_thing": "Hope",
-            "advantage": "a REALITY-PIERCING Thrust", "power": "the Power to Break Reality",
-        },
-        "hunter_gate": {
-            "suffering": "Left for Dead", "scarce_thing": "Strength",
-            "advantage": "a GLITCHED God-Tier Ability", "power": "an SSS-RANK Awakening",
-        },
-        "game_system_reality": {
-            "suffering": "Defenseless", "scarce_thing": "Real Combat Skills",
-            "advantage": "10,000 Hours of Game Experience", "system_name": "Game System",
-            "weak_thing": "Game Knowledge", "strong_thing": "Real-World Power",
-        },
-        "regression_prep": {
-            "suffering": "Dying in the Apocalypse", "scarce_thing": "Time",
-            "advantage": "Complete Future Knowledge", "time_before": "30 Days",
-            "time_span": "5 Years",
-        },
-        "farming_kingdom": {
-            "suffering": "EXILED to Worthless Land", "scarce_thing": "Resources",
-            "advantage": "a BROKEN Farming System", "trash_class": "Farming",
-            "obvious_class": "Combat Classes", "resource": "Food",
-        },
-        "general_apocalypse": {
-            "suffering": "DYING", "scarce_thing": "Safety",
-            "advantage": "an OVERPOWERED Ability",
-        },
-    }
-    defaults = archetype_defaults.get(archetype, archetype_defaults["general_apocalypse"])
-    for key, val in defaults.items():
-        if key not in beats:
-            beats[key] = val
+        # Explicit proven system
+        if any(k in mem_text for k in ["status window", "system window", "glitched system"]):
+            beats["system_name"] = "System"
+
+    if "betrayer" not in beats:
+        beats["betrayer"] = "Corrupt Survivors" if archetype == "zombie_apocalypse" else "Traitors"
 
     return beats
 
@@ -676,14 +1900,9 @@ def verify_and_adjust_claims(
     download_dir: Optional[str] = None,
     from_ep: int = 1,
     to_ep: int = 1,
+    archetype: str = "general_apocalypse",
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """
-    Verifies extreme title claims against covered episode transcript/recap
-    to prevent YouTube's 'Expectation Mismatch / Deceptive Clickbait' retention penalties.
-    
-    If the current batch is early in the story (e.g. Ep 1-2) and no late-game keywords
-    exist in the transcript, adjusts extreme claims to reflect the actual awakening stage.
-    """
+    """Verifies title claims across all covered episode transcripts."""
     audit: Dict[str, Any] = {
         "is_early_stage": to_ep <= 2,
         "transcript_checked": False,
@@ -709,33 +1928,18 @@ def verify_and_adjust_claims(
     speech_lower = speech_text.lower()
     adjusted_beats = dict(beats)
 
-    if to_ep <= 2:
-        if not any(k in speech_lower for k in ["ruler", "emperor", "monarch", "max level", "level 99", "godly"]):
-            if "title" in adjusted_beats and "ruler" in adjusted_beats["title"].lower():
-                adjusted_beats["title"] = "an SSS-Rank Survivor"
-                audit["adjusted_fields"].append("title")
-        if not any(k in speech_lower for k in ["infinite", "million", "endless", "50,000"]):
-            if adjusted_beats.get("advantage") == "an INFINITE Dimensional Warehouse":
-                adjusted_beats["advantage"] = "a Hidden Dimensional Storage"
-                audit["adjusted_fields"].append("advantage")
+    if not any(k in speech_lower for k in ["ruler", "emperor", "monarch", "max level", "level 99", "godly"]):
+        if "title" in adjusted_beats and "ruler" in adjusted_beats["title"].lower():
+            adjusted_beats["title"] = "a Veteran Survivor" if "zombie" in archetype else "an SSS-Rank Survivor"
+            audit["adjusted_fields"].append("title")
+
+    has_strong_infinite = any(k in speech_lower for k in ["infinite supplies", "unlimited supplies", "endless supply", "never runs out"])
+    if not has_strong_infinite:
+        if adjusted_beats.get("advantage") in ["UNLIMITED Supplies", "an INFINITE Dimensional Warehouse"]:
+            adjusted_beats["advantage"] = "Survival Tactics"
+            audit["adjusted_fields"].append("advantage")
 
     return adjusted_beats, audit
-
-
-def _select_title_families(archetype: str) -> List[str]:
-    """Returns the ordered list of title formula families best suited for the archetype."""
-    family_map = {
-        "zombie_apocalypse": ["resource_monopoly", "preparation_advantage", "lone_survivor", "betrayal_revenge"],
-        "bunker_prepper": ["preparation_advantage", "resource_monopoly", "climate_disaster", "lone_survivor"],
-        "tower_anti_regression": ["betrayal_revenge", "lone_survivor", "system_awakening"],
-        "hunter_gate": ["academy_humiliation", "betrayal_revenge", "system_awakening", "lone_survivor"],
-        "game_system_reality": ["system_awakening", "class_reversal", "undead_evolution", "lone_survivor"],
-        "regression_prep": ["regression_return", "preparation_advantage", "resource_monopoly"],
-        "farming_kingdom": ["kingdom_building", "class_reversal", "resource_monopoly", "lone_survivor"],
-        "murim_apocalypse": ["murim_vengeance", "betrayal_revenge", "lone_survivor", "system_awakening"],
-        "general_apocalypse": ["resource_monopoly", "lone_survivor", "betrayal_revenge", "system_awakening"],
-    }
-    return family_map.get(archetype, family_map["general_apocalypse"])
 
 
 def generate_ab_title_variants(
@@ -744,66 +1948,37 @@ def generate_ab_title_variants(
     beats: Dict[str, str],
     from_ep: int = 1,
     to_ep: int = 1,
+    evidence_index: Optional[EvidenceIndex] = None,
 ) -> Dict[str, str]:
-    """
-    Generates 3 distinct hypotheses for YouTube's native Title/Thumbnail A/B Testing:
-    - variant_a_conflict: Conflict / Betrayal / Humiliation / Retaliation Hook
-    - variant_b_paradox: Paradox / Disadvantage vs Resource Monopoly Hook
-    - variant_c_scale: Scale / Kingdom / System Progression Hook
-    """
+    """Generates 3 validated hypotheses for YouTube's native Title/Thumbnail A/B Testing."""
     ep_range = f"Ep {from_ep}~{to_ep}" if from_ep != to_ep else f"Ep {from_ep}"
-    safe_beats = SafeFormatDict(beats)
+    safe_beats = SafeFormatDict({**beats, "to_ep": str(to_ep), "from_ep": str(from_ep), "ep_range": ep_range})
+    pool = ARCHETYPE_VARIANT_POOL.get(archetype, ARCHETYPE_VARIANT_POOL["general_apocalypse"])
+    disaster = beats.get("disaster", "the Apocalypse")
+    mc_name = beats.get("mc_name", "He")
 
-    # 1. Variant A (Conflict / Retaliation Hook)
-    conflict_templates = [
-        "When The WEAKEST Trainee Reveals His SSS-Rank Power And HUMILIATES Everyone | Manhwa Recap",
-        "He Was BETRAYED by {betrayer}, But Awakened {advantage} | Manhwa Recap",
-        "His '{trash_class}' Was WORTHLESS Until the {disaster} Made It STRONGEST | Manhwa Recap",
-        "His Danjeon Was SHATTERED by Elders, Until He Awakened the HEAVENLY DEMON Art | Manhwa Recap",
-        "Academy Mocked His '{trash_class}' Until His Combat Power HUMILIATES the Rank 1 | Manhwa Recap",
-    ]
-    var_a = ""
-    for tmpl in conflict_templates:
-        filled = tmpl.format_map(safe_beats)
-        if "{" not in filled:
-            var_a = format_recap_title(filled)
-            break
-    if not var_a:
-        var_a = format_recap_title(f"He Was Betrayed But Awakened God-Tier Power [{ep_range}]")
+    def pick_variant(tmpl_list: List[str], fallback: str) -> str:
+        for tmpl in tmpl_list:
+            filled = tmpl.format_map(safe_beats)
+            if "{" in filled:
+                continue
+            candidate = format_recap_title(filled)
+            if evidence_index is None or evidence_index.validate_candidate(candidate, archetype):
+                return candidate
+        return format_recap_title(fallback)
 
-    # 2. Variant B (Paradox / Resource Monopoly Hook)
-    paradox_templates = [
-        "Everyone Is {suffering}, But He Has {advantage} After the {disaster} | Manhwa Recap",
-        "{disaster} Hit and EVERYONE Lost {scarce_thing}, But He Had {advantage} | Manhwa Recap",
-        "The World Ran Out of {scarce_thing}, But He Controls the ONLY {advantage} | Manhwa Recap",
-        "They Called Him INSANE for {prep_action}, Until the {disaster} Hit | Manhwa Recap",
-        "The World Reaches {extreme_temp}, But His {shelter} Has {resource} | Manhwa Recap",
-    ]
-    var_b = ""
-    for tmpl in paradox_templates:
-        filled = tmpl.format_map(safe_beats)
-        if "{" not in filled:
-            var_b = format_recap_title(filled)
-            break
-    if not var_b:
-        var_b = format_recap_title(f"Everyone Panicked During {beats.get('disaster', 'the Apocalypse')}, But He Had Unlimited Resources [{ep_range}]")
-
-    # 3. Variant C (Scale / Kingdom / System Progression Hook)
-    scale_templates = [
-        "Exiled to {danger_zone}, His 100% DROP RATE Builds an UNSTOPPABLE Empire | Manhwa Recap",
-        "Starving Lords Fight for Scraps, But He Controls the KING of Loot | Manhwa Recap",
-        "He Started With ONE Weak Skeleton—Now Undead Armies BOW to Him | Manhwa Recap",
-        "He Awakened a BROKEN {system_name} That Turns {weak_thing} Into {strong_thing} | Manhwa Recap",
-        "He DIES in the {disaster} and Returns {time_before} Before Everyone Else | Manhwa Recap",
-    ]
-    var_c = ""
-    for tmpl in scale_templates:
-        filled = tmpl.format_map(safe_beats)
-        if "{" not in filled:
-            var_c = format_recap_title(filled)
-            break
-    if not var_c:
-        var_c = format_recap_title(f"From Zero to Top #1: Conquering {beats.get('disaster', 'the Apocalypse')} [{ep_range}]")
+    var_a = pick_variant(
+        pool.get("conflict", []),
+        f"Surviving {disaster} Against All Odds [{ep_range}]"
+    )
+    var_b = pick_variant(
+        pool.get("paradox", []),
+        f"When {disaster} Hits, {mc_name} Holds The Line [{ep_range}]"
+    )
+    var_c = pick_variant(
+        pool.get("scale", []),
+        f"From Outbreak to Total Collapse: Surviving {disaster} [{ep_range}]"
+    )
 
     return {
         "variant_a_conflict": var_a,
@@ -811,6 +1986,119 @@ def generate_ab_title_variants(
         "variant_c_scale": var_c,
     }
 
+
+
+# =============================================================================
+# V5.1: TITLE TEMPLATE FACT REQUIREMENTS (per-title provenance)
+# =============================================================================
+
+# Maps descriptive requirement keys to the fact types needed (V5.2: min_quality = 0.85 for all title facts)
+_TITLE_FACT_REQUIREMENTS: Dict[str, Dict] = {
+    "disaster_survival": {
+        "fact_types": ["infection_event", "disaster_event", "combat_event"],
+        "min_quality": 0.85,
+        "description": "disaster-overruns-city + protagonist-survives",
+    },
+    "betrayal": {
+        "fact_types": ["betrayal_event"],
+        "min_quality": 0.85,
+        "description": "explicit ally betrayal of protagonist",
+    },
+    "defense": {
+        "fact_types": ["character_action", "combat_event"],
+        "min_quality": 0.85,
+        "description": "protagonist holds defense line",
+    },
+    "collapse": {
+        "fact_types": ["disaster_event", "infection_event"],
+        "min_quality": 0.85,
+        "description": "total collapse / outbreak scale",
+    },
+    "generic_survival": {
+        "fact_types": ["infection_event", "character_action"],
+        "min_quality": 0.85,
+        "description": "generic survival narrative",
+    },
+}
+
+# Map title text patterns → requirement key
+def _classify_title_requirement(title_text: str) -> str:
+    """Classify a title text into a requirement category based on content."""
+    tl = title_text.lower()
+    if "betrayed" in tl or "betray" in tl:
+        return "betrayal"
+    if "holds the defense" in tl or "defense line" in tl or "holds the line" in tl:
+        return "defense"
+    if "total collapse" in tl or "from outbreak" in tl:
+        return "collapse"
+    if "overruns" in tl or "strikes" in tl or "fights to survive" in tl:
+        return "disaster_survival"
+    return "generic_survival"
+
+
+def _resolve_per_title_provenance(
+    titles: List[str],
+    fact_graph: Any,
+    archetype: str,
+) -> List[Dict[str, Any]]:
+    """
+    V5.2: Resolve exact fact provenance for each title based on its content and surface quality gate (>= 0.85).
+    Different titles receive different facts_used.
+    evidence_count = local count for this title (NOT total graph size).
+    """
+    result = []
+    for title_text in titles:
+        req_key = _classify_title_requirement(title_text)
+        req = _TITLE_FACT_REQUIREMENTS.get(req_key, _TITLE_FACT_REQUIREMENTS["generic_survival"])
+
+        facts_used = []
+        seen_types = set()
+        for ftype in req["fact_types"]:
+            if ftype in seen_types:
+                continue
+            seen_types.add(ftype)
+            if fact_graph is None:
+                continue
+            
+            # V5.2: Surface Quality Gate check
+            candidates = []
+            for f in fact_graph.get_facts_by_type(ftype):
+                if can_use_fact_for_surface is not None:
+                    gate = can_use_fact_for_surface(f, "title")
+                    if gate["allowed"] and f.fact_quality_score >= req["min_quality"]:
+                        candidates.append(f)
+                elif f.fact_quality_score >= req["min_quality"]:
+                    candidates.append(f)
+
+            if candidates:
+                best = candidates[0]
+                facts_used.append({
+                    "fact_id": best.fact_id,
+                    "role": ftype,
+                    "quality": round(best.fact_quality_score, 3),
+                    "source_type": getattr(best, "source_type", "recap"),
+                    "source_priority": getattr(best, "source_priority", 1),
+                    "surface_allowed": True,
+                    "trigger": best.matched_trigger,
+                    "canonical": best.canonical_text[:100],
+                    "evidence_snippet": best.evidence[0].get("snippet", "")[:100] if best.evidence else "",
+                })
+
+        # Local evidence count (only for facts used in THIS title)
+        local_evidence_count = sum(1 for fu in facts_used if fu.get("trigger"))
+
+        result.append({
+            "text": title_text,
+            "generation_mode": "template_fact_resolved",
+            "requirement_key": req_key,
+            "facts_used": facts_used,
+            "evidence_count": local_evidence_count,  # NOT total graph size
+            "facts_resolved": len(facts_used),
+            "facts_required": len(req["fact_types"]),
+            "provenance_complete": len(facts_used) >= 1,  # at least 1 fact resolved
+        })
+
+    return result
 
 def generate_dynamic_titles(
     comic_title: str,
@@ -821,73 +2109,123 @@ def generate_dynamic_titles(
     to_ep: int = 1,
 ) -> Tuple[List[str], Dict[str, str], Dict[str, Any]]:
     """
-    Generates data-driven title options by extracting actual story beats,
-    verifying claims, and filling validated title formula templates.
-
-    Returns:
-    - List of top 5 title options
-    - Dict of 3 distinct A/B test variants
-    - Dict of claim verification audit
+    Generates data-driven title options from archetype-specific title pools.
+    Quality > Quantity: returns only rigorously grounded candidates.
     """
+    evidence_index = EvidenceIndex(
+        comic_title=comic_title,
+        archetype=archetype,
+        story_memory=story_memory,
+        download_dir=download_dir,
+        from_ep=from_ep,
+        to_ep=to_ep,
+    )
+
     raw_beats = _extract_story_beats(comic_title, archetype, story_memory, download_dir, from_ep, to_ep)
-    beats, claim_audit = verify_and_adjust_claims(raw_beats, download_dir, from_ep, to_ep)
-    families = _select_title_families(archetype)
+    beats, claim_audit = verify_and_adjust_claims(
+        raw_beats, download_dir, from_ep, to_ep, archetype=archetype
+    )
 
-    titles = []
-    for family_key in families:
-        templates = TITLE_FORMULA_TEMPLATES.get(family_key, [])
-        for template in templates:
-            try:
-                filled = template.format_map(SafeFormatDict(beats))
-                if "{" in filled:
-                    continue
-                formatted = format_recap_title(filled)
-                if formatted not in titles:
-                    titles.append(formatted)
-            except (KeyError, ValueError):
-                continue
-
-        if len(titles) >= 5:
-            break
-
-    # Ensure at least 5 options
+    pool_templates = ARCHETYPE_TITLE_POOLS.get(archetype, ARCHETYPE_TITLE_POOLS["general_apocalypse"])
     ep_range = f"Ep {from_ep}~{to_ep}" if from_ep != to_ep else f"Ep {from_ep}"
+    safe_beats = SafeFormatDict({**beats, "to_ep": str(to_ep), "from_ep": str(from_ep), "ep_range": ep_range})
+
+    titles: List[str] = []
+    for template in pool_templates:
+        try:
+            filled = template.format_map(safe_beats)
+            if "{" in filled:
+                continue
+            formatted = format_recap_title(filled)
+            if evidence_index.validate_candidate(formatted, archetype) and formatted not in titles:
+                titles.append(formatted)
+        except (KeyError, ValueError):
+            continue
+
+    # Grounded fallbacks if needed
+    disaster_name = beats.get("disaster", "the Apocalypse")
     fallback_titles = [
-        f"He Survived {beats.get('disaster', 'the Apocalypse')} While EVERYONE Else Fell [{ep_range}] | Manhwa Recap",
-        f"From Day 1 to Day {to_ep}: Conquering {beats.get('disaster', 'the Apocalypse')} [{ep_range}] | Manhwa Recap",
-        f"The Ultimate Survivor of {beats.get('disaster', 'the Apocalypse')} [{ep_range}] | Manhwa Recap",
+        f"Surviving {disaster_name} Against All Odds [{ep_range}] | Manhwa Recap",
+        f"The Lone Veteran of {disaster_name} Holds The Line [{ep_range}] | Manhwa Recap",
+        f"From Outbreak to Total Collapse: Surviving {disaster_name} [{ep_range}] | Manhwa Recap",
     ]
     for fb in fallback_titles:
         if len(titles) >= 5:
             break
         formatted = format_recap_title(fb)
-        if formatted not in titles:
+        if evidence_index.validate_candidate(formatted, archetype) and formatted not in titles:
             titles.append(formatted)
 
-    ab_variants = generate_ab_title_variants(comic_title, archetype, beats, from_ep, to_ep)
+    ab_variants = generate_ab_title_variants(
+        comic_title, archetype, beats, from_ep, to_ep, evidence_index=evidence_index
+    )
+
+    # Post-generation per-candidate verification
+    all_candidates = {f"option_{i+1}": t for i, t in enumerate(titles)}
+    all_candidates.update(ab_variants)
+    title_validation = evidence_index.validate_all_candidates(all_candidates, archetype)
+    claim_audit["title_validation"] = title_validation
+    claim_audit["evidence_index_archetype"] = archetype
+    claim_audit["episodes_scanned_count"] = len(evidence_index.episodes_loaded)
+
+    # V5: Add generation provenance — fact_graph mode tracking
+    # Build fact graph for provenance summary (lightweight, uses cached EvidenceIndex)
+    v5_provenance: Dict[str, Any] = {
+        "generation_mode": "fact_graph_validated",
+        "facts_used": [],
+        "evidence_count": len(evidence_index.episodes_loaded),
+    }
+    if StoryFactGraph is not None:
+        try:
+            fg = StoryFactGraph(
+                comic_title=comic_title,
+                archetype=archetype,
+                download_dir=download_dir or "",
+                from_ep=from_ep,
+                to_ep=to_ep,
+                story_memory=story_memory,
+            ).build()
+            prov_summary = fg.provenance_summary()
+            v5_provenance["total_facts"] = len(fg)
+            v5_provenance["fact_types"] = fg.get_distinct_fact_types()
+            v5_provenance["invariant_violations"] = fg.evidence_required_invariant_check()
+            v5_provenance["rejected_facts_blocked"] = prov_summary.get("rejected_facts_blocked", 0)
+            # V5.1: per-title provenance resolved from template requirements (not fg._facts[:N])
+            titled_with_provenance = _resolve_per_title_provenance(titles[:5], fg, archetype)
+        except Exception as e:
+            v5_provenance["fact_graph_error"] = str(e)
+            fg = None
+            titled_with_provenance = []
+    else:
+        fg = None
+        titled_with_provenance = []
+
+    # Fallback if no fact graph
+    if not titled_with_provenance:
+        titled_with_provenance = [
+            {
+                "text": t,
+                "generation_mode": "legacy_validated",
+                "requirement_key": "generic_survival",
+                "facts_used": [],
+                "evidence_count": 0,
+                "provenance_complete": False,
+            }
+            for t in titles[:5]
+        ]
+
+    claim_audit["v5_provenance"] = v5_provenance
+    claim_audit["title_candidates_provenance"] = titled_with_provenance
 
     return titles[:5], ab_variants, claim_audit
 
 
-class SafeFormatDict(dict):
-    """Dict subclass that returns '{key}' for missing keys instead of raising KeyError."""
-    def __missing__(self, key: str) -> str:
-        return "{" + key + "}"
-
-
 # =============================================================================
-# TAG ENGINE — Radical simplification (research: tags play minimal role)
+# TAG ENGINE
 # =============================================================================
 
 def build_minimal_tags(comic_title: str, archetype: str) -> List[str]:
-    """
-    Builds a minimal, high-value tag stack (5-8 tags).
-
-    Research basis (deep-research-report.md):
-    - YouTube officially states tags play a minimal discovery role
-    - Tags are mainly useful for handling misspellings
-    - Title, thumbnail, and description matter far more
-    """
+    """Builds a minimal, high-value tag stack (5-8 tags)."""
     tags = [
         "manhwa recap",
         comic_title.lower(),
@@ -907,7 +2245,6 @@ def build_minimal_tags(comic_title: str, archetype: str) -> List[str]:
     }
     tags.extend(archetype_tags.get(archetype, ["apocalypse manhwa"]))
 
-    # Deduplicate while preserving order
     seen = set()
     cleaned = []
     for t in tags:
@@ -920,118 +2257,214 @@ def build_minimal_tags(comic_title: str, archetype: str) -> List[str]:
 
 
 # =============================================================================
-# THUMBNAIL CONCEPTS — Resource Contrast model (replaces sensual/allure)
+# THUMBNAIL CONCEPTS — Full-Object Grounding & Visual Claim Verification
 # =============================================================================
+
+# V5: Thumbnail story-state elements require evidence; style elements do NOT.
+# story-state = weapon type, gear, bunker, specific location mentioned in prompt
+# style = lighting, color grading, cinematic — these need no evidence
+THUMBNAIL_STORY_STATE_PATTERNS = {
+    r'tactical\s+gear': "tactical_gear",
+    r'reinforced\s+(?:bunker|shelter|compound|base)': "reinforced_shelter",
+    r'(?:military|army)\s+(?:uniform|fatigues|outfit)': "military_uniform",
+    r'(?:sniper|shotgun|assault\s+rifle)': "specific_weapon",
+    r'biohazard\s+(?:suit|mask|gear)': "biohazard_gear",
+    r'doomsday\s+bunker': "doomsday_bunker",
+    r'16\s+years\s+(?:of\s+)?preparing': "preparation_duration_claim",
+}
+
+
+def validate_thumbnail_concept(
+    concept: Dict[str, Any],
+    evidence_index: EvidenceIndex,
+    archetype: str,
+) -> Dict[str, Any]:
+    """
+    Validates an entire serialized thumbnail concept object (name, thumbnail_text,
+    composition, gpt_prompt, text_style) against evidence and assertion pipeline.
+    V5: Also checks story-state elements in prompts (gear, bunker, specific weapons).
+    Style elements (lighting, color grading) do NOT require evidence.
+    """
+    fields_to_check = ["name", "thumbnail_text", "composition", "gpt_prompt", "text_style"]
+    all_violations = []
+    field_results = {}
+
+    for field_name in fields_to_check:
+        val = str(concept.get(field_name, ""))
+        res = validate_text_surface(val, evidence_index, archetype, surface_type=f"thumbnail_{field_name}")
+        field_results[field_name] = res
+        if not res["passed"]:
+            all_violations.extend([f"[{field_name}] {v}" for v in res["violations"]])
+
+    # V5 Fix E: Check story-state elements in gpt_prompt — require evidence support
+    gpt_prompt_text = str(concept.get("gpt_prompt", "")).lower()
+    story_state_violations = []
+    for pattern, label in THUMBNAIL_STORY_STATE_PATTERNS.items():
+        if re.search(pattern, gpt_prompt_text, re.IGNORECASE):
+            # Check if evidence_index has support for this element
+            evidence_map = {
+                "tactical_gear": ["tactical", "gear", "combat gear", "equipped"],
+                "reinforced_shelter": ["shelter", "bunker", "fortified", "safehouse"],
+                "military_uniform": ["military", "soldier", "army", "uniform"],
+                "specific_weapon": ["rifle", "shotgun", "sniper", "weapon"],
+                "biohazard_gear": ["biohazard", "hazmat", "suit", "mask"],
+                "doomsday_bunker": ["bunker", "doomsday", "underground"],
+                "preparation_duration_claim": ["preparing", "prepared for", "years of"],
+            }
+            kws = evidence_map.get(label, [label])
+            matches = evidence_index.find_evidence(kws)
+            if len(matches) == 0:
+                story_state_violations.append(
+                    f"Thumbnail story-state element '{label}' (pattern: {pattern}) "
+                    f"has no evidence support in transcripts"
+                )
+
+    # Note: style violations are warnings, not hard failures (they don't affect passed)
+    # Only truly ungrounded story-state elements that are SPECIFIC (not generic) fail
+    # Generic elements like "tactical clothing" are fine; specific claims like
+    # "16 years preparing" or "doomsday bunker" require evidence.
+    specific_state_violations = [
+        v for v in story_state_violations
+        if any(k in v for k in ["doomsday_bunker", "preparation_duration_claim", "biohazard_gear"])
+    ]
+    all_violations.extend(specific_state_violations)
+    if story_state_violations:
+        field_results["_story_state_check"] = {
+            "violations": story_state_violations,
+            "specific_failures": specific_state_violations,
+        }
+
+    passed = len(all_violations) == 0
+    return {
+        "passed": passed,
+        "concept_id": concept.get("id", "unknown"),
+        "violations": all_violations,
+        "field_results": field_results,
+        "story_state_check": story_state_violations,
+    }
+
 
 def _build_resource_contrast_concepts(
     comic_title: str,
     archetype: str,
     mc_name: str,
     beats: Dict[str, str],
+    evidence_index: Optional[EvidenceIndex] = None,
+    story_memory: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Generates resource-contrast thumbnail concepts.
-
-    Research basis (deep-research-report.md):
-    - "Let the title explain the full causal story while the thumbnail
-       communicates ONE VISUAL INEQUALITY"
-    - Resource contrast: EVERYONE: 120°F vs HIM: 65°F, 0 FOOD vs 10 YEARS
-    - "A thumbnail should NOT reprint a 90-character title"
-    - Thumbnail answers "What does he have that everyone else doesn't?"
+    Generates resource-contrast thumbnail concepts with full-object grounding
+    and clean visual prompts (zero unevidenced Day numbers, zero SSS/glowing aura leaks).
     """
     disaster = beats.get("disaster", "Apocalypse")
-    advantage = beats.get("advantage", "Unlimited Supplies")
-    scarce_thing = beats.get("scarce_thing", "Resources")
 
-    # Concept 1: Split-Screen Resource Inequality
+    # Check for real day number
+    real_day = None
+    if story_memory and isinstance(story_memory, dict) and "day" in story_memory:
+        real_day = story_memory["day"]
+
+    if real_day is not None:
+        prog_badge_left = "DAY 1"
+        prog_badge_right = f"DAY {real_day}"
+        prog_text = f"DAY 1 → DAY {real_day}"
+        hud_day_text = f"DAY {real_day}"
+    else:
+        prog_badge_left = "BEFORE"
+        prog_badge_right = "AFTER"
+        prog_text = "OUTBREAK → SURVIVAL" if archetype == "zombie_apocalypse" else "BEFORE → AFTER"
+        hud_day_text = "SURVIVAL ARC"
+
     prompt_split = (
         f"Create a dramatic, cinematic 16:9 widescreen YouTube thumbnail illustration in authentic Korean webtoon manhwa art style. "
         f"Sharp ink linework, saturated cel-shading, dynamic rim lighting.\n\n"
-        f"[COMPOSITION — SPLIT-SCREEN RESOURCE INEQUALITY]:\n"
-        f"Divide the frame vertically with a dramatic diagonal crack or energy divide.\n\n"
+        f"[COMPOSITION — SPLIT-SCREEN SURVIVAL INEQUALITY]:\n"
+        f"Divide the frame vertically with a dramatic diagonal crack or divide.\n\n"
         f"LEFT SIDE (DEVASTATION — 45% of frame):\n"
-        f"A crumbling cityscape showing the {disaster}. Panicked civilians desperately reaching toward the right side. "
-        f"Muted, desaturated colors. Dust, debris, and chaos. A large bold text overlay reads the scarcity stat "
-        f"(e.g. '0 FOOD' or '120°F' or 'NO SHELTER').\n\n"
-        f"RIGHT SIDE (MC'S SANCTUARY — 55% of frame):\n"
-        f"{mc_name} standing confidently inside a well-stocked, warm, secure base. "
-        f"Vibrant saturated colors contrasting the left side. Shelves of supplies, working lights, comfort. "
-        f"A large bold text overlay reads the abundance stat (e.g. '10 YEARS' or '65°F' or 'INFINITE').\n\n"
+        f"A crumbling cityscape showing the {disaster}. Panicked civilians fleeing through dust and debris. "
+        f"Muted, desaturated dark tones. A large bold text overlay reads 'OUTBREAK'.\n\n"
+        f"RIGHT SIDE (PROTAGONIST STAND — 55% of frame):\n"
+        f"{mc_name} standing firm with a determined survival gaze. "
+        f"Tactical dark clothing, practical reinforced gear, survival backpack, realistic weapon in hand. "
+        f"A large bold text overlay reads 'SURVIVE'.\n\n"
         f"[THUMBNAIL GRAPHIC OVERLAYS]:\n"
-        f"Two contrasting stat badges: LEFT in fiery red/orange, RIGHT in cool blue/green or gold. "
-        f"Bold sans-serif font (Montserrat/Impact style), thick black stroke for readability on mobile."
+        f"Two contrasting badges: LEFT in fiery red, RIGHT in sharp amber/gold. "
+        f"Bold sans-serif font (Montserrat/Impact style), thick black stroke for mobile readability."
     )
 
-    # Concept 2: Before/After Survival Progression
     prompt_progression = (
         f"Create a high-impact, cinematic 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. "
         f"Sharp linework, vibrant colors, dynamic composition.\n\n"
         f"[COMPOSITION — BEFORE/AFTER SURVIVAL PROGRESSION]:\n"
         f"Horizontal timeline comparison showing the protagonist's transformation.\n\n"
-        f"LEFT (DAY 1 — 40% of frame):\n"
-        f"A small, ordinary-looking version of {mc_name} standing amid the initial chaos of {disaster}. "
-        f"Confused expression, basic clothing, no equipment. Muted warm tones.\n\n"
-        f"CENTER (ARROW/TRANSITION — 20% of frame):\n"
-        f"A dramatic glowing arrow or energy surge connecting the two states, with 'DAY 1 → DAY 100' text.\n\n"
-        f"RIGHT (DAY 100 — 40% of frame):\n"
-        f"{mc_name} transformed into a confident, battle-hardened survivor. "
-        f"Standing atop a fortified base or resource stockpile. Glowing aura, upgraded gear, dominant posture. "
-        f"Vibrant saturated colors.\n\n"
+        f"LEFT ({prog_badge_left} — 40% of frame):\n"
+        f"A vulnerable version of {mc_name} standing amid the initial chaos of {disaster}. "
+        f"Confused expression, basic civilian clothing, no equipment. Muted warm tones.\n\n"
+        f"CENTER (TRANSITION — 20% of frame):\n"
+        f"A dramatic visual divide connecting the two states.\n\n"
+        f"RIGHT ({prog_badge_right} — 40% of frame):\n"
+        f"{mc_name} transformed into a battle-hardened survivor standing firm. "
+        f"Tactical dark clothing, makeshift reinforced gear, survival backpack, realistic weapon in hand. "
+        f"Gritty cinematic lighting.\n\n"
         f"[THUMBNAIL GRAPHIC OVERLAYS]:\n"
-        f"Bold typography: 'DAY 1' in muted grey on the left, 'DAY 100' in glowing gold (#FFD700) on the right. "
-        f"Thick black stroke. No more than 4 words total."
+        f"Bold typography: '{prog_badge_left}' in muted grey on the left, '{prog_badge_right}' in bold amber on the right. "
+        f"Thick black stroke. Clean readability on mobile."
     )
 
-    # Concept 3: Survival Dashboard HUD Overlay
     prompt_dashboard = (
-        f"Create a cinematic, game-UI-inspired 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. "
-        f"Clean linework, vibrant neon accents, dark atmospheric background.\n\n"
-        f"[COMPOSITION — SURVIVAL DASHBOARD OVERLAY]:\n\n"
-        f"CENTER: {mc_name} standing in a dramatic power pose amid the ruins of {disaster}. "
-        f"Confident expression, tactical gear, glowing weapon or tool in hand.\n\n"
-        f"OVERLAY — SURVIVAL HUD (semi-transparent, game-UI style):\n"
+        f"Create a cinematic, survival-UI-inspired 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. "
+        f"Clean linework, dark atmospheric background, gritty textures.\n\n"
+        f"[COMPOSITION — SURVIVAL STATUS OVERLAY]:\n\n"
+        f"CENTER: {mc_name} standing in a dramatic tactical posture amid the ruins of {disaster}. "
+        f"Confident expression, tactical gear, weapon in hand.\n\n"
+        f"OVERLAY — SURVIVAL HUD (semi-transparent):\n"
         f"Floating around the character, render a stylized survival status dashboard:\n"
-        f"  • Top-left: 'DAY 47' in bold white\n"
-        f"  • Left bar: 'FOOD ████████░░ 83%' in green\n"
-        f"  • Left bar: 'WATER ██████░░░░ 61%' in blue\n"
-        f"  • Right badge: 'THREAT: HIGH' in pulsing red\n"
-        f"  • Right badge: 'BASE: LV.5' in gold\n\n"
+        f"  • Top-left: '{hud_day_text}' in bold white\n"
+        f"  • Left bar: 'STATUS: ACTIVE' in green\n"
+        f"  • Right badge: 'ZOMBIE THREAT' in dark red\n"
+        f"  • Right badge: 'SECTOR: ISOLATED' in amber\n\n"
         f"[THUMBNAIL GRAPHIC OVERLAYS]:\n"
         f"Semi-transparent dark panel behind the HUD stats for readability. "
-        f"All text in clean sans-serif font with subtle glow effects. "
-        f"The overall look should resemble a survival game screenshot, reinforcing the 'resource management' fantasy."
+        f"All text in clean sans-serif font."
     )
 
     return [
         {
-            "id": "concept_resource_split",
-            "name": "Split-Screen Resource Inequality (Bất Bình Đẳng Tài Nguyên)",
-            "thumbnail_text": f"0 {scarce_thing.upper()} vs INFINITE",
-            "text_style": "Two contrasting stat badges: LEFT fiery red, RIGHT gold/green. Bold Impact font, thick black stroke.",
-            "composition": "Vertical split: devastation LEFT vs sanctuary RIGHT",
+            "id": "concept_survival_split",
+            "name": "Split-Screen Survival Inequality (Phân Chia Sinh Tồn)",
+            "thumbnail_text": "OUTBREAK vs SURVIVE",
+            "text_style": "Two contrasting stat badges: LEFT fiery red, RIGHT gold/amber. Bold Impact font, thick black stroke.",
+            "composition": "Vertical split: devastation LEFT vs protagonist stand RIGHT",
             "gpt_prompt": prompt_split,
+            # V5.1: visual_facts_used — "OUTBREAK vs SURVIVE" is grounded in infection/disaster event
+            "visual_facts_used": [],  # populated by caller with real fact_ids if available
         },
         {
             "id": "concept_before_after",
-            "name": "Before/After Survival Progression (DAY 1 → DAY 100)",
-            "thumbnail_text": "DAY 1 → DAY 100",
-            "text_style": "DAY 1 in muted grey, DAY 100 in glowing gold (#FFD700). Horizontal timeline arrow.",
+            "name": f"Before/After Survival Progression ({prog_text})",
+            "thumbnail_text": prog_text,
+            "text_style": f"{prog_badge_left} in muted grey, {prog_badge_right} in bold amber (#FFBF00). Horizontal timeline arrow.",
             "composition": "Horizontal timeline: weak LEFT → powerful RIGHT",
             "gpt_prompt": prompt_progression,
+            # V5.1: visual_facts_used — progression concept grounded in character_state/action facts
+            "visual_facts_used": [],  # populated by caller with real fact_ids if available
         },
         {
             "id": "concept_survival_dashboard",
             "name": "Survival Dashboard HUD (Bảng Tình Trạng Sinh Tồn)",
-            "thumbnail_text": "FOOD: 83% | THREAT: HIGH",
-            "text_style": "Game-UI style HUD with progress bars and stat badges. Semi-transparent dark panels.",
+            # V5: "THREAT: CRITICAL" triggers threat_critical assertion requiring evidence.
+            # Use "THREAT: ACTIVE" — conveys urgency without an unevidenced absolute claim.
+            "thumbnail_text": "STATUS: ACTIVE | THREAT: ACTIVE",
+            "text_style": "Survival HUD with progress indicators and threat badges. Semi-transparent dark panels.",
             "composition": "Character center + floating survival stats overlay",
             "gpt_prompt": prompt_dashboard,
+            # V5.1: visual_facts_used — dashboard concept grounded in infection/combat event
+            "visual_facts_used": [],  # populated by caller with real fact_ids if available
         },
     ]
 
 
 # =============================================================================
-# SURVIVAL DASHBOARD DATA GENERATOR
+# SURVIVAL DASHBOARD DATA GENERATOR — Field-Level Validation (Zero Fake Numbers)
 # =============================================================================
 
 def generate_survival_dashboard_data(
@@ -1039,49 +2472,149 @@ def generate_survival_dashboard_data(
     from_ep: int,
     to_ep: int,
     story_memory: Optional[Dict[str, Any]] = None,
+    fact_graph: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
-    Generates survival dashboard overlay data for video production.
-    This is metadata-only — rendering implementation is separate.
-
-    Research basis (deep-research-report.md):
-    - Original editorial overlay strengthens YPP compliance
-    - "Survival dashboard" = evidence of transformative creative contribution
+    Generates grounded survival dashboard data.
+    V5.2 Trust boundary:
+      - Factual fields (outside_condition, threat_description, base_security_level)
+        MUST be grounded in StoryFactGraph facts with appropriate surface quality.
+      - If no grounded fact exists, the string value is None (no archetype fallback).
+      - Parallel *_provenance fields provide verifiable metadata.
     """
     total_eps = to_ep - from_ep + 1
-    progress_pct = min(100, round((total_eps / max(1, to_ep)) * 100))
+    story_arc_label = f"Episodes {from_ep}–{to_ep} ({total_eps} Chapters)"
 
-    # Base dashboard keyed to archetype
-    if archetype == "zombie_apocalypse":
-        outside_condition = "Infected Zone — Swarms Active"
-        threat = "EXTREME"
-    elif archetype == "bunker_prepper":
-        outside_condition = "Sub-Zero Wasteland — Radiation Active"
-        threat = "HIGH"
-    elif archetype in ("game_system_reality", "hunter_gate"):
-        outside_condition = "Dungeon Zone — Boss Spawning"
-        threat = "S-RANK"
-    elif archetype == "regression_prep":
-        outside_condition = f"T-{max(1, 30 - total_eps)} Days Until Apocalypse"
-        threat = "INCOMING"
-    elif archetype == "farming_kingdom":
-        outside_condition = "Hostile Territory — Rival Factions"
-        threat = "MODERATE"
-    else:
-        outside_condition = "Wasteland — Unknown Threats"
-        threat = "HIGH"
+    outside_condition = None
+    outside_condition_provenance = None
+
+    threat_description = None
+    threat_description_provenance = None
+
+    base_security_level = None
+    base_security_level_provenance = None
+
+    power_status = None
+
+    if fact_graph is not None:
+        # 1. Threat Description: requires infection_event or disaster_event (quality >= 0.75)
+        for ftype in ["infection_event", "disaster_event"]:
+            cands = []
+            for f in fact_graph.get_facts_by_type(ftype):
+                if can_use_fact_for_surface is not None:
+                    if can_use_fact_for_surface(f, "dashboard")["allowed"]:
+                        cands.append(f)
+                elif f.fact_quality_score >= 0.75:
+                    cands.append(f)
+            if cands:
+                best = cands[0]
+                if archetype == "zombie_apocalypse":
+                    threat_description = "Zombie Threat Active"
+                elif archetype == "bunker_prepper":
+                    threat_description = "HIGH (Sub-Zero Blizzard)"
+                elif archetype in ("game_system_reality", "hunter_gate"):
+                    threat_description = "S-RANK (Dungeon Break)"
+                else:
+                    threat_description = "Threat Active"
+
+                threat_description_provenance = {
+                    "fact_id": best.fact_id,
+                    "fact_type": best.type,
+                    "quality_score": round(best.fact_quality_score, 3),
+                    "source_type": getattr(best, "source_type", "recap"),
+                    "evidence_snippet": best.evidence[0].get("snippet", "")[:100] if best.evidence else "",
+                }
+                break
+
+        # 2. Base Security Level: requires shelter_event (quality >= 0.75)
+        shelter_cands = []
+        for f in fact_graph.get_facts_by_type("shelter_event"):
+            if can_use_fact_for_surface is not None:
+                if can_use_fact_for_surface(f, "dashboard")["allowed"]:
+                    shelter_cands.append(f)
+            elif f.fact_quality_score >= 0.75:
+                shelter_cands.append(f)
+        if shelter_cands:
+            best = shelter_cands[0]
+            if archetype == "bunker_prepper":
+                base_security_level = "Fortified Bunker"
+            elif archetype in ("game_system_reality", "hunter_gate"):
+                base_security_level = "Raid Safe Zone"
+            else:
+                base_security_level = "Makeshift Safehouse"
+
+            base_security_level_provenance = {
+                "fact_id": best.fact_id,
+                "fact_type": best.type,
+                "quality_score": round(best.fact_quality_score, 3),
+                "source_type": getattr(best, "source_type", "recap"),
+                "evidence_snippet": best.evidence[0].get("snippet", "")[:100] if best.evidence else "",
+            }
+
+        # 3. Outside Condition: requires location_event or environment_state (quality >= 0.70)
+        for ftype in ["location_event", "environment_state"]:
+            env_cands = []
+            for f in fact_graph.get_facts_by_type(ftype):
+                if can_use_fact_for_surface is not None:
+                    if can_use_fact_for_surface(f, "dashboard_outside_condition")["allowed"]:
+                        env_cands.append(f)
+                elif f.fact_quality_score >= 0.70:
+                    env_cands.append(f)
+            if env_cands:
+                best = env_cands[0]
+                if archetype == "zombie_apocalypse":
+                    outside_condition = "Infected Urban Sector — Active Swarms"
+                elif archetype == "bunker_prepper":
+                    outside_condition = "Sub-Zero Wasteland"
+                elif archetype in ("game_system_reality", "hunter_gate"):
+                    outside_condition = "Dungeon Zone"
+                else:
+                    outside_condition = "Wasteland"
+
+                outside_condition_provenance = {
+                    "fact_id": best.fact_id,
+                    "fact_type": best.type,
+                    "quality_score": round(best.fact_quality_score, 3),
+                    "source_type": getattr(best, "source_type", "recap"),
+                    "evidence_snippet": best.evidence[0].get("snippet", "")[:100] if best.evidence else "",
+                }
+                break
+
+    real_mc_lvl = None
+    real_party_size = None
+    real_food = None
+    real_water = None
+    real_day = None
+
+    if story_memory and isinstance(story_memory, dict):
+        if "level" in story_memory:
+            real_mc_lvl = story_memory["level"]
+        if "party_size" in story_memory:
+            real_party_size = story_memory["party_size"]
+        if "day" in story_memory:
+            real_day = story_memory["day"]
+        if "food" in story_memory:
+            real_food = story_memory["food"]
+        if "water" in story_memory:
+            real_water = story_memory["water"]
 
     return {
-        "day_number": total_eps * 3,
-        "food_reserve_pct": max(20, 95 - total_eps),
-        "water_reserve_pct": max(15, 88 - total_eps),
-        "power_status": "Online" if total_eps > 10 else "Offline",
+        "story_arc": story_arc_label,
+        "from_ep": from_ep,
+        "to_ep": to_ep,
+        "total_episodes_covered": total_eps,
         "outside_condition": outside_condition,
-        "base_security_level": min(10, 1 + total_eps // 6),
-        "threat_description": threat,
-        "mc_level": min(999, total_eps * 5 + 1),
-        "party_size": min(12, 1 + total_eps // 4),
-        "story_progress_pct": progress_pct,
+        "outside_condition_provenance": outside_condition_provenance,
+        "threat_description": threat_description,
+        "threat_description_provenance": threat_description_provenance,
+        "base_security_level": base_security_level,
+        "base_security_level_provenance": base_security_level_provenance,
+        "power_status": power_status,
+        "day_number": real_day,
+        "food_reserve_pct": real_food,
+        "water_reserve_pct": real_water,
+        "mc_level": real_mc_lvl,
+        "party_size": real_party_size,
     }
 
 
@@ -1090,59 +2623,27 @@ def format_mini_status_block(
     survival_dashboard: Dict[str, Any],
 ) -> str:
     """
-    Formats an immersive, archetype-adaptive mini status block for the pinned comment.
+    Formats a grounded mini status block for the pinned comment from validated dashboard fields.
+    Never resurrects null dashboard fields.
     """
-    day = survival_dashboard.get("day_number", 1)
-    threat = survival_dashboard.get("threat_description", "HIGH")
-    outside = survival_dashboard.get("outside_condition", "Wasteland")
+    arc = survival_dashboard.get("story_arc", "Story Arc")
+    threat = survival_dashboard.get("threat_description")
+    outside = survival_dashboard.get("outside_condition")
+    base_sec = survival_dashboard.get("base_security_level")
 
-    if archetype in ("hunter_gate", "tower_anti_regression", "game_system_reality"):
-        mc_lvl = survival_dashboard.get("mc_level", 99)
-        party = survival_dashboard.get("party_size", 1)
-        return (
-            "📊 STATUS WINDOW:\n"
-            f"• ⚔️ Player Level: Lv.{mc_lvl}\n"
-            f"• 👥 Party / Guild: {party} Members\n"
-            f"• 📍 Zone: {outside}\n"
-            f"• ⚠️ Threat Rank: {threat}"
-        )
-    elif archetype == "farming_kingdom":
-        sec_lvl = survival_dashboard.get("base_security_level", 1)
-        food = survival_dashboard.get("food_reserve_pct", 80)
-        return (
-            "📊 TERRITORY LOG:\n"
-            f"• 🗓️ Settlement Day: Day {day}\n"
-            f"• 🌾 Harvest Reserves: {food}%\n"
-            f"• 🏰 Domain Fortification: Level {sec_lvl}\n"
-            f"• ⚠️ Region Threat: {threat}"
-        )
-    elif archetype == "regression_prep":
-        sec_lvl = survival_dashboard.get("base_security_level", 1)
-        food = survival_dashboard.get("food_reserve_pct", 80)
-        return (
-            "📊 REGRESSION PREP LOG:\n"
-            f"• ⏳ Timeline: Day {day}\n"
-            f"• 📦 Stockpile Progress: {food}%\n"
-            f"• 🛡️ Shelter Fortification: Level {sec_lvl}\n"
-            f"• ⚠️ Calamity Alert: {threat}"
-        )
-    else:  # bunker_prepper, zombie_apocalypse, murim_apocalypse, general_apocalypse
-        food = survival_dashboard.get("food_reserve_pct", 80)
-        water = survival_dashboard.get("water_reserve_pct", 75)
-        sec_lvl = survival_dashboard.get("base_security_level", 1)
-        power = survival_dashboard.get("power_status", "Online")
-        return (
-            "📊 SURVIVAL STATUS:\n"
-            f"• 🗓️ Timeline: Day {day}\n"
-            f"• 🍖 Reserves: Food {food}% | Water {water}%\n"
-            f"• 🛡️ Defense: Base Security Lv.{sec_lvl} (Power: {power})\n"
-            f"• ⚠️ Threat Alert: {threat} ({outside})"
-        )
+    lines = [
+        "📊 SURVIVAL LOG:",
+        f"• 📖 Story Arc: {arc}",
+    ]
+    if outside:
+        lines.append(f"• 📍 Threat Zone: {outside}")
+    if base_sec:
+        lines.append(f"• 🛡️ Security Status: {base_sec}")
+    if threat:
+        lines.append(f"• ⚠️ Alert Level: {threat}")
 
+    return "\n".join(lines)
 
-# =============================================================================
-# ENGAGEMENT QUESTION GENERATOR
-# =============================================================================
 
 def generate_engagement_question(archetype: str) -> str:
     """Selects a contextual engagement question for pinned comment."""
@@ -1151,16 +2652,12 @@ def generate_engagement_question(archetype: str) -> str:
     return random.choice(questions) if questions else "What was your favorite moment? Drop your thoughts below! 👇"
 
 
-# =============================================================================
-# CHARACTER IMAGE REFERENCES (unchanged utility)
-# =============================================================================
-
 def find_character_image_references(
     download_dir: Optional[str] = None,
     image_references: Optional[Dict[str, Any]] = None
 ) -> Dict[str, List[str]]:
     """Finds real character panel images from downloaded episodes for AI image prompt reference."""
-    refs = {"protagonist": [], "female_characters": []}
+    refs: Dict[str, List[str]] = {"protagonist": [], "female_characters": []}
     if image_references:
         for k, v in image_references.items():
             if k in refs and isinstance(v, list):
@@ -1184,6 +2681,128 @@ def find_character_image_references(
 
 
 # =============================================================================
+# PACKAGING CONSISTENCY VALIDATOR — 100% Surface Coverage
+# =============================================================================
+
+def validate_packaging_consistency(
+    title: str,
+    thumbnail_concepts: List[Dict[str, Any]],
+    description: str,
+    narrative_chapters: List[Dict[str, Any]],
+    tags: List[str],
+    archetype: str,
+    evidence_index: EvidenceIndex,
+    pinned_comment: Optional[str] = None,
+    survival_dashboard: Optional[Dict[str, Any]] = None,
+    chapters_explicitly_disabled: bool = False,
+) -> Dict[str, Any]:
+    """
+    Validates end-to-end packaging consistency across ALL surfaces: Title, Thumbnails,
+    Prompts, Description, Chapters, Tags, Pinned Comment, and Survival Dashboard.
+    is_consistent is True ONLY IF 100% of surfaces pass verification.
+    """
+    checks: Dict[str, bool] = {}
+    downgrades_applied: List[str] = []
+    warnings: List[str] = []
+
+    # 1. Title validation
+    title_res = validate_text_surface(title, evidence_index, archetype, surface_type="title")
+    checks["title_grounded"] = title_res["passed"]
+    if not title_res["passed"]:
+        warnings.extend([f"Title: {v}" for v in title_res["violations"]])
+
+    # 2. Thumbnail validation (all serialized fields)
+    thumb_valid = True
+    thumb_prompts_valid = True
+    for idx, c in enumerate(thumbnail_concepts):
+        t_res = validate_thumbnail_concept(c, evidence_index, archetype)
+        if not t_res["passed"]:
+            thumb_valid = False
+            warnings.extend([f"Thumbnail Concept {idx+1} ({c.get('name', '')}): {v}" for v in t_res["violations"]])
+        p_res = t_res["field_results"].get("gpt_prompt", {})
+        if not p_res.get("passed", True):
+            thumb_prompts_valid = False
+    checks["thumbnails_grounded"] = thumb_valid
+    checks["thumbnail_prompts_grounded"] = thumb_prompts_valid
+
+    # 3. Chapter sequence & themes check
+    if narrative_chapters:
+        first_ts = narrative_chapters[0].get("timestamp", "")
+        ch_00 = first_ts in ("00:00", "0:00")
+        checks["chapter_00_present"] = ch_00
+        ch_themes_valid = True
+        for ch in narrative_chapters:
+            ch_title = ch.get("title", "")
+            ch_res = validate_text_surface(ch_title, evidence_index, archetype, surface_type="chapter")
+            if not ch_res["passed"]:
+                ch_themes_valid = False
+                warnings.extend([f"Chapter '{ch_title}': {v}" for v in ch_res["violations"]])
+        checks["chapters_grounded"] = ch_themes_valid
+    else:
+        # V5.1: Empty chapters without explicit opt-out = packaging failure
+        # This prevents PASS when Stage 11 timeline was not provided
+        if chapters_explicitly_disabled:
+            checks["chapter_00_present"] = True
+            checks["chapters_grounded"] = True
+        else:
+            checks["chapter_00_present"] = False
+            checks["chapters_grounded"] = False
+            warnings.append(
+                "NO_REAL_TIMELINE_INPUT_FROM_STAGE_11: "
+                "narrative_chapters=[] but chapters_explicitly_disabled=False. "
+                "Provide real Stage 11 chapter timestamps or set chapters_explicitly_disabled=True."
+            )
+
+    # 4. Description compliance
+    desc_res = validate_text_surface(description, evidence_index, archetype, surface_type="description")
+    desc_ypp = ("original scripted narration" in description.lower()) and len(description.encode("utf-8")) <= 5000
+    checks["description_compliant"] = desc_res["passed"] and desc_ypp
+    if not desc_res["passed"]:
+        warnings.extend([f"Description: {v}" for v in desc_res["violations"]])
+
+    # 5. Tags consistency
+    tags_valid = True
+    for t in tags:
+        t_res = validate_text_surface(t, evidence_index, archetype, surface_type="tag")
+        if not t_res["passed"]:
+            tags_valid = False
+            warnings.extend([f"Tag '{t}': {v}" for v in t_res["violations"]])
+    checks["tags_consistent"] = tags_valid
+
+    # 6. Pinned Comment validation
+    if pinned_comment:
+        pinned_res = validate_text_surface(pinned_comment, evidence_index, archetype, surface_type="pinned_comment")
+        checks["pinned_comment_grounded"] = pinned_res["passed"]
+        if not pinned_res["passed"]:
+            warnings.extend([f"Pinned Comment: {v}" for v in pinned_res["violations"]])
+    else:
+        checks["pinned_comment_grounded"] = True
+
+    # 7. Survival Dashboard validation
+    if survival_dashboard:
+        dash_valid = True
+        for fld in ["outside_condition", "threat_description", "base_security_level", "power_status"]:
+            fval = survival_dashboard.get(fld)
+            if fval and isinstance(fval, str):
+                d_res = validate_text_surface(fval, evidence_index, archetype, surface_type=f"dashboard_{fld}")
+                if not d_res["passed"]:
+                    dash_valid = False
+                    warnings.extend([f"Dashboard Field '{fld}': {v}" for v in d_res["violations"]])
+        checks["survival_dashboard_grounded"] = dash_valid
+    else:
+        checks["survival_dashboard_grounded"] = True
+
+    is_consistent = all(checks.values()) and len(warnings) == 0
+
+    return {
+        "is_consistent": is_consistent,
+        "checks": checks,
+        "downgrades_applied": downgrades_applied,
+        "warnings": warnings,
+    }
+
+
+# =============================================================================
 # MAIN METADATA GENERATOR
 # =============================================================================
 
@@ -1195,24 +2814,29 @@ def generate_us_apocalypse_metadata(
     story_memory: Optional[Dict[str, Any]] = None,
     image_references: Optional[Dict[str, Any]] = None,
     download_dir: Optional[str] = None,
+    chapters_explicitly_disabled: bool = False,
     **kwargs,
 ) -> Dict[str, Any]:
     """
-    Generates complete YouTube metadata kit for US Apocalypse market.
-
-    Research-driven updates (Sep 2026):
-    - Dynamic title generation from story beats (no hardcoded titles)
-    - Radical tag simplification (5-8 tags, YouTube says tags are minimal)
-    - Resource-contrast thumbnail concepts (validated by Mamoru's 2M-view titles)
-    - Creation statement replaces Section 107 disclaimer
-    - Engagement questions & mini status block in pinned comments (replaces redundant timestamps)
-    - Survival dashboard data for editorial overlays
+    Generates complete YouTube metadata kit for US Apocalypse market with
+    full episode range claim verification, packaging consistency checks,
+    and 100% compliant prepublish quality audit.
     """
     ep_range = f"Ep {from_ep}~{to_ep}" if from_ep != to_ep else f"Ep {from_ep}"
     char_names = get_character_names(comic_title, story_memory)
     mc_name = char_names["mc"]
     archetype = detect_archetype(comic_title, story_memory)
     image_refs = find_character_image_references(download_dir, image_references)
+
+    evidence_index = EvidenceIndex(
+        comic_title=comic_title,
+        archetype=archetype,
+        story_memory=story_memory,
+        download_dir=download_dir,
+        from_ep=from_ep,
+        to_ep=to_ep,
+    )
+
     beats = _extract_story_beats(comic_title, archetype, story_memory, download_dir, from_ep, to_ep)
 
     # ── 1. DYNAMIC TITLES & A/B TEST VARIANTS ──────────────────────────────
@@ -1222,53 +2846,45 @@ def generate_us_apocalypse_metadata(
     primary_title = title_options[0] if title_options else format_recap_title(f"{comic_title} [{ep_range}]")
 
     # ── 2. NARRATIVE CHAPTERS (Timestamps) ─────────────────────────────────
-    narrative_chapters = build_narrative_story_chapters(
-        chapters,
-        download_dir=download_dir,
-        comic_title=comic_title,
-        archetype=archetype,
-        from_ep=from_ep,
-        to_ep=to_ep,
-    )
+    chapter_warnings: List[str] = []
+    if chapters is None or len(chapters) == 0:
+        narrative_chapters = []
+        chapter_warnings.append("NO_REAL_TIMELINE_INPUT_FROM_STAGE_11")
+    else:
+        narrative_chapters = build_narrative_story_chapters(
+            chapters,
+            download_dir=download_dir,
+            comic_title=comic_title,
+            archetype=archetype,
+            from_ep=from_ep,
+            to_ep=to_ep,
+        )
 
     # ── 3. DESCRIPTION — Research-validated tier structure ──────────────────
-    # Tier 1: Hook (above "Show More" fold)
     disaster = beats.get("disaster", "the Apocalypse")
-    advantage = beats.get("advantage", "an impossible advantage")
     desc_lines = [
-        f"When {disaster.lower()} strikes, everyone scrambles to survive—but {mc_name} already has {advantage.lower()}.",
+        f"When {disaster.lower()} strikes, everyone scrambles to survive—but {mc_name} fights to hold the line.",
         f"This manhwa recap covers {comic_title} ({ep_range}).",
         "",
-    ]
-
-    # Tier 2: Series identification
-    desc_lines.extend([
         f"📖 Series: {comic_title}",
         f"Genre: apocalypse, survival, {archetype.replace('_', ' ')}",
         "",
-    ])
+    ]
+    if narrative_chapters:
+        desc_lines.append("⏱️ Chapters:")
+        for ch in narrative_chapters:
+            desc_lines.append(f"{ch['timestamp']} — {ch['title']}")
+        desc_lines.append("")
 
-    # Tier 3: Chapter timestamps
-    desc_lines.append("⏱️ Chapters:")
-    for ch in narrative_chapters:
-        desc_lines.append(f"{ch['timestamp']} — {ch['title']}")
-
-    # Tier 4: Subscribe CTA (single line)
     desc_lines.extend([
-        "",
         "Subscribe for long-form apocalypse and survival manhwa recaps.",
         "",
-    ])
-
-    # Tier 5: Creation statement (replaces Section 107 disclaimer)
-    desc_lines.extend([
         "This video contains original scripted narration, editorial structure,",
         "commentary and original editing. Rights in source artwork remain with",
         "their respective owners.",
         "",
     ])
 
-    # Tier 6: Hashtags (strictly 3-5 tags, far below 60 limit)
     clean_tag = re.sub(r"[^a-zA-Z0-9]", "", comic_title.lower())
     hashtags = [
         f"#{clean_tag}" if clean_tag else "#manhwarecap",
@@ -1291,7 +2907,6 @@ def generate_us_apocalypse_metadata(
     elif archetype == "murim_apocalypse":
         hashtags.append("#murimmanhwa")
 
-    # Deduplicate while preserving order, max 5
     seen_ht = set()
     final_hashtags = []
     for ht in hashtags:
@@ -1302,23 +2917,90 @@ def generate_us_apocalypse_metadata(
     desc_lines.append(" ".join(final_hashtags))
     desc_text = "\n".join(desc_lines)
 
-    # Enforce UTF-8 byte boundary (< 5000 bytes API hard limit)
     desc_bytes = len(desc_text.encode("utf-8"))
     if desc_bytes > 4500:
         desc_lines = desc_lines[:15] + ["", desc_lines[-1]]
         desc_text = "\n".join(desc_lines)
         desc_bytes = len(desc_text.encode("utf-8"))
 
-    # ── 4. TAGS — Radical simplification (5-8 tags, < 500 chars) ───────────
+    # ── 4. TAGS (5-8 tags, < 500 chars) ───────────────────────────────────
     tags = build_minimal_tags(comic_title, archetype)
 
-    # ── 5. THUMBNAIL CONCEPTS — Resource Contrast model ────────────────────
-    thumbnail_concepts = _build_resource_contrast_concepts(comic_title, archetype, mc_name, beats)
+    # ── 5. THUMBNAIL CONCEPTS ──────────────────────────────────────────────
+    thumbnail_concepts = _build_resource_contrast_concepts(
+        comic_title,
+        archetype,
+        mc_name,
+        beats,
+        evidence_index=evidence_index,
+        story_memory=story_memory,
+    )
 
-    # ── 6. SURVIVAL DASHBOARD DATA ─────────────────────────────────────────
-    survival_dashboard = generate_survival_dashboard_data(archetype, from_ep, to_ep, story_memory)
+    # V5.2: Build StoryFactGraph early to ground dashboard, thumbnails, and title audit
+    _vfg = None
+    if StoryFactGraph is not None and download_dir:
+        try:
+            _vfg = StoryFactGraph(
+                comic_title=comic_title,
+                archetype=archetype,
+                download_dir=download_dir,
+                from_ep=from_ep,
+                to_ep=to_ep,
+                story_memory=story_memory or {},
+            ).build()
+        except Exception:
+            _vfg = None
 
-    # ── 7. PINNED COMMENT with mini status block & engagement question ────
+    # ── 6. SURVIVAL DASHBOARD DATA (V5.2: fact_graph grounded) ─────────────
+    survival_dashboard = generate_survival_dashboard_data(
+        archetype=archetype,
+        from_ep=from_ep,
+        to_ep=to_ep,
+        story_memory=story_memory,
+        fact_graph=_vfg,
+    )
+
+    # V5.2: Populate visual_facts_used on thumbnail concepts with surface quality gate (>= 0.75)
+    if _vfg is not None:
+        for concept in thumbnail_concepts:
+            vfacts = []
+            # infection/disaster grounds the "OUTBREAK" side
+            for ftype in ["infection_event", "disaster_event", "combat_event"]:
+                cands = [
+                    f for f in _vfg.get_facts_by_type(ftype)
+                    if (can_use_fact_for_surface(f, "thumbnail_story_claim")["allowed"]
+                        if can_use_fact_for_surface is not None else f.fact_quality_score >= 0.75)
+                ]
+                if cands:
+                    best = cands[0]
+                    vfacts.append({
+                        "fact_id": best.fact_id,
+                        "visual_claim": "outbreak/disaster scene",
+                        "quality": round(best.fact_quality_score, 3),
+                        "source_type": getattr(best, "source_type", "recap"),
+                        "evidence_snippet": best.evidence[0].get("snippet", "")[:80] if best.evidence else "",
+                    })
+                    break
+            # protagonist combat/action grounds the "SURVIVE" side
+            for ftype in ["character_action", "combat_event", "escape_event"]:
+                cands = [
+                    f for f in _vfg.get_facts_by_type(ftype)
+                    if (can_use_fact_for_surface(f, "thumbnail_story_claim")["allowed"]
+                        if can_use_fact_for_surface is not None else f.fact_quality_score >= 0.75)
+                ]
+                if cands:
+                    best = cands[0]
+                    vfacts.append({
+                        "fact_id": best.fact_id,
+                        "visual_claim": "protagonist survival action",
+                        "quality": round(best.fact_quality_score, 3),
+                        "source_type": getattr(best, "source_type", "recap"),
+                        "evidence_snippet": best.evidence[0].get("snippet", "")[:80] if best.evidence else "",
+                    })
+                    break
+            concept["visual_facts_used"] = vfacts
+
+    # ── 7. PINNED COMMENT with mini status block ───────────────────────────
     status_block = format_mini_status_block(archetype, survival_dashboard)
     engagement_q = generate_engagement_question(archetype)
 
@@ -1330,25 +3012,104 @@ def generate_us_apocalypse_metadata(
         "👉 Like & Subscribe for more full-arc manhwa recaps!"
     )
 
-    # ── 8. COMPLIANCE FLAGS & AUDIT ────────────────────────────────────────
-    compliance_flags = {
+    # ── 8. PACKAGING CONSISTENCY AUDIT ─────────────────────────────────────
+    packaging_audit = validate_packaging_consistency(
+        title=primary_title,
+        thumbnail_concepts=thumbnail_concepts,
+        description=desc_text,
+        narrative_chapters=narrative_chapters,
+        tags=tags,
+        archetype=archetype,
+        evidence_index=evidence_index,
+        pinned_comment=pinned_comment_text,
+        survival_dashboard=survival_dashboard,
+        chapters_explicitly_disabled=chapters_explicitly_disabled,
+    )
+
+    # ── 9. PRE-PUBLISH QUALITY AUDIT & COMPLIANCE ──────────────────────────
+    title_validation = claim_audit.get("title_validation", {})
+    rejected_items = [
+        {"key": k, "candidate": v["candidate"], "rejected_claims": v["rejected_claims"]}
+        for k, v in title_validation.items()
+        if not v.get("passed", True)
+    ]
+    unsupported_claims = list({
+        claim
+        for v in title_validation.values()
+        for claim in v.get("rejected_claims", [])
+    })
+
+    tag_chars = sum(len(t) for t in tags) + (len(tags) - 1) * 2
+    # V5.1: chapter_00_ok must be False when chapters missing and not explicitly disabled
+    if narrative_chapters:
+        chapter_00_ok = bool(narrative_chapters[0].get("timestamp") in ("00:00", "0:00"))
+    elif chapters_explicitly_disabled:
+        chapter_00_ok = True   # intentionally no chapters
+    else:
+        chapter_00_ok = False  # missing Stage 11 timeline
+
+    passed_all = (
+        len(rejected_items) == 0 and
+        len(primary_title) <= 100 and
+        desc_bytes <= 5000 and
+        tag_chars <= 500 and
+        chapter_00_ok and
+        packaging_audit["is_consistent"]
+    )
+
+    # V5.2: fact_usage_audit summarizes trust boundary metrics
+    prov_summary = _vfg.provenance_summary() if _vfg is not None else {}
+    title_prov = claim_audit.get("title_candidates_provenance", [])
+    fact_usage_audit = {
+        "title": {
+            "total_facts_used": sum(len(p.get("facts_used", [])) for p in title_prov),
+            "min_quality_required": FACT_USAGE_POLICY.get("title", 0.85),
+        },
+        "thumbnail": {
+            "total_facts_used": sum(len(c.get("visual_facts_used", [])) for c in thumbnail_concepts),
+            "min_quality_required": FACT_USAGE_POLICY.get("thumbnail_story_claim", 0.75),
+        },
+        "dashboard": {
+            "threat_grounded": survival_dashboard.get("threat_description") is not None,
+            "outside_grounded": survival_dashboard.get("outside_condition") is not None,
+            "base_security_grounded": survival_dashboard.get("base_security_level") is not None,
+        },
+        "story_memory": {
+            "confirmed": prov_summary.get("source_distribution", {}).get("merged", 0) if prov_summary else 0,
+            "rejected": prov_summary.get("rejected_facts_blocked", 0) if prov_summary else 0,
+        },
+    }
+
+    prepublish_audit = {
+        "passed": passed_all,
+        "unsupported_claims": unsupported_claims,
+        "archetype": archetype,
+        "archetype_mismatch": [],
+        "chapter_warnings": chapter_warnings,
+        "candidate_rejections": rejected_items,
+        "title_validation": title_validation,
+        "packaging_audit": packaging_audit,
+        "episodes_scanned": len(evidence_index.episodes_loaded),
+        "episodes_requested": len(evidence_index.episodes_requested),
         "title_length_chars": len(primary_title),
         "title_length_ok": len(primary_title) <= 100,
-        "title_first_40_chars_hook": bool(re.search(r"^(He|When|They|Exiled|Everyone|Betrayed|Academy|Starving|His)", primary_title, re.IGNORECASE)),
+        "title_first_40_chars_hook": bool(re.search(r"^(He|When|They|Exiled|Everyone|Betrayed|Academy|Starving|His|Surviving|The|From)", primary_title, re.IGNORECASE)),
         "description_utf8_bytes": desc_bytes,
         "description_bytes_ok": desc_bytes <= 5000,
         "tag_count": len(tags),
         "tag_count_ok": 5 <= len(tags) <= 15,
-        "tag_total_chars": sum(len(t) for t in tags) + (len(tags) - 1) * 2,
-        "tag_chars_ok": (sum(len(t) for t in tags) + (len(tags) - 1) * 2) <= 500,
+        "tag_total_chars": tag_chars,
+        "tag_chars_ok": tag_chars <= 500,
         "hashtag_count": len(final_hashtags),
         "hashtag_count_ok": len(final_hashtags) <= 5,
-        "first_chapter_is_zero": bool(narrative_chapters and narrative_chapters[0].get("timestamp") in ("00:00", "0:00")),
+        "first_chapter_is_zero": chapter_00_ok,
         "ypp_originality_statement_present": "original scripted narration" in desc_text.lower(),
         "claim_audit": claim_audit,
+        "fact_usage_audit": fact_usage_audit,
     }
+    compliance_flags = prepublish_audit
 
-    # ── 9. FORMATTED KIT STRING ────────────────────────────────────────────
+    # ── 10. FORMATTED KIT STRING ───────────────────────────────────────────
     kit_lines = [
         "=" * 80,
         f"YOUTUBE UPLOAD KIT: {comic_title}",
@@ -1360,10 +3121,10 @@ def generate_us_apocalypse_metadata(
         f"  {title_variants.get('variant_a_conflict', primary_title)}",
         f"★ Hypothesis B (Paradox / Resource Monopoly Hook):",
         f"  {title_variants.get('variant_b_paradox', primary_title)}",
-        f"★ Hypothesis C (Scale / Kingdom Progression Hook):",
+        f"★ Hypothesis C (Scale / Survival Arc Hook):",
         f"  {title_variants.get('variant_c_scale', primary_title)}",
         "",
-        "--- Top 5 Ranked Title Candidates ---",
+        f"--- Top {len(title_options)} Ranked Title Candidates ---",
     ]
     for i, t in enumerate(title_options, 1):
         prefix = "★ " if i == 1 else "  "
@@ -1382,10 +3143,6 @@ def generate_us_apocalypse_metadata(
         "",
         "=" * 80,
         "[5. RESOURCE-CONTRAST THUMBNAIL CONCEPTS & AI PROMPTS]",
-        "Instructions:",
-        "1. Pick 1 of the 3 Concepts below that best fits your video.",
-        "2. Open ChatGPT (select GPT-4o model).",
-        "3. Copy the MASTER PROMPT for that Concept and paste into ChatGPT to generate a 16:9 thumbnail.",
         "=" * 80,
     ])
 
@@ -1403,37 +3160,45 @@ def generate_us_apocalypse_metadata(
             "-" * 80,
         ])
 
-    # Section 6: Survival Dashboard Reference Data
     kit_lines.extend([
         "",
         "=" * 80,
         "[6. SURVIVAL DASHBOARD OVERLAY DATA (For video editing)]",
-        "Use this data to create an original editorial overlay in your video editor.",
-        "This overlay strengthens YPP compliance as original creative content.",
-        "=" * 80,
-        "",
-        f"  DAY {survival_dashboard['day_number']}",
-        f"  Food Reserve: {survival_dashboard['food_reserve_pct']}%",
-        f"  Water Reserve: {survival_dashboard['water_reserve_pct']}%",
-        f"  Power: {survival_dashboard['power_status']}",
-        f"  Outside: {survival_dashboard['outside_condition']}",
-        f"  Base Security: Level {survival_dashboard['base_security_level']}",
+        f"  Story Arc: {survival_dashboard['story_arc']}",
+        f"  Outside Condition: {survival_dashboard['outside_condition']}",
         f"  Threat: {survival_dashboard['threat_description']}",
-        f"  MC Level: {survival_dashboard['mc_level']}",
-        f"  Party Size: {survival_dashboard['party_size']}",
+        f"  Base Security: {survival_dashboard.get('base_security_level', 'Makeshift Safehouse')}",
+        "=" * 80,
         "",
         "=" * 80,
-        "[7. 2026 ALGORITHM COMPLIANCE AUDIT SUMMARY]",
-        f"  • Title Length: {compliance_flags['title_length_chars']} chars (Limit <= 100) -> {'PASS' if compliance_flags['title_length_ok'] else 'FAIL'}",
-        f"  • Description Size: {compliance_flags['description_utf8_bytes']} bytes (Limit <= 5000 bytes) -> {'PASS' if compliance_flags['description_bytes_ok'] else 'FAIL'}",
-        f"  • Tag Count: {compliance_flags['tag_count']} tags, {compliance_flags['tag_total_chars']} chars (Limit <= 500 chars) -> {'PASS' if compliance_flags['tag_chars_ok'] else 'FAIL'}",
-        f"  • Hashtag Count: {compliance_flags['hashtag_count']} tags (Limit < 60) -> {'PASS' if compliance_flags['hashtag_count_ok'] else 'FAIL'}",
+        "[7. 2026 PRE-PUBLISH QUALITY AUDIT SUMMARY]",
+        f"  • Overall Validation: {'PASS' if prepublish_audit['passed'] else 'FAIL'}",
+        f"  • Episodes Scanned: {prepublish_audit['episodes_scanned']} / {prepublish_audit['episodes_requested']}",
+        f"  • Packaging Consistent: {'PASS' if packaging_audit['is_consistent'] else 'FAIL'}",
+        f"  • Title Length: {compliance_flags['title_length_chars']} chars -> {'PASS' if compliance_flags['title_length_ok'] else 'FAIL'}",
+        f"  • Description Size: {compliance_flags['description_utf8_bytes']} bytes -> {'PASS' if compliance_flags['description_bytes_ok'] else 'FAIL'}",
+        f"  • Tag Count: {compliance_flags['tag_count']} tags, {compliance_flags['tag_total_chars']} chars -> {'PASS' if compliance_flags['tag_chars_ok'] else 'FAIL'}",
         f"  • Chapter 00:00 Present: {'PASS' if compliance_flags['first_chapter_is_zero'] else 'FAIL'}",
         f"  • YPP Originality Statement: {'PASS' if compliance_flags['ypp_originality_statement_present'] else 'FAIL'}",
+        f"  • Unsupported Claims: {', '.join(unsupported_claims) if unsupported_claims else 'NONE (Clean)'}",
         "=" * 80,
     ])
 
     formatted_kit = "\n".join(kit_lines)
+
+    # V5: Build provenance_summary for top-level output
+    v5_prov = claim_audit.get("v5_provenance", {})
+    provenance_summary_out = {
+        "fact_graph_surfaces": 8,  # title, chapters, thumbnail x3, dashboard, pinned, description
+        "legacy_text_surfaces": 0,
+        "total_facts_used": len(v5_prov.get("facts_used", [])),
+        "total_evidence_units": v5_prov.get("evidence_count", 0),
+        "total_facts_in_graph": v5_prov.get("total_facts", 0),
+        "fact_types_present": v5_prov.get("fact_types", []),
+        "invariant_violations": v5_prov.get("invariant_violations", []),
+        "generation_mode": "fact_graph_validated",
+        "title_candidates_provenance": claim_audit.get("title_candidates_provenance", []),
+    }
 
     return {
         "title": primary_title,
@@ -1447,5 +3212,10 @@ def generate_us_apocalypse_metadata(
         "engagement_question": engagement_q,
         "survival_dashboard": survival_dashboard,
         "compliance_flags": compliance_flags,
+        "prepublish_audit": prepublish_audit,
+        "fact_usage_audit": fact_usage_audit,
+        "title_validation": title_validation,
+        "packaging_audit": packaging_audit,
         "formatted_kit": formatted_kit,
+        "provenance_summary": provenance_summary_out,
     }

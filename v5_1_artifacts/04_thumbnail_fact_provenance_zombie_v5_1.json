@@ -1,0 +1,65 @@
+{
+  "comic_title": "Zombie Revelation 82-08",
+  "concepts": [
+    {
+      "concept_id": "concept_survival_split",
+      "thumbnail_text": "OUTBREAK vs SURVIVE",
+      "visual_facts_count": 2,
+      "visual_facts_used": [
+        {
+          "fact_id": "infection_event_ep002_001",
+          "visual_claim": "outbreak/disaster scene",
+          "quality": 0.9,
+          "evidence_snippet": "The recovered footage exposes an outbreak that defies all biological logic."
+        },
+        {
+          "fact_id": "character_action_ep023_001",
+          "visual_claim": "protagonist survival action",
+          "quality": 0.88,
+          "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby ab"
+        }
+      ],
+      "has_visual_grounding": true
+    },
+    {
+      "concept_id": "concept_before_after",
+      "thumbnail_text": "OUTBREAK → SURVIVAL",
+      "visual_facts_count": 2,
+      "visual_facts_used": [
+        {
+          "fact_id": "infection_event_ep002_001",
+          "visual_claim": "outbreak/disaster scene",
+          "quality": 0.9,
+          "evidence_snippet": "The recovered footage exposes an outbreak that defies all biological logic."
+        },
+        {
+          "fact_id": "character_action_ep023_001",
+          "visual_claim": "protagonist survival action",
+          "quality": 0.88,
+          "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby ab"
+        }
+      ],
+      "has_visual_grounding": true
+    },
+    {
+      "concept_id": "concept_survival_dashboard",
+      "thumbnail_text": "STATUS: ACTIVE | THREAT: ACTIVE",
+      "visual_facts_count": 2,
+      "visual_facts_used": [
+        {
+          "fact_id": "infection_event_ep002_001",
+          "visual_claim": "outbreak/disaster scene",
+          "quality": 0.9,
+          "evidence_snippet": "The recovered footage exposes an outbreak that defies all biological logic."
+        },
+        {
+          "fact_id": "character_action_ep023_001",
+          "visual_claim": "protagonist survival action",
+          "quality": 0.88,
+          "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby ab"
+        }
+      ],
+      "has_visual_grounding": true
+    }
+  ]
+}

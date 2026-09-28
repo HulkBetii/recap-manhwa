@@ -1,0 +1,130 @@
+{
+  "v5_title_assertion_trace": [
+    {
+      "rank": 1,
+      "title": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+      "passed": true,
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "violations": [],
+      "generation_mode": "fact_graph_validated"
+    },
+    {
+      "rank": 2,
+      "title": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+      "passed": true,
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "violations": [],
+      "generation_mode": "fact_graph_validated"
+    },
+    {
+      "rank": 3,
+      "title": "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+      "passed": true,
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "violations": [],
+      "generation_mode": "fact_graph_validated"
+    },
+    {
+      "rank": 4,
+      "title": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+      "passed": true,
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "violations": [],
+      "generation_mode": "fact_graph_validated"
+    },
+    {
+      "rank": 5,
+      "title": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+      "passed": true,
+      "assertions_detected": 0,
+      "assertions_validated": 0,
+      "violations": [],
+      "generation_mode": "fact_graph_validated"
+    }
+  ],
+  "provenance": {
+    "fact_graph_surfaces": 8,
+    "legacy_text_surfaces": 0,
+    "total_facts_used": 10,
+    "total_evidence_units": 1258,
+    "total_facts_in_graph": 1258,
+    "fact_types_present": [
+      "arrival_event",
+      "betrayal_event",
+      "character_action",
+      "character_state",
+      "combat_event",
+      "containment_event",
+      "death_event",
+      "departure_event",
+      "disaster_event",
+      "environment_state",
+      "escape_event",
+      "group_state",
+      "infection_event",
+      "location_event",
+      "military_event",
+      "relationship_event",
+      "resource_event",
+      "shelter_event"
+    ],
+    "invariant_violations": [],
+    "generation_mode": "fact_graph_validated",
+    "title_candidates_provenance": [
+      {
+        "text": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+        "generation_mode": "fact_graph_validated",
+        "facts_used": [
+          "combat_event_ep001_001",
+          "military_event_ep001_001",
+          "betrayal_event_ep001_001"
+        ],
+        "evidence_count": 1258
+      },
+      {
+        "text": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+        "generation_mode": "fact_graph_validated",
+        "facts_used": [
+          "combat_event_ep001_001",
+          "military_event_ep001_001",
+          "betrayal_event_ep001_001"
+        ],
+        "evidence_count": 1258
+      },
+      {
+        "text": "He Was BETRAYED by Corrupt Survivors, But Survived Zombie Apocalypse | Manhwa Recap",
+        "generation_mode": "fact_graph_validated",
+        "facts_used": [
+          "combat_event_ep001_001",
+          "military_event_ep001_001",
+          "betrayal_event_ep001_001"
+        ],
+        "evidence_count": 1258
+      },
+      {
+        "text": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+        "generation_mode": "fact_graph_validated",
+        "facts_used": [
+          "combat_event_ep001_001",
+          "military_event_ep001_001",
+          "betrayal_event_ep001_001"
+        ],
+        "evidence_count": 1258
+      },
+      {
+        "text": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+        "generation_mode": "fact_graph_validated",
+        "facts_used": [
+          "combat_event_ep001_001",
+          "military_event_ep001_001",
+          "betrayal_event_ep001_001"
+        ],
+        "evidence_count": 1258
+      }
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+[
+  {
+    "line": "📌 MANHWA INFO & STATUS LOG:",
+    "assertions_detected": 0,
+    "assertions_validated": 0,
+    "assertions": []
+  },
+  {
+    "line": "📖 Series: Zombie Revelation 82-08 (Chapters 1 – 143)",
+    "assertions_detected": 0,
+    "assertions_validated": 0,
+    "assertions": []
+  },
+  {
+    "line": "📊 SURVIVAL LOG:",
+    "assertions_detected": 0,
+    "assertions_validated": 0,
+    "assertions": []
+  },
+  {
+    "line": "• 📖 Story Arc: Episodes 1–143 (143 Chapters)",
+    "assertions_detected": 0,
+    "assertions_validated": 0,
+    "assertions": []
+  },
+  {
+    "line": "• 📍 Threat Zone: Infected Urban Sector — Active Swarms",
+    "assertions_detected": 0,
+    "assertions_validated": 0,
+    "assertions": []
+  },
+  {
+    "line": "• 🛡️ Security Status: Makeshift Safehouse",
+    "assertions_detected": 0,
+    "assertions_validated": 0,
+    "assertions": []
+  },
+  {
+    "line": "• ⚠️ Alert Level: CRITICAL (Mutant Strains Active)",
+    "assertions_detected": 1,
+    "assertions_validated": 1,
+    "assertions": [
+      {
+        "assertion_type": "threat_critical",
+        "raw_text": "THREAT: CRITICAL",
+        "subject": "environment",
+        "scope": "local_scene",
+        "value": "threat_critical",
+        "unit": null,
+        "risk": "low",
+        "requires_evidence": true,
+        "status": "supported",
+        "evidence_units": [],
+        "rejection_reason": null
+      }
+    ]
+  },
+  {
+    "line": "💬 What's the FIRST weapon you'd grab in a zombie outbreak? 🧟",
+    "assertions_detected": 0,
+    "assertions_validated": 0,
+    "assertions": []
+  },
+  {
+    "line": "👉 Like & Subscribe for more full-arc manhwa recaps!",
+    "assertions_detected": 0,
+    "assertions_validated": 0,
+    "assertions": []
+  }
+]

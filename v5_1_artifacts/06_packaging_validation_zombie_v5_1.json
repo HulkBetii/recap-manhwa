@@ -1,0 +1,24 @@
+{
+  "is_consistent": true,
+  "checks": {
+    "title_grounded": true,
+    "thumbnails_grounded": true,
+    "thumbnail_prompts_grounded": true,
+    "chapter_00_present": true,
+    "chapters_grounded": true,
+    "description_compliant": true,
+    "tags_consistent": true,
+    "pinned_comment_grounded": true,
+    "survival_dashboard_grounded": true
+  },
+  "warnings": [],
+  "stage11_timeline_available": true,
+  "stage11_source": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\output\\metadata.json",
+  "chapter_count": 10,
+  "chapter_00_present": true,
+  "chapters_grounded": true,
+  "prepublish_passed": true,
+  "notes": [
+    "✅ Full packaging consistency achieved with real Stage 11 timeline."
+  ]
+}

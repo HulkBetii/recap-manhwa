@@ -1,0 +1,445 @@
+{
+  "comic_title": "좀비묵시록 82-08",
+  "archetype": "zombie_apocalypse",
+  "episodes_scanned": 143,
+  "total_evidence_units": 9270,
+  "claims": {
+    "sss_rank": {
+      "claim": "sss_rank",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": true
+    },
+    "trainee": {
+      "claim": "trainee",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": false
+    },
+    "academy": {
+      "claim": "academy",
+      "supported": true,
+      "confidence": 0.25,
+      "matched_units_count": 1,
+      "matched_units": [
+        {
+          "source": "recap",
+          "episode": 96,
+          "segment_index": 50,
+          "snippet": "Academy bonds mean nothing when you abandoned your men to get ripped apart.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_96\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        }
+      ],
+      "matched_terms": [
+        "academy"
+      ],
+      "high_risk": false
+    },
+    "regression": {
+      "claim": "regression",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": false
+    },
+    "system": {
+      "claim": "system",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": false
+    },
+    "infinite_resources": {
+      "claim": "infinite_resources",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": true
+    },
+    "bunker": {
+      "claim": "bunker",
+      "supported": true,
+      "confidence": 1.0,
+      "matched_units_count": 112,
+      "matched_units": [
+        {
+          "source": "story_memory",
+          "episode": 0,
+          "segment_index": -1,
+          "snippet": "episodes: {\"1\": {\"episode\": 1, \"opening\": \"Pure bedlam detonates across the city as terrified citizens scramble blindly against the bloodthirsty horde.\", \"closing_cliffhanger\": \"Cold eyes pierce the gloomy silence, fully aware the true nightmare has barely even started.\", \"summary\": \"Pure bedlam det",
+          "source_path": "story_memory.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "global_story_world",
+          "context_type": "memory"
+        },
+        {
+          "source": "recap",
+          "episode": 1,
+          "segment_index": 9,
+          "snippet": "Shelters collapse beneath crushing swarms, leaving lone stragglers totally exposed to the brutal onslaught.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_1\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 4,
+          "segment_index": 57,
+          "snippet": "Without the electronic passcode, breaking into this mobile vault is practically impossible.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_4\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 4,
+          "segment_index": 82,
+          "snippet": "The heavy pneumatic seals hiss open, signaling that the vault doors have unlocked.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_4\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 4,
+          "segment_index": 93,
+          "snippet": "The heavy vault hatch creaks wide open, unleashing the true nightmare into the rain.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_4\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 5,
+          "segment_index": 26,
+          "snippet": "Agonized screams shatter through the heavy steel vault.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_5\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 5,
+          "segment_index": 33,
+          "snippet": "Desperate cries plead to force the vault doors open before it's too late.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_5\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 5,
+          "segment_index": 97,
+          "snippet": "Tae steps cautiously out from the shipping shelter, observing the carnage.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_5\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 9,
+          "segment_index": 49,
+          "snippet": "Tae straps on reinforced leather work gloves, noting they protect his palms when vaulting rusty wire barriers.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_9\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 11,
+          "segment_index": 32,
+          "snippet": "Seeing another cluster approach, Tae realizes their sanctuary is an absolute dead end.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_11\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        }
+      ],
+      "matched_terms": [
+        "vault",
+        "sanctuary",
+        "shelter",
+        "bunker"
+      ],
+      "high_risk": false
+    },
+    "zombie": {
+      "claim": "zombie",
+      "supported": true,
+      "confidence": 1.0,
+      "matched_units_count": 607,
+      "matched_units": [
+        {
+          "source": "title",
+          "episode": 0,
+          "segment_index": 0,
+          "snippet": "좀비묵시록 82-08",
+          "source_path": "",
+          "timestamp": null,
+          "subject": null,
+          "scope": "global_story_world",
+          "context_type": "title"
+        },
+        {
+          "source": "story_memory",
+          "episode": 0,
+          "segment_index": -1,
+          "snippet": "comic_title: 좀비묵시록 82-08",
+          "source_path": "story_memory.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "global_story_world",
+          "context_type": "memory"
+        },
+        {
+          "source": "recap",
+          "episode": 1,
+          "segment_index": 0,
+          "snippet": "Pure bedlam detonates across the city as terrified citizens scramble blindly against the bloodthirsty horde.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_1\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 1,
+          "segment_index": 7,
+          "snippet": "The horde surges forward like a rabid tidal wave, completely overwhelming the military's crumbling defenses.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_1\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 1,
+          "segment_index": 14,
+          "snippet": "A feral infected lunges straight for his jugular, only to meet ruthless, calculated steel.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_1\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 1,
+          "segment_index": 19,
+          "snippet": "Even hardened fighters struggle for air, barely clinging to life beneath the relentless horde's pressure.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_1\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 1,
+          "segment_index": 23,
+          "snippet": "Point-blank pistol shots ring out through the hallway, blowing back the rabid infected in mid-lunge.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_1\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 1,
+          "segment_index": 24,
+          "snippet": "A clean shot pierces straight through a zombie's skull, dropping the ravenous creature instantly.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_1\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 2,
+          "segment_index": 14,
+          "snippet": "The recovered footage exposes an outbreak that defies all biological logic.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_2\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 2,
+          "segment_index": 15,
+          "snippet": "They codename the horrifying biohazard operation Zombie Apocalypse 82-08.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_2\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_scene",
+          "context_type": "narration"
+        }
+      ],
+      "matched_terms": [
+        "outbreak",
+        "virus",
+        "infected",
+        "plague",
+        "zombie",
+        "undead",
+        "82-08",
+        "horde"
+      ],
+      "high_risk": false
+    },
+    "cultivation": {
+      "claim": "cultivation",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": false
+    },
+    "heavenly_demon": {
+      "claim": "heavenly_demon",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": false
+    },
+    "drop_rate": {
+      "claim": "drop_rate",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": false
+    },
+    "percentage_humanity_destroyed": {
+      "claim": "percentage_humanity_destroyed",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": true
+    },
+    "only_survivor": {
+      "claim": "only_survivor",
+      "supported": false,
+      "confidence": 0.5,
+      "matched_units_count": 3,
+      "matched_units": [
+        {
+          "source": "recap",
+          "episode": 12,
+          "segment_index": 60,
+          "snippet": "A desperate hand reaches out to haul the last survivor upward to safety.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_12\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_group",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 57,
+          "segment_index": 61,
+          "snippet": "The point man barks cold orders, demanding to know if these three are the only survivors left.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_57\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_group",
+          "context_type": "narration"
+        },
+        {
+          "source": "recap",
+          "episode": 96,
+          "segment_index": 14,
+          "snippet": "A raw curse tears out of him—the bitter taste of being the only survivors.",
+          "source_path": "D:\\VibeCoding\\recap_comics-windows_version\\recap_comics-windows_version\\downloads\\좀비묵시록_8208_1_143_en_946016ec\\episode_96\\recap.json",
+          "timestamp": null,
+          "subject": null,
+          "scope": "local_group",
+          "context_type": "narration"
+        }
+      ],
+      "matched_terms": [
+        "only survivor",
+        "last survivor"
+      ],
+      "high_risk": true
+    },
+    "knew_apocalypse_beforehand": {
+      "claim": "knew_apocalypse_beforehand",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": true
+    },
+    "unbreakable_fortress": {
+      "claim": "unbreakable_fortress",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": true
+    },
+    "god_tier": {
+      "claim": "god_tier",
+      "supported": false,
+      "confidence": 0.0,
+      "matched_units_count": 0,
+      "matched_units": [],
+      "matched_terms": [],
+      "high_risk": true
+    }
+  },
+  "disambiguation_checks": {
+    "regression_false_positives_blocked": true,
+    "vault_verb_vs_noun_checked": true,
+    "immune_system_vs_rpg_system_checked": true,
+    "only_survivor_scope_checked": true
+  }
+}

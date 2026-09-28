@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+import hashlib
 from typing import Any, Dict, List, Optional
 
 
@@ -29,6 +30,17 @@ class StoryMemory:
         self.protagonist_name = protagonist_name
         self.protagonist_gender = protagonist_gender
 
+    def get_fingerprint(
+        self,
+        source_url: str = "",
+        from_ep: int = 1,
+        to_ep: int = 1,
+        prompt_version: str = "v1",
+    ) -> str:
+        """Computes a 16-character fingerprint for cache validation."""
+        data = f"{source_url}|{self.comic_title}|{from_ep}|{to_ep}|{self.language}|{prompt_version}"
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()[:16]
+
     @classmethod
     def load(
         cls,
@@ -36,10 +48,10 @@ class StoryMemory:
         comic_title: str = "",
         language: str = "vi",
     ) -> StoryMemory:
-        if not download_dir or not os.path.exists(download_dir):
+        if not download_dir:
             return cls(comic_title=comic_title, language=language)
 
-        memory_file = os.path.join(download_dir, "story_memory.json")
+        memory_file = download_dir if download_dir.endswith(".json") else os.path.join(download_dir, "story_memory.json")
         if os.path.exists(memory_file):
             try:
                 with open(memory_file, "r", encoding="utf-8") as f:
@@ -55,6 +67,93 @@ class StoryMemory:
             except Exception:
                 pass
         return cls(comic_title=comic_title, language=language)
+
+    @classmethod
+    def load_validated(
+        cls,
+        download_dir: str,
+        comic_title: str = "",
+        language: str = "vi",
+        source_url: str = "",
+        from_ep: int = 1,
+        to_ep: int = 1,
+        prompt_version: str = "us_apocalypse_v2",
+    ) -> StoryMemory:
+        """
+        Loads memory, validating against fingerprint if stored.
+        - If comic identity changed (different title/source), performs a full reset (clears glossary & protagonist).
+        - If only prompt/range changed for the same comic, invalidates episodes while preserving cumulative glossary.
+        """
+        mem = cls.load(download_dir, comic_title=comic_title, language=language)
+        if download_dir:
+            memory_file = download_dir if download_dir.endswith(".json") else os.path.join(download_dir, "story_memory.json")
+            if os.path.exists(memory_file):
+                try:
+                    with open(memory_file, "r", encoding="utf-8") as f:
+                        raw = json.load(f)
+                    stored_title = raw.get("comic_title", "")
+                    stored_fp = raw.get("_fingerprint")
+
+                    # Cross-comic identity change check
+                    if stored_title and comic_title and stored_title.strip().lower() != comic_title.strip().lower():
+                        mem.episodes = {}
+                        mem.cumulative_glossary = {}
+                        mem.protagonist_name = ""
+                        mem.comic_title = comic_title
+                    elif stored_fp:
+                        expected_fp = mem.get_fingerprint(source_url, from_ep, to_ep, prompt_version)
+                        if stored_fp != expected_fp:
+                            mem.episodes = {}  # Invalidate stale episodes but keep glossary for same comic
+                except Exception:
+                    pass
+        return mem
+
+    def save_with_fingerprint(
+        self,
+        download_dir: str,
+        source_url: str = "",
+        from_ep: int = 1,
+        to_ep: int = 1,
+        prompt_version: str = "us_apocalypse_v2",
+    ) -> bool:
+        """Saves story memory with embedded cache fingerprint."""
+        if not download_dir:
+            return False
+        if download_dir.endswith(".json"):
+            memory_file = download_dir
+            target_dir = os.path.dirname(download_dir)
+            if target_dir:
+                os.makedirs(target_dir, exist_ok=True)
+        else:
+            os.makedirs(download_dir, exist_ok=True)
+            memory_file = os.path.join(download_dir, "story_memory.json")
+        tmp_file = memory_file + ".tmp_" + str(int(time.time() * 1000))
+        fp = self.get_fingerprint(source_url, from_ep, to_ep, prompt_version)
+
+        payload = {
+            "comic_title": self.comic_title,
+            "language": self.language,
+            "protagonist_name": self.protagonist_name,
+            "protagonist_gender": self.protagonist_gender,
+            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "total_episodes_recorded": len(self.episodes),
+            "episodes": self.episodes,
+            "cumulative_glossary": self.cumulative_glossary,
+            "_fingerprint": fp,
+        }
+
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_file, memory_file)
+            return True
+        except Exception:
+            if os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except Exception:
+                    pass
+            return False
 
 
     def save(self, download_dir: str) -> bool:

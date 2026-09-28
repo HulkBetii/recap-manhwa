@@ -1,0 +1,80 @@
+{
+  "comic_title": "Zombie Revelation 82-08",
+  "from_ep": 1,
+  "to_ep": 143,
+  "story_fact_graph_summary": {
+    "total_facts": 943,
+    "rejected_facts_blocked": 334,
+    "distinct_types": 17,
+    "fact_types_present": [
+      "arrival_event",
+      "character_action",
+      "character_state",
+      "combat_event",
+      "containment_event",
+      "death_event",
+      "departure_event",
+      "disaster_event",
+      "environment_state",
+      "escape_event",
+      "group_state",
+      "infection_event",
+      "location_event",
+      "military_event",
+      "relationship_event",
+      "resource_event",
+      "shelter_event"
+    ],
+    "total_evidence_units": 943,
+    "episodes_scanned": 143,
+    "episodes_found": 143,
+    "invariant_violations": 0,
+    "type_counts": {
+      "combat_event": 113,
+      "military_event": 95,
+      "death_event": 85,
+      "escape_event": 58,
+      "infection_event": 27,
+      "resource_event": 63,
+      "group_state": 114,
+      "disaster_event": 68,
+      "character_state": 62,
+      "environment_state": 36,
+      "location_event": 76,
+      "shelter_event": 64,
+      "arrival_event": 31,
+      "relationship_event": 7,
+      "departure_event": 21,
+      "character_action": 8,
+      "containment_event": 15
+    },
+    "quality_distribution": {
+      "high": 243,
+      "medium": 571,
+      "low": 129
+    }
+  },
+  "false_fact_regression": {
+    "all_cases_correct": true,
+    "cases_tested": 6
+  },
+  "prepublish_audit_summary": {
+    "passed": true,
+    "stage11_timeline_available": true,
+    "first_chapter_is_zero": true
+  },
+  "packaging_summary": {
+    "is_consistent": true,
+    "checks": {
+      "title_grounded": true,
+      "thumbnails_grounded": true,
+      "thumbnail_prompts_grounded": true,
+      "chapter_00_present": true,
+      "chapters_grounded": true,
+      "description_compliant": true,
+      "tags_consistent": true,
+      "pinned_comment_grounded": true,
+      "survival_dashboard_grounded": true
+    }
+  }
+}

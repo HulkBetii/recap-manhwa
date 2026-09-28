@@ -1247,7 +1247,60 @@ class Stage5_GeminiAutomation(BaseStage):
         }
         """
 
-        async def generate_with_gemini_api(target_pdf, target_prompt):
+        async def generate_with_gemini_api(target_pdf, target_prompt, ep=None):
+            """
+            Tier-2 Fallback: Thử 9Router API trước, nếu không configured thì
+            fallback sang Direct Gemini SDK (google-genai).
+            Returns: response text string hoặc None nếu cả hai đều thất bại.
+            """
+            from app import load_config
+            cfg = load_config()
+            ninerouter_url = cfg.get("ninerouter_url", "").strip()
+            ninerouter_api_key = (
+                cfg.get("ninerouter_api_key", "").strip()
+                or cfg.get("ninerouter_api_keys", "").strip()
+                or os.getenv("NINEROUTER_API_KEY", "").strip()
+                or os.getenv("NINEROUTER_API_KEYS", "").strip()
+            )
+            ninerouter_model = (
+                cfg.get("ninerouter_model", "").strip()
+                or cfg.get("gemini_model", "").strip()
+                or os.getenv("GEMINI_MODEL", "").strip()
+                or "ag/gemini-3.8-flash-medium"
+            )
+
+            # --- Path A: 9Router API Gateway ---
+            if ninerouter_api_key:
+                try:
+                    from gemini_api_engine import GeminiApiEngine
+                    engine = GeminiApiEngine(
+                        base_url=ninerouter_url or "http://localhost:20128/v1",
+                        api_keys=[ninerouter_api_key],
+                        default_model=ninerouter_model,
+                        timeout=task.payload.get("timeout", 180),
+                    )
+                    text, used_model = await engine.generate_content(
+                        prompt=target_prompt,
+                        pdf_path=target_pdf,
+                        context_logger=context,
+                    )
+                    if text and text.strip():
+                        ep_log = f"Tập {ep}: " if ep is not None else ""
+                        await context.log(
+                            f"{ep_log}[9Router] Tier-2 thành công via {used_model}.",
+                            "success",
+                            episode=ep,
+                        )
+                        return text.strip()
+                except Exception as router_err:
+                    ep_log = f"Tập {ep}: " if ep is not None else ""
+                    await context.log(
+                        f"{ep_log}[9Router] Tier-2 thất bại: {router_err}. Thử Direct Gemini API...",
+                        "warning",
+                        episode=ep,
+                    )
+
+            # --- Path B: Direct Gemini SDK (legacy fallback) ---
             api_key = os.getenv("GEMINI_API_KEY")
             if not api_key:
                 return None
@@ -1272,7 +1325,7 @@ class Stage5_GeminiAutomation(BaseStage):
                 if resp and resp.text:
                     return resp.text
             except Exception as api_err:
-                print(f"Gemini API fallback error: {api_err}")
+                await context.log(f"Tập {ep}: Direct Gemini API fallback error: {api_err}", "warning", episode=ep)
             return None
 
         async def dismiss_gemini_modals(p):
@@ -1331,9 +1384,18 @@ class Stage5_GeminiAutomation(BaseStage):
 
             # Load rolling story context from previous episode if available
             previous_context = None
+            story_prompt_version = "us_apocalypse_v2"
             try:
                 from story_memory import StoryMemory
-                memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
+                memory = StoryMemory.load_validated(
+                    download_dir,
+                    comic_title=comic_title,
+                    language=language,
+                    source_url=getattr(task, "comic_url", ""),
+                    from_ep=getattr(task, "from_episode", 1),
+                    to_ep=getattr(task, "to_episode", 1),
+                    prompt_version=story_prompt_version,
+                )
                 previous_context = memory.get_previous_context(ep, download_dir=download_dir)
                 if previous_context:
                     name_part = f" | MC: {previous_context.get('protagonist_name')}" if previous_context.get('protagonist_name') else ""
@@ -1420,12 +1482,26 @@ class Stage5_GeminiAutomation(BaseStage):
                 await context.log(f"Tập {ep}: Cache Gemini hợp lệ / recap.json đã tồn tại. Bỏ qua automation.", "success")
                 try:
                     from story_memory import StoryMemory
-                    memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
+                    memory = StoryMemory.load_validated(
+                        download_dir,
+                        comic_title=comic_title,
+                        language=language,
+                        source_url=getattr(task, "comic_url", ""),
+                        from_ep=getattr(task, "from_episode", 1),
+                        to_ep=getattr(task, "to_episode", 1),
+                        prompt_version=story_prompt_version,
+                    )
                     if str(ep) not in memory.episodes and os.path.exists(recap_json_path):
                         with open(recap_json_path, "r", encoding="utf-8") as f:
                             cached_recap = json.load(f)
                         memory.add_episode_recap(ep, cached_recap, language=language)
-                        memory.save(download_dir)
+                        memory.save_with_fingerprint(
+                            download_dir,
+                            source_url=getattr(task, "comic_url", ""),
+                            from_ep=getattr(task, "from_episode", 1),
+                            to_ep=getattr(task, "to_episode", 1),
+                            prompt_version=story_prompt_version,
+                        )
                 except Exception:
                     pass
                 await context.complete_episode(ep)
@@ -1998,9 +2074,23 @@ class Stage5_GeminiAutomation(BaseStage):
                     try:
                         async with _story_memory_lock:
                             from story_memory import StoryMemory
-                            memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
+                            memory = StoryMemory.load_validated(
+                                download_dir,
+                                comic_title=comic_title,
+                                language=language,
+                                source_url=getattr(task, "comic_url", ""),
+                                from_ep=getattr(task, "from_episode", 1),
+                                to_ep=getattr(task, "to_episode", 1),
+                                prompt_version=story_prompt_version,
+                            )
                             memory.add_episode_recap(ep, normalized_data, language=language)
-                            memory.save(download_dir)
+                            memory.save_with_fingerprint(
+                                download_dir,
+                                source_url=getattr(task, "comic_url", ""),
+                                from_ep=getattr(task, "from_episode", 1),
+                                to_ep=getattr(task, "to_episode", 1),
+                                prompt_version=story_prompt_version,
+                            )
                             mc_log = f" (Nhân vật chính: {memory.protagonist_name}" if memory.protagonist_name else ""
                             if mc_log:
                                 if memory.protagonist_gender and memory.protagonist_gender != "auto":
@@ -2148,16 +2238,24 @@ class Stage5_GeminiAutomation(BaseStage):
                                 pass
 
             if not success:
-                # Tier-2 Fallback: If browser automation failed after all retries, try Gemini API as emergency fallback
-                api_key = os.getenv("GEMINI_API_KEY")
-                if api_key:
+                # Tier-2 Fallback: If browser automation failed after all retries, try Gemini API via 9Router or Direct SDK
+                from app import load_config
+                cfg = load_config()
+                has_api_access = bool(
+                    cfg.get("ninerouter_api_key")
+                    or cfg.get("ninerouter_api_keys")
+                    or os.getenv("NINEROUTER_API_KEY")
+                    or os.getenv("NINEROUTER_API_KEYS")
+                    or os.getenv("GEMINI_API_KEY")
+                )
+                if has_api_access:
                     await context.log(
-                        f"Tập {ep}: Các lượt thử qua trình duyệt đều thất bại. Kích hoạt Tier-2 Fallback sang Gemini API chính thức (gemini-2.5-flash)...",
+                        f"Tập {ep}: Các lượt thử qua trình duyệt đều thất bại. Kích hoạt Tier-2 Fallback (9Router API / Direct Gemini SDK)...",
                         "info",
                         episode=ep
                     )
                     try:
-                        api_text = await generate_with_gemini_api(pdf_path, prompt_content)
+                        api_text = await generate_with_gemini_api(pdf_path, prompt_content, ep=ep)
                         if api_text:
                             response_text = clean_gemini_response(api_text)
                             parsed_data = parse_gemini_recap_text(response_text)
@@ -2185,9 +2283,23 @@ class Stage5_GeminiAutomation(BaseStage):
                                 
                                 try:
                                     from story_memory import StoryMemory
-                                    memory = StoryMemory.load(download_dir, comic_title=comic_title, language=language)
+                                    memory = StoryMemory.load_validated(
+                                        download_dir,
+                                        comic_title=comic_title,
+                                        language=language,
+                                        source_url=getattr(task, "comic_url", ""),
+                                        from_ep=getattr(task, "from_episode", 1),
+                                        to_ep=getattr(task, "to_episode", 1),
+                                        prompt_version=story_prompt_version,
+                                    )
                                     memory.add_episode_recap(ep, normalized_data, language=language)
-                                    memory.save(download_dir)
+                                    memory.save_with_fingerprint(
+                                        download_dir,
+                                        source_url=getattr(task, "comic_url", ""),
+                                        from_ep=getattr(task, "from_episode", 1),
+                                        to_ep=getattr(task, "to_episode", 1),
+                                        prompt_version=story_prompt_version,
+                                    )
                                 except Exception:
                                     pass
                                 

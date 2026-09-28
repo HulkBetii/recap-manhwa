@@ -1,0 +1,28 @@
+{
+  "comic_title": "Zombie Revelation 82-08",
+  "archetype": "zombie_apocalypse",
+  "episodes_scanned": 143,
+  "total_evidence_units": 9264,
+  "invariant_check": {
+    "invariant_holds": true,
+    "detected_assertions": 3,
+    "validated_assertions": 3
+  },
+  "assertion_statistics": {
+    "total_detected": 3,
+    "total_validated": 3,
+    "total_supported": 3,
+    "total_rejected": 0,
+    "clean_surface_pass_rate_percent": 100.0
+  },
+  "surfaces_evaluated": [
+    "title_options",
+    "title_variants",
+    "thumbnail_concepts_text",
+    "thumbnail_concepts_prompts",
+    "narrative_chapters",
+    "survival_dashboard",
+    "pinned_comment"
+  ],
+  "audit_passed": true
+}

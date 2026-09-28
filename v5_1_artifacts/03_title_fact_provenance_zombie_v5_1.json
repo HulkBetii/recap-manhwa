@@ -1,0 +1,169 @@
+{
+  "comic_title": "Zombie Revelation 82-08",
+  "archetype": "zombie_apocalypse",
+  "generation_summary": {
+    "total_facts": 948,
+    "rejected_false_facts": 334,
+    "fact_types": [
+      "arrival_event",
+      "betrayal_event",
+      "character_action",
+      "character_state",
+      "combat_event",
+      "containment_event",
+      "death_event",
+      "departure_event",
+      "disaster_event",
+      "environment_state",
+      "escape_event",
+      "group_state",
+      "infection_event",
+      "location_event",
+      "military_event",
+      "relationship_event",
+      "resource_event",
+      "shelter_event"
+    ],
+    "invariant_violations": [
+      "INVARIANT: fact 'betrayal_event_mem_001' matched_trigger='betray' does NOT appear in evidence snippet — semantic gap.",
+      "INVARIANT: fact 'infection_event_mem_001' matched_trigger='infected' does NOT appear in evidence snippet — semantic gap."
+    ]
+  },
+  "titles": [
+    {
+      "title": "When Zombie Apocalypse Overruns The City, Tae Fights To Survive | Manhwa Recap",
+      "requirement_key": "disaster_survival",
+      "generation_mode": "template_fact_resolved",
+      "facts_resolved": 3,
+      "facts_required": 3,
+      "evidence_count_local": 3,
+      "provenance_complete": true,
+      "facts_used": [
+        {
+          "fact_id": "infection_event_ep002_001",
+          "role": "infection_event",
+          "quality": 0.9,
+          "trigger": "outbreak",
+          "canonical": "[Ep 2] Infected spreads population (trigger: 'outbreak'; from: \"The recovered footage exposes an out",
+          "evidence_snippet": "The recovered footage exposes an outbreak that defies all biological logic."
+        },
+        {
+          "fact_id": "disaster_event_ep029_012",
+          "role": "disaster_event",
+          "quality": 0.9,
+          "trigger": "total collapse",
+          "canonical": "[Ep 29] Disaster destroys city/region (trigger: 'total collapse'; from: \"Tae adjusts his glasses, co",
+          "evidence_snippet": "Tae adjusts his glasses, convinced the authorities are hiding the capital's total collapse."
+        },
+        {
+          "fact_id": "combat_event_ep032_024",
+          "role": "combat_event",
+          "quality": 0.95,
+          "trigger": "swings",
+          "canonical": "[Ep 32] Protagonist fights infected (trigger: 'swings'; from: \"Tae swings a heavy sledgehammer with ",
+          "evidence_snippet": "Tae swings a heavy sledgehammer with devastating force, cracking straight through skull and spine."
+        }
+      ]
+    },
+    {
+      "title": "Surviving Zombie Apocalypse Against All Odds [Ep 1~143] | Manhwa Recap",
+      "requirement_key": "generic_survival",
+      "generation_mode": "template_fact_resolved",
+      "facts_resolved": 2,
+      "facts_required": 2,
+      "evidence_count_local": 2,
+      "provenance_complete": true,
+      "facts_used": [
+        {
+          "fact_id": "infection_event_ep002_001",
+          "role": "infection_event",
+          "quality": 0.9,
+          "trigger": "outbreak",
+          "canonical": "[Ep 2] Infected spreads population (trigger: 'outbreak'; from: \"The recovered footage exposes an out",
+          "evidence_snippet": "The recovered footage exposes an outbreak that defies all biological logic."
+        },
+        {
+          "fact_id": "character_action_ep023_001",
+          "role": "character_action",
+          "quality": 0.88,
+          "trigger": "rescued",
+          "canonical": "[Ep 23] Protagonist acts under pressure (trigger: 'rescued'; from: \"The squad scrambles through the ",
+          "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby aboard."
+        }
+      ]
+    },
+    {
+      "title": "He Was BETRAYED by His Own Allies, But Survived Zombie Apocalypse | Manhwa Recap",
+      "requirement_key": "betrayal",
+      "generation_mode": "template_fact_resolved",
+      "facts_resolved": 1,
+      "facts_required": 1,
+      "evidence_count_local": 1,
+      "provenance_complete": true,
+      "facts_used": [
+        {
+          "fact_id": "betrayal_event_mem_001",
+          "role": "betrayal_event",
+          "quality": 0.9,
+          "trigger": "betray",
+          "canonical": "[story_memory] ally betrays protagonist",
+          "evidence_snippet": "story_memory betrayal: {'comic_title': '좀비묵시록 82-08', 'language': 'en', 'protagonist_name': 'tae', '"
+        }
+      ]
+    },
+    {
+      "title": "When Zombie Apocalypse Strikes, Tae Holds The Defense Line | Manhwa Recap",
+      "requirement_key": "defense",
+      "generation_mode": "template_fact_resolved",
+      "facts_resolved": 2,
+      "facts_required": 2,
+      "evidence_count_local": 2,
+      "provenance_complete": true,
+      "facts_used": [
+        {
+          "fact_id": "character_action_ep023_001",
+          "role": "character_action",
+          "quality": 0.88,
+          "trigger": "rescued",
+          "canonical": "[Ep 23] Protagonist acts under pressure (trigger: 'rescued'; from: \"The squad scrambles through the ",
+          "evidence_snippet": "The squad scrambles through the howling rotor wash, dragging the rescued baby aboard."
+        },
+        {
+          "fact_id": "combat_event_ep032_024",
+          "role": "combat_event",
+          "quality": 0.95,
+          "trigger": "swings",
+          "canonical": "[Ep 32] Protagonist fights infected (trigger: 'swings'; from: \"Tae swings a heavy sledgehammer with ",
+          "evidence_snippet": "Tae swings a heavy sledgehammer with devastating force, cracking straight through skull and spine."
+        }
+      ]
+    },
+    {
+      "title": "From Outbreak to Total Collapse: Surviving Zombie Apocalypse [Ep 1~143] | Manhwa Recap",
+      "requirement_key": "collapse",
+      "generation_mode": "template_fact_resolved",
+      "facts_resolved": 2,
+      "facts_required": 2,
+      "evidence_count_local": 2,
+      "provenance_complete": true,
+      "facts_used": [
+        {
+          "fact_id": "disaster_event_ep029_012",
+          "role": "disaster_event",
+          "quality": 0.9,
+          "trigger": "total collapse",
+          "canonical": "[Ep 29] Disaster destroys city/region (trigger: 'total collapse'; from: \"Tae adjusts his glasses, co",
+          "evidence_snippet": "Tae adjusts his glasses, convinced the authorities are hiding the capital's total collapse."
+        },
+        {
+          "fact_id": "infection_event_ep002_001",
+          "role": "infection_event",
+          "quality": 0.9,
+          "trigger": "outbreak",
+          "canonical": "[Ep 2] Infected spreads population (trigger: 'outbreak'; from: \"The recovered footage exposes an out",
+          "evidence_snippet": "The recovered footage exposes an outbreak that defies all biological logic."
+        }
+      ]
+    }
+  ]
+}

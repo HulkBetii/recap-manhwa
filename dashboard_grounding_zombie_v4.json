@@ -1,0 +1,81 @@
+{
+  "story_arc": {
+    "value": "Episodes 1–143 (143 Chapters)",
+    "grounded": true,
+    "assertions": []
+  },
+  "from_ep": {
+    "value": 1,
+    "grounded": true,
+    "assertions": []
+  },
+  "to_ep": {
+    "value": 143,
+    "grounded": true,
+    "assertions": []
+  },
+  "total_episodes_covered": {
+    "value": 143,
+    "grounded": true,
+    "assertions": []
+  },
+  "outside_condition": {
+    "value": "Infected Urban Sector — Active Swarms",
+    "grounded": true,
+    "assertions": []
+  },
+  "threat_description": {
+    "value": "CRITICAL (Mutant Strains Active)",
+    "grounded": true,
+    "assertions": [
+      {
+        "assertion_type": "threat_critical",
+        "raw_text": "THREAT: CRITICAL",
+        "subject": "environment",
+        "scope": "local_scene",
+        "value": "threat_critical",
+        "unit": null,
+        "risk": "low",
+        "requires_evidence": true,
+        "status": "supported",
+        "evidence_units": [],
+        "rejection_reason": null
+      }
+    ]
+  },
+  "base_security_level": {
+    "value": "Makeshift Safehouse",
+    "grounded": true,
+    "assertions": []
+  },
+  "power_status": {
+    "value": null,
+    "grounded": true,
+    "note": "Unproven metric set to None (Zero Hallucination)"
+  },
+  "day_number": {
+    "value": null,
+    "grounded": true,
+    "note": "Unproven metric set to None (Zero Hallucination)"
+  },
+  "food_reserve_pct": {
+    "value": null,
+    "grounded": true,
+    "note": "Unproven metric set to None (Zero Hallucination)"
+  },
+  "water_reserve_pct": {
+    "value": null,
+    "grounded": true,
+    "note": "Unproven metric set to None (Zero Hallucination)"
+  },
+  "mc_level": {
+    "value": null,
+    "grounded": true,
+    "note": "Unproven metric set to None (Zero Hallucination)"
+  },
+  "party_size": {
+    "value": null,
+    "grounded": true,
+    "note": "Unproven metric set to None (Zero Hallucination)"
+  }
+}
