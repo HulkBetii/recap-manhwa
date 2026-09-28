@@ -1177,7 +1177,7 @@ class CameraPlanner:
 
             # 3-keyframe breathing: slight zoom-in at midpoint (1.03) while panning
             # keeps pan as primary motion; subtle scale pulse adds organic life without motion sickness
-            t_mid = round(duration * 0.5, 3)
+            t_mid = duration * 0.5
             y_mid = (y_start + y_end) * 0.5
             keyframes = [
                 {"time": 0.0,      "x": focal_x, "y": y_start, "scale": 1.00, "progress": 0.0},
@@ -1509,10 +1509,10 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 char_p = bd.get("character_presence", 0.0)
                                 is_bad = (
                                     bd.get("is_meaningless", False)
-                                    or sc < 50
-                                    or (bubble_cov > 0.35 and char_p < 50.0)
-                                    or bubble_cov > 0.52
-                                    or (char_p < 25.0 and not bd.get("is_establishing_shot", False))
+                                    or sc < 52
+                                    or (bubble_cov > 0.30 and char_p < 55.0)
+                                    or bubble_cov > 0.48
+                                    or (char_p < 30.0 and not bd.get("is_establishing_shot", False))
                                 )
                             except Exception:
                                 sc, char_p, is_bad = 70, 50.0, False
@@ -1566,8 +1566,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 candidate = bad_page_idx + delta
                                 if 0 <= candidate < len(image_files):
                                     cand_page = candidate + 1
-                                    # Strict Deduplication: Do NOT pick any page that was displayed in the last 2 shots or already used as a donor elsewhere
-                                    if cand_page in recent_displayed_pages[-2:] or cand_page in global_used_donors:
+                                    # Strict Deduplication: Do NOT pick any page that was displayed in the last 5 shots or already used as a donor elsewhere
+                                    if cand_page in recent_displayed_pages[-5:] or cand_page in global_used_donors:
                                         continue
                                     im_path = os.path.join(images_blur_dir, image_files[candidate])
                                     if not os.path.exists(im_path):
@@ -1599,7 +1599,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 print(f"  [Stage10] Replaced low-quality/junk/bubble page {bad_page_idx + 1} with character page {chosen_page} (composite={best_composite:.1f})")
                             else:
                                 # Fallback: drop any explicitly meaningless panels from seg_images if better candidates exist
-                                non_meaningless = [c[0] for c in scored_candidates if not c[4] and c[1] >= 40 and int(c[0]["page"]) not in recent_displayed_pages[-2:] and int(c[0]["page"]) not in global_used_donors]
+                                non_meaningless = [c[0] for c in scored_candidates if not c[4] and c[1] >= 40 and int(c[0]["page"]) not in recent_displayed_pages[-5:] and int(c[0]["page"]) not in global_used_donors]
                                 if non_meaningless:
                                     chosen_fallback = int(non_meaningless[0]["page"])
                                     global_used_donors.add(chosen_fallback)
@@ -1628,7 +1628,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             if not (0 <= cand_idx < len(image_files)):
                                 continue
                             cand_page_num = cand_idx + 1
-                            if (cand_page_num in recent_displayed_pages[-2:]
+                            if (cand_page_num in recent_displayed_pages[-4:]
                                     or cand_page_num == (orig_page_idx + 1)
                                     or cand_page_num in global_used_donors):
                                 continue
@@ -1932,7 +1932,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 H_img, W_img = img_rgb.shape[:2]
                 usable_v = H_c - (W_c / aspect_card)
 
-                if aspect_nat < 0.70 and usable_v >= 160:
+                if aspect_nat < 0.70 and usable_v >= 100:
                     w_base = float(W_c)
                     h_base = w_base / aspect_card
                     if h_base > float(H_c):
@@ -2039,7 +2039,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     # True Adaptive Card Dimensions (v1.8.0):
                     # Preserves 100% of panel artwork without arbitrary cropping or decapitation
                     usable_v = H_c - (W_c / 0.68)
-                    if aspect_nat < 0.70 and usable_v >= 160:
+                    if aspect_nat < 0.70 and usable_v >= 100:
                         # Tall webtoon scroll panel with ample vertical headroom -> pillarbox card (0.68) for smooth pan
                         aspect_card = 0.68
                         card_h = 1080
@@ -2198,12 +2198,12 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             active_sub = subtitles[active_sub_idx]["text"]
 
                     # Adaptive Luminance Transition (v1.8.4):
-                    # For high-contrast lighting jumps (delta_lum >= 90), use longer 0.35s cross-dissolve to eliminate eye fatigue
+                    # For high-contrast lighting jumps (delta_lum >= 90), use 0.25s cross-dissolve to eliminate eye fatigue
                     next_idx = active_idx + 1
                     lum_curr = lum_map.get(pd_curr["image_file"], 128.0)
                     lum_next = lum_map.get(page_displays[next_idx]["image_file"], 128.0) if next_idx < len(page_displays) else lum_curr
                     delta_lum = abs(lum_curr - lum_next)
-                    T_trans = 0.35 if delta_lum >= 90.0 else 0.20
+                    T_trans = 0.25 if delta_lum >= 90.0 else 0.18
                     in_transition = False
                     
                     if next_idx < len(page_displays):
@@ -2222,9 +2222,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         bg_curr_obj = get_blurred_background(pd_curr["image_file"], img_curr_obj, curr_bounds)
                         frame_curr = render_page_frame(img_curr_obj, bg_curr_obj, curr_bounds, plans[active_idx], t_local_curr, curr_card_dims)
                         
-                        # Incoming next page holds its starting composition (t=0.0) while cross-fading in,
-                        # ensuring zero timeline rewind or camera snapping when it becomes active.
-                        t_local_next = 0.0
+                        # Incoming next page advances smoothly by 1 frame during cross-fade to eliminate easing snap
+                        t_local_next = 1.0 / float(fps)
                         img_next_obj = get_img(pd_next["image_file"], t)
                         next_bounds = get_cached_bounds(pd_next["image_file"])
                         next_card_dims = card_dims_map.get(pd_next["image_file"], (555, 0, 810, 1080, 0.75))
