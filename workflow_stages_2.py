@@ -1117,12 +1117,13 @@ class CameraPlanner:
         y_max_valid = float(max(y_min_valid, H_c - h_cam_ref * 0.5))
         total_valid_span = max(0.0, y_max_valid - y_min_valid)
 
-        # Mode B: Vertical Pan Glide for Vertical Panels (usable_v_travel >= 120px and total_valid_span >= 25px)
-        # Cap speed so pan is smooth and continuous
-        max_travel_by_speed = max(20.0, float(duration) * 110.0)
+        # Mode B: Vertical Pan Glide for Vertical Panels (usable_v_travel >= 80px and total_valid_span >= 25px)
+        # Cap speed at 150px/s so pan covers the full strip smoothly without motion sickness
+        MAX_PAN_SPEED_PX_PER_SEC = 150.0
+        max_travel_by_speed = max(20.0, float(duration) * MAX_PAN_SPEED_PX_PER_SEC)
         actual_span = min(total_valid_span, max_travel_by_speed)
 
-        if (usable_v_travel >= 120.0 or aspect_ratio < 0.55) and actual_span >= 25.0:
+        if (usable_v_travel >= 80.0 or aspect_ratio < 0.55) and actual_span >= 25.0:
             animation_type = "vertical_pan_glide"
             easing = "easeInOutCubic"
             
@@ -1174,9 +1175,14 @@ class CameraPlanner:
             else:
                 y_start, y_end = y_bot, y_top
 
+            # 3-keyframe breathing: slight zoom-in at midpoint (1.03) while panning
+            # keeps pan as primary motion; subtle scale pulse adds organic life without motion sickness
+            t_mid = round(duration * 0.5, 3)
+            y_mid = (y_start + y_end) * 0.5
             keyframes = [
-                {"time": 0.0, "x": focal_x, "y": y_start, "scale": 1.00, "progress": 0.0},
-                {"time": duration, "x": focal_x, "y": y_end, "scale": 1.00, "progress": 1.0}
+                {"time": 0.0,      "x": focal_x, "y": y_start, "scale": 1.00, "progress": 0.0},
+                {"time": t_mid,    "x": focal_x, "y": y_mid,   "scale": 1.03, "progress": 0.5},
+                {"time": duration, "x": focal_x, "y": y_end,   "scale": 1.00, "progress": 1.0},
             ]
             return {
                 "page": page_num,
@@ -1200,7 +1206,7 @@ class CameraPlanner:
             t_split = round(duration * 0.5, 3)
             keyframes = [
                 {"time": 0.0, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 0.0},
-                {"time": t_split, "x": focal_x, "y": focal_y, "scale": 1.10, "progress": 0.5},
+                {"time": t_split, "x": focal_x, "y": focal_y, "scale": 1.08, "progress": 0.5},
                 {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 1.0},
             ]
             return {
@@ -1253,13 +1259,13 @@ class CameraPlanner:
                 direction = "zoom_in"
                 keyframes = [
                     {"time": 0.0,      "x": focal_x,     "y": focal_y,     "scale": 1.00, "progress": 0.0},
-                    {"time": duration, "x": x_drift_end, "y": y_drift_end, "scale": 1.10, "progress": 1.0}
+                    {"time": duration, "x": x_drift_end, "y": y_drift_end, "scale": 1.08, "progress": 1.0}
                 ]
         elif shot_index % 3 == 1:
             animation_type = "focal_zoom_out"
             direction = "zoom_out"
             keyframes = [
-                {"time": 0.0,      "x": focal_x,     "y": focal_y,     "scale": 1.10, "progress": 0.0},
+                {"time": 0.0,      "x": focal_x,     "y": focal_y,     "scale": 1.08, "progress": 0.0},
                 {"time": duration, "x": x_drift_rev, "y": y_drift_rev, "scale": 1.00, "progress": 1.0}
             ]
         else:
@@ -1267,7 +1273,7 @@ class CameraPlanner:
             direction = "punch_in"
             keyframes = [
                 {"time": 0.0,      "x": focal_x,     "y": focal_y,     "scale": 1.00, "progress": 0.0},
-                {"time": duration, "x": x_drift_end, "y": y_drift_end, "scale": 1.12, "progress": 1.0}
+                {"time": duration, "x": x_drift_end, "y": y_drift_end, "scale": 1.08, "progress": 1.0}
             ]
 
         return {
@@ -2167,44 +2173,6 @@ class Stage10_EpisodeVideoRendering(BaseStage):
 
             active_idx = 0
             active_sub_idx = 0
-
-            # Episode Intro Title Card (v2.1.0):
-            # Render 2.0s of fade-in frames from black with series + episode text
-            # before the main panel frame loop. PIL text on black canvas, no external fonts.
-            INTRO_DURATION = 2.0
-            INTRO_FADE_SECS = 1.2
-            intro_fps_frames = int(INTRO_DURATION * fps)
-            intro_fade_frames = max(1, int(INTRO_FADE_SECS * fps))
-            comic_title_intro = str(kwargs.get("comic_title", "") or "").upper()
-            episode_num_intro = kwargs.get("episode_num", "")
-
-            if comic_title_intro or episode_num_intro:
-                from PIL import Image as _IntroImg, ImageDraw as _IntroDraw
-                for _fi in range(intro_fps_frames):
-                    if pipe_broken:
-                        break
-                    _alpha = min(1.0, _fi / intro_fade_frames)
-                    _br = int(255 * _alpha)
-                    _br_dim = int(_br * 0.55)
-                    _canvas = np.zeros((1080, 1920, 3), dtype=np.uint8)
-                    _pil_c = _IntroImg.fromarray(_canvas)
-                    _draw = _IntroDraw.Draw(_pil_c)
-                    _col = (_br, _br, _br)
-                    _col_dim = (_br_dim, _br_dim, _br_dim)
-                    if comic_title_intro:
-                        _draw.text((960, 480), comic_title_intro,
-                                   fill=_col, anchor="mm")
-                    _draw.text((960, 516), "\u2500" * 22,
-                               fill=_col_dim, anchor="mm")
-                    if episode_num_intro:
-                        _draw.text((960, 552), f"Episode {episode_num_intro}",
-                                   fill=_col, anchor="mm")
-                    _intro_frame = np.array(_pil_c)
-                    try:
-                        proc.stdin.write(_intro_frame.tobytes())
-                    except (BrokenPipeError, ConnectionAbortedError, OSError):
-                        pipe_broken = True
-                        break
 
             try:
                 for f_idx in range(num_frames):
