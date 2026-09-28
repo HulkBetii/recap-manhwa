@@ -2,6 +2,8 @@
 """Unit tests for GeminiApiEngine (9Router compatible)."""
 
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from unittest.mock import patch, MagicMock
 from gemini_api_engine import GeminiApiEngine, get_gemini_api_engine
@@ -48,4 +50,4 @@ def test_get_gemini_api_engine_singleton():
     engine2 = get_gemini_api_engine()
     assert engine1 is engine2
     assert engine1.base_url == "http://localhost:20128/v1"
-    assert engine1.default_model == "ag/gemini-3.8-flash-high"
+    assert engine1.default_model == "ag/gemini-3.8-flash-medium"

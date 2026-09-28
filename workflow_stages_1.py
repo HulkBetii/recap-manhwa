@@ -1247,23 +1247,25 @@ class Stage5_GeminiAutomation(BaseStage):
         }
         """
 
-        async def generate_with_gemini_api(target_pdf, target_prompt, ep=None):
+        async def generate_with_gemini_api(target_pdf, target_prompt, ep=None, is_primary=True):
             """
-            Tier-2 Fallback: Thử 9Router API trước, nếu không configured thì
-            fallback sang Direct Gemini SDK (google-genai).
+            Tier-1 Primary / Tier-2 Fallback: 9Router API Gateway (OpenAI/Gemini format),
+            với fallback sang Direct Gemini SDK (google-genai).
             Returns: response text string hoặc None nếu cả hai đều thất bại.
             """
             from app import load_config
             cfg = load_config()
             ninerouter_url = cfg.get("ninerouter_url", "").strip()
             ninerouter_api_key = (
-                cfg.get("ninerouter_api_key", "").strip()
+                task.payload.get("ninerouter_api_key")
+                or cfg.get("ninerouter_api_key", "").strip()
                 or cfg.get("ninerouter_api_keys", "").strip()
                 or os.getenv("NINEROUTER_API_KEY", "").strip()
                 or os.getenv("NINEROUTER_API_KEYS", "").strip()
             )
             ninerouter_model = (
-                cfg.get("ninerouter_model", "").strip()
+                task.payload.get("ninerouter_model")
+                or cfg.get("ninerouter_model", "").strip()
                 or cfg.get("gemini_model", "").strip()
                 or os.getenv("GEMINI_MODEL", "").strip()
                 or "ag/gemini-3.8-flash-medium"
@@ -1286,8 +1288,9 @@ class Stage5_GeminiAutomation(BaseStage):
                     )
                     if text and text.strip():
                         ep_log = f"Tập {ep}: " if ep is not None else ""
+                        engine_label = "Primary 9Router API" if is_primary else "Tier-2 9Router Fallback"
                         await context.log(
-                            f"{ep_log}[9Router] Tier-2 thành công via {used_model}.",
+                            f"{ep_log}[{engine_label}] Thành công via {used_model}.",
                             "success",
                             episode=ep,
                         )
@@ -1295,7 +1298,7 @@ class Stage5_GeminiAutomation(BaseStage):
                 except Exception as router_err:
                     ep_log = f"Tập {ep}: " if ep is not None else ""
                     await context.log(
-                        f"{ep_log}[9Router] Tier-2 thất bại: {router_err}. Thử Direct Gemini API...",
+                        f"{ep_log}[9Router] Lỗi gọi API: {router_err}. Thử Direct Gemini API...",
                         "warning",
                         episode=ep,
                     )
@@ -1385,6 +1388,7 @@ class Stage5_GeminiAutomation(BaseStage):
             # Load rolling story context from previous episode if available
             previous_context = None
             story_prompt_version = "us_apocalypse_v2"
+            memory = None
             try:
                 from story_memory import StoryMemory
                 memory = StoryMemory.load_validated(
@@ -1412,6 +1416,45 @@ class Stage5_GeminiAutomation(BaseStage):
                 for k, v in payload_ip_ctx.items():
                     if k not in previous_context or not previous_context[k]:
                         previous_context[k] = v
+
+            # 4-Tier Protagonist Name Bootstrap
+            confirmed_mc_name = ""
+            confirmed_gender = "auto"
+
+            # Priority 1: task.payload.ip_context or task.payload.protagonist_name
+            if isinstance(payload_ip_ctx, dict) and payload_ip_ctx.get("protagonist_name"):
+                confirmed_mc_name = str(payload_ip_ctx["protagonist_name"]).strip()
+                confirmed_gender = str(payload_ip_ctx.get("protagonist_gender", "auto")).strip()
+            elif task.payload.get("protagonist_name"):
+                confirmed_mc_name = str(task.payload["protagonist_name"]).strip()
+
+            # Priority 2: Market metadata character dictionary
+            if not confirmed_mc_name:
+                try:
+                    from markets.us_apocalypse.metadata import get_character_names
+                    mem_dict = memory.__dict__ if hasattr(memory, '__dict__') else None
+                    char_dict = get_character_names(comic_title, story_memory=mem_dict)
+                    resolved_mc = char_dict.get("mc", "").strip()
+                    if resolved_mc and resolved_mc not in ["The Lone Survivor", "The Veteran Survivor", ""]:
+                        confirmed_mc_name = resolved_mc
+                except Exception:
+                    pass
+
+            # Priority 3: Existing memory / glossary
+            if not confirmed_mc_name and memory and memory.protagonist_name:
+                confirmed_mc_name = memory.protagonist_name
+                confirmed_gender = memory.protagonist_gender
+
+            # Assign to previous_context & memory
+            if confirmed_mc_name:
+                if previous_context is None:
+                    previous_context = {}
+                if not previous_context.get("protagonist_name"):
+                    previous_context["protagonist_name"] = confirmed_mc_name
+                if confirmed_gender != "auto" and not previous_context.get("protagonist_gender"):
+                    previous_context["protagonist_gender"] = confirmed_gender
+                if memory:
+                    memory.set_protagonist_name(confirmed_mc_name)
 
             prompt_content = generate_gemini_prompt(
                 comic_title,
@@ -1534,6 +1577,112 @@ class Stage5_GeminiAutomation(BaseStage):
             success = False
             start_time = time.time()
 
+            # =========================================================================
+            # TIER-1 PRIMARY: 9Router API Engine (Fast Direct VLM Gateway)
+            # =========================================================================
+            from app import load_config
+            cfg = load_config()
+            vlm_engine_pref = str(task.payload.get("vlm_engine", cfg.get("vlm_engine", "9router_api"))).strip().lower()
+            ninerouter_key_val = (
+                task.payload.get("ninerouter_api_key")
+                or cfg.get("ninerouter_api_key", "").strip()
+                or cfg.get("ninerouter_api_keys", "").strip()
+                or os.getenv("NINEROUTER_API_KEY", "").strip()
+                or os.getenv("NINEROUTER_API_KEYS", "").strip()
+            )
+            has_api_access = bool(ninerouter_key_val or os.getenv("GEMINI_API_KEY"))
+            use_api_primary = has_api_access and (vlm_engine_pref in ("9router_api", "api", "gemini_api", "auto", ""))
+
+            if use_api_primary:
+                api_start_time = time.time()
+                await context.log(
+                    f"Tập {ep}: [Primary Engine] Đang sinh kịch bản recap trực tiếp qua 9Router Gemini API...",
+                    "info",
+                    episode=ep
+                )
+                try:
+                    api_text = await generate_with_gemini_api(pdf_path, prompt_content, ep=ep, is_primary=True)
+                    if api_text and api_text.strip():
+                        response_text = clean_gemini_response(api_text)
+                        parsed_data = parse_gemini_recap_text(response_text)
+                        if parsed_data and len(parsed_data) >= 10:
+                            from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops, auto_split_long_segments, enforce_monotonic_page_order
+                            has_loop, loop_idx = detect_recap_loop(parsed_data, max_page=len(image_files))
+                            if has_loop:
+                                pruned_data, was_pruned = prune_recap_loops(parsed_data, max_page=len(image_files))
+                                if was_pruned and len(pruned_data) >= 10:
+                                    await context.log(
+                                        f"Tập {ep}: Anti-Loop Guardrail: Đã phát hiện và tự động xử lý vòng lặp kịch bản (chọn {len(pruned_data)} phân cảnh).",
+                                        "info",
+                                        episode=ep,
+                                    )
+                                    parsed_data = pruned_data
+
+                            parsed_data = auto_split_long_segments(parsed_data, max_words=20)
+                            parsed_data = enforce_monotonic_page_order(parsed_data)
+
+                            normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
+                            raw_temp_path = raw_response_path + ".tmp"
+                            recap_temp_path = recap_json_path + ".tmp"
+                            with open(raw_temp_path, "w", encoding="utf-8") as rf:
+                                rf.write(response_text)
+                            with open(recap_temp_path, "w", encoding="utf-8") as jf:
+                                json.dump(normalized_data, jf, ensure_ascii=False, indent=2, allow_nan=False)
+                            os.replace(raw_temp_path, raw_response_path)
+                            os.replace(recap_temp_path, recap_json_path)
+                            cache.commit(stage="gemini", fingerprint=fingerprint, outputs=[raw_response_path, recap_json_path])
+
+                            # Update Story Memory for subsequent episodes (Thread-Safe)
+                            try:
+                                async with _story_memory_lock:
+                                    from story_memory import StoryMemory
+                                    memory = StoryMemory.load_validated(
+                                        download_dir,
+                                        comic_title=comic_title,
+                                        language=language,
+                                        source_url=getattr(task, "comic_url", ""),
+                                        from_ep=getattr(task, "from_episode", 1),
+                                        to_ep=getattr(task, "to_episode", 1),
+                                        prompt_version=story_prompt_version,
+                                    )
+                                    memory.add_episode_recap(ep, normalized_data, language=language)
+                                    memory.save_with_fingerprint(
+                                        download_dir,
+                                        source_url=getattr(task, "comic_url", ""),
+                                        from_ep=getattr(task, "from_episode", 1),
+                                        to_ep=getattr(task, "to_episode", 1),
+                                        prompt_version=story_prompt_version,
+                                    )
+                                    mc_log = f" (Nhân vật chính: {memory.protagonist_name}" if memory.protagonist_name else ""
+                                    if mc_log:
+                                        if memory.protagonist_gender and memory.protagonist_gender != "auto":
+                                            mc_log += f", Giới tính: {memory.protagonist_gender})"
+                                        else:
+                                            mc_log += ")"
+                                    await context.log(f"Tập {ep}: Đã cập nhật Rolling Story Memory{mc_log} (nối tiếp ngữ cảnh cho các tập tiếp theo).", "info", episode=ep)
+                            except Exception as mem_err:
+                                await context.log(f"Cảnh báo: Không thể cập nhật StoryMemory cho tập {ep}: {mem_err}", "warning", episode=ep)
+
+                            api_dur = round(time.time() - api_start_time, 1)
+                            await context.log(
+                                f"Tập {ep}: [9Router API] Xử lý thành công trong {api_dur}s ({len(normalized_data)} phân cảnh).",
+                                "success",
+                                episode=ep
+                            )
+                            await context.complete_episode(ep)
+                            if streaming_consumer:
+                                await streaming_consumer.enqueue_episode(ep)
+                            completed_eps_count += 1
+                            await context.update_stage_progress(self.name, (completed_eps_count / total_eps) * 100.0)
+                            return True
+                        else:
+                            await context.log(f"Tập {ep}: 9Router API trả về kịch bản ngắn hoặc không hợp lệ. Chuẩn bị fallback...", "warning", episode=ep)
+                except Exception as api_err:
+                    await context.log(f"Tập {ep}: 9Router API thất bại: {api_err}. Kích hoạt Fallback sang Playwright Web UI...", "warning", episode=ep)
+
+            # =========================================================================
+            # TIER-2 FALLBACK: Playwright Web UI Automation (Worker / Profile Loop)
+            # =========================================================================
             for attempt in range(1, max_retries + 1):
                 if context.cancel_token.is_cancelled():
                     break
@@ -2318,13 +2467,38 @@ class Stage5_GeminiAutomation(BaseStage):
             await context.update_stage_progress(self.name, (valid_count / (to_ep - from_ep + 1)) * 100.0)
             return success
 
-        concurrency = int(task.payload.get("concurrency", 1))
+        concurrency = int(task.payload.get("concurrency", 2))
         from app import ChromeProfilePoolManager, load_config
         cfg = load_config()
         available_profiles = cfg.get("chrome_profiles", [])
         num_workers = min(concurrency, len(available_profiles))
 
-        if num_workers > 1 and len(episodes_to_process) > 1:
+        vlm_engine_pref = str(task.payload.get("vlm_engine", cfg.get("vlm_engine", "9router_api"))).strip().lower()
+        ninerouter_key_val = (
+            task.payload.get("ninerouter_api_key")
+            or cfg.get("ninerouter_api_key", "").strip()
+            or cfg.get("ninerouter_api_keys", "").strip()
+            or os.getenv("NINEROUTER_API_KEY", "").strip()
+            or os.getenv("NINEROUTER_API_KEYS", "").strip()
+        )
+        has_api_access = bool(ninerouter_key_val or os.getenv("GEMINI_API_KEY"))
+        use_api_primary = has_api_access and (vlm_engine_pref in ("9router_api", "api", "gemini_api", "auto", ""))
+
+        if use_api_primary:
+            await context.log(f"Stage 5: Kích hoạt Primary 9Router Gemini API Engine (Độ song song: {concurrency})...", "info")
+            sem = asyncio.Semaphore(concurrency)
+            async def run_api_ep(ep):
+                async with sem:
+                    if context.cancel_token.is_cancelled():
+                        return
+                    try:
+                        await process_episode_vlm(ep)
+                    except Exception as e:
+                        await context.log(f"Lỗi khi chạy tập {ep}: {e}", "error", episode=ep)
+
+            api_tasks = [run_api_ep(ep) for ep in episodes_to_process]
+            await asyncio.gather(*api_tasks)
+        elif num_workers > 1 and len(episodes_to_process) > 1:
             await context.log(f"Stage 5: Kích hoạt xử lý song song với {num_workers} Chrome Profiles...", "info")
             try:
                 from app import reset_shared_browser_context
