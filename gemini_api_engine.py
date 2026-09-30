@@ -57,12 +57,12 @@ class GeminiApiEngine:
         base_url: Optional[str] = None,
         ninerouter_url: Optional[str] = None,
         api_keys: Optional[Union[List[str], str]] = None,
-        default_model: str = "ag/gemini-3.8-flash-medium",
+        default_model: str = "ag/gemini-3.8-flash-high",
         timeout: int = 180,
     ):
         self.base_url = (base_url or ninerouter_url or os.getenv("NINEROUTER_URL") or os.getenv("GEMINI_API_BASE_URL") or "https://api.9router.com/v1").strip().rstrip("/")
         self.api_keys = self._parse_keys(api_keys)
-        self.default_model = default_model or os.getenv("GEMINI_MODEL") or "ag/gemini-3.8-flash-medium"
+        self.default_model = default_model or os.getenv("GEMINI_MODEL") or "ag/gemini-3.8-flash-high"
         self.timeout = timeout
 
     @classmethod
@@ -538,7 +538,7 @@ def get_gemini_api_engine(
             or os.getenv("NINEROUTER_API_KEYS")
             or ""
         )
-        final_model = default_model or cfg.get("ninerouter_model") or cfg.get("gemini_model") or os.getenv("GEMINI_MODEL") or "ag/gemini-3.8-flash-medium"
+        final_model = default_model or cfg.get("ninerouter_model") or cfg.get("gemini_model") or os.getenv("GEMINI_MODEL") or "ag/gemini-3.8-flash-high"
         return GeminiApiEngine(
             base_url=final_url,
             api_keys=final_keys,
@@ -560,7 +560,7 @@ def get_gemini_api_engine(
             or os.getenv("NINEROUTER_API_KEYS")
             or ""
         )
-        model = cfg.get("ninerouter_model") or cfg.get("gemini_model") or os.getenv("GEMINI_MODEL") or "ag/gemini-3.8-flash-medium"
+        model = cfg.get("ninerouter_model") or cfg.get("gemini_model") or os.getenv("GEMINI_MODEL") or "ag/gemini-3.8-flash-high"
         _gemini_api_engine_instance = GeminiApiEngine(
             base_url=base_url,
             api_keys=api_keys,

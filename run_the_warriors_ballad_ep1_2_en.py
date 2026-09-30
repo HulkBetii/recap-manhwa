@@ -121,7 +121,7 @@ async def main():
         to_episode=to_ep,
         payload={
             "vlm_model": "3.8 Flash",
-            "ninerouter_model": "ag/gemini-3.8-flash-medium",
+            "ninerouter_model": "ag/gemini-3.8-flash-high",
             "language": "en",
             "market_id": "us_apocalypse",
             "voice_id": config.DEFAULT_EN_VOICE_ID,

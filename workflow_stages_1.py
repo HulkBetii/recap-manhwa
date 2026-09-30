@@ -1268,7 +1268,7 @@ class Stage5_GeminiAutomation(BaseStage):
                 or cfg.get("ninerouter_model", "").strip()
                 or cfg.get("gemini_model", "").strip()
                 or os.getenv("GEMINI_MODEL", "").strip()
-                or "ag/gemini-3.8-flash-medium"
+                or "ag/gemini-3.8-flash-high"
             )
 
             # --- Path A: 9Router API Gateway ---
