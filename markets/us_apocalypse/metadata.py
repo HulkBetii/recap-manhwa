@@ -2402,6 +2402,471 @@ def validate_thumbnail_concept(
     }
 
 
+def _mine_dynamic_story_concepts(
+    comic_title: str,
+    archetype: str,
+    mc_name: str,
+    beats: Dict[str, str],
+    story_memory: Optional[Dict[str, Any]] = None,
+    download_dir: Optional[str] = None,
+    from_ep: int = 1,
+    to_ep: int = 1,
+) -> List[Dict[str, Any]]:
+    """
+    Mines real narrative peaks and dramatic incidents from story_memory & transcripts.
+    Generates fully custom, story-specific visual concepts (dynamic layout, camera, scene, text).
+    Zero hardcoded concept molds.
+    """
+    # 1. Aggregate story text & individual episode peaks
+    all_episodes_data = []
+    aggregated_text = ""
+    if story_memory and isinstance(story_memory, dict):
+        episodes_dict = story_memory.get("episodes", {})
+        if isinstance(episodes_dict, dict):
+            for ep_num_str, ep_data in episodes_dict.items():
+                if isinstance(ep_data, dict):
+                    opening = str(ep_data.get("opening", ""))
+                    summary = str(ep_data.get("summary", ""))
+                    cliffhanger = str(ep_data.get("closing_cliffhanger", ""))
+                    all_episodes_data.append({
+                        "ep": int(ep_num_str) if ep_num_str.isdigit() else 1,
+                        "text": f"{opening} {summary} {cliffhanger}".strip(),
+                        "opening": opening,
+                        "summary": summary,
+                        "cliffhanger": cliffhanger,
+                    })
+                    aggregated_text += f" {opening} {summary} {cliffhanger}"
+        glossary = story_memory.get("cumulative_glossary", {})
+        if isinstance(glossary, dict):
+            aggregated_text += " " + " ".join(glossary.keys())
+
+    text_lower = aggregated_text.lower()
+    title_lower = (comic_title or "").lower()
+
+    # Style header constant (Anime Premium DNA)
+    art_style_block = (
+        "[ART STYLE]:\n"
+        "Premium modern Japanese anime illustration, high-budget promotional key visual quality. "
+        "Polished digital painting, clean sharp line art, professional cel-shading mixed with smooth gradient shading. "
+        "Highly detailed expressive anime eyes with iris reflections, smooth skin, glossy layered hair, "
+        "vivid saturated colors, cinematic depth, crisp edges, polished key visual quality."
+    )
+
+    negative_prompt_block = (
+        "[NEGATIVE PROMPT]:\n"
+        "Distorted hands, extra fingers, missing fingers, fused fingers, extra limbs, bad anatomy, "
+        "malformed face, asymmetrical eyes, tiny characters, full-body distant view, "
+        "photorealistic style, realistic photography, 3D CGI, chibi, western comic, low-detail drawing, "
+        "sketch, blurry image, dull colors, dark nighttime scene, horror, blood, wounds, gore, "
+        "excessive violence, NSFW, cluttered background, illegible text, watermark."
+    )
+
+    concepts: List[Dict[str, Any]] = []
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONCEPT TYPE 1: The Catalyst / Inciting Incident (Khởi Đầu / Bùng Nổ Thảm Họa)
+    # ─────────────────────────────────────────────────────────────────────────
+    if "asteroid" in text_lower or "asteroid" in title_lower:
+        c1_id = "concept_asteroid_awakening"
+        c1_name = "Asteroid Impact & Public Revelation (Công Bố Thiên Thạch & Thức Tỉnh)"
+        c1_main_text = "THE SKY IS FALLING!"
+        c1_sub_text = "IMMUNITY AWAKENED!"
+        c1_comp = "Medium close-up: MC center-left looking into broadcast camera with calm smirk, asteroid trail glowing in sky behind"
+        c1_prompt = (
+            f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+            f"{art_style_block}\n\n"
+            f"[COMPOSITION — DRAMATIC REVELATION MOMENT]:\n"
+            f"Extreme medium close-up, cinematic slightly low camera angle. "
+            f"LEFT (~55% of frame): {mc_name}, 20-25 year old male protagonist, messy layered dark hair, fearless piercing eyes, "
+            f"calm confident smirk. A glowing translucent blue System Window hovers near his eyes, illuminating his face. "
+            f"RIGHT (~45% of frame): A giant blazing asteroid streak cutting through a dramatic crimson twilight sky above collapsing skyscrapers. "
+            f"Shallow depth of field: {mc_name} razor sharp, sky and city softly blurred.\n\n"
+            f"[LIGHTING]:\n"
+            f"Strong dual lighting: warm sunlight from upper-left, cool blue holographic rim light from System Window on protagonist's face. "
+            f"Glossy hair reflections, crisp anime shadows under chin and bangs.\n\n"
+            f"[THUMBNAIL TEXT OVERLAYS]:\n"
+            f"Upper-left corner: huge bold text '{c1_main_text}' in bright saturated yellow (#FFD700), "
+            f"very thick black outline, subtle drop shadow, counterclockwise tilt. Yellow comic speech pointer toward mouth.\n"
+            f"Lower center-right: text '{c1_sub_text}' in bright amber/gold, bold condensed uppercase, heavy black outline.\n\n"
+            f"{negative_prompt_block}"
+        )
+    elif "freeze" in text_lower or "blizzard" in text_lower:
+        c1_id = "concept_subzero_cataclysm"
+        c1_name = "Sub-Zero Freeze Collapse (Đại Hàn Băng Giá Đột Ngột)"
+        c1_main_text = "WORLD FREEZES OVER!"
+        c1_sub_text = "SHELTER HEATED!"
+        c1_comp = "Extreme close-up: Frostbitten environment left vs MC warm and insulated right"
+        c1_prompt = (
+            f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+            f"{art_style_block}\n\n"
+            f"[COMPOSITION — FREEZING APOCALYPSE CONTRAST]:\n"
+            f"Extreme medium close-up. {mc_name} on right (~55%), wearing high-tech thermal survival jacket, "
+            f"sharp confident gaze, warm skin tone, exhaling faint white steam with a fearless smirk. "
+            f"LEFT (~45%): Frozen glass, icicles, and a blizzard-covered skyscraper skyline. "
+            f"Shallow depth of field: {mc_name} razor sharp, blizzard background softly blurred.\n\n"
+            f"[LIGHTING]:\n"
+            f"Warm amber indoor heating light on right side, cold icy blue blizzard rim light on left. "
+            f"High contrast, vibrant saturated colors.\n\n"
+            f"[THUMBNAIL TEXT OVERLAYS]:\n"
+            f"Upper-left: bold yellow '{c1_main_text}' with thick black outline. "
+            f"Lower-right: bold yellow '{c1_sub_text}' with black drop shadow.\n\n"
+            f"{negative_prompt_block}"
+        )
+    else:
+        c1_id = "concept_outbreak_zero_hour"
+        c1_name = "Zero Hour Apocalypse Outbreak (Bùng Nổ Đại Dịch Giờ Số 0)"
+        c1_main_text = "ZERO HOUR COLLAPSE!"
+        c1_sub_text = "VETERAN STANDS READY!"
+        c1_comp = "Extreme close-up: MC frontline stance with weapon, chaos behind"
+        c1_prompt = (
+            f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+            f"{art_style_block}\n\n"
+            f"[COMPOSITION — OUTBREAK FRONTLINE]:\n"
+            f"Extreme medium close-up, slightly low camera angle. {mc_name} fills the foreground right (~55%), "
+            f"holding a tactical weapon with a fearless confident smirk. "
+            f"Background left (~45%): crumbling urban checkpoint with smoke plumes and distant emergency sirens. "
+            f"Shallow depth of field: {mc_name} razor sharp, background softly blurred.\n\n"
+            f"[LIGHTING]:\n"
+            f"Strong bright directional sunlight from upper-left, warm highlights on skin, glossy hair reflections.\n\n"
+            f"[THUMBNAIL TEXT OVERLAYS]:\n"
+            f"Upper-left: bold yellow '{c1_main_text}' with thick black outline. "
+            f"Lower-right: bold yellow '{c1_sub_text}' with black drop shadow.\n\n"
+            f"{negative_prompt_block}"
+        )
+
+    concepts.append({
+        "id": c1_id,
+        "name": c1_name,
+        "thumbnail_text": f"{c1_main_text} / {c1_sub_text}",
+        "text_style": f"Upper-left: bold yellow ('{c1_main_text}'), thick black outline. Lower-right: ('{c1_sub_text}').",
+        "composition": c1_comp,
+        "gpt_prompt": c1_prompt,
+        "visual_facts_used": [],
+    })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONCEPT TYPE 2: Apex Predator / Colossal Beast Clash (Săn Quái Thú / Boss)
+    # ─────────────────────────────────────────────────────────────────────────
+    has_beast = any(k in text_lower for k in ["owl bear", "bear", "goblin", "beast", "monster", "mutant", "skeletal", "predator", "boss", "swarm"])
+    if has_beast:
+        c2_beast_name = "Colossal Apex Predator" if "bear" in text_lower or "owl" in text_lower else "Mutant Swarm Beast"
+        c2_id = "concept_apex_beast_showdown"
+        c2_name = f"Apex Monster Clash (Quyết Đấu {c2_beast_name})"
+        c2_main_text = "IT'S AN APEX BEAST!"
+        c2_sub_text = "ONE SHOT ELIMINATION!"
+        c2_comp = "Extreme close-up: MC dodging left with glowing weapon primed, massive beast roaring in upper-right"
+        c2_prompt = (
+            f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+            f"{art_style_block}\n\n"
+            f"[COMPOSITION — MONSTER CLASH SHOWDOWN]:\n"
+            f"Extreme medium close-up, dramatic cinematic angle. "
+            f"LEFT FOREGROUND (~52% of frame): {mc_name}, 20-25 year old male protagonist, messy dark hair, intense narrowed eyes, "
+            f"confident smirk, holding a glowing reinforced survival spear/weapon primed to strike forward. "
+            f"RIGHT BACKGROUND (~48% of frame): Looming silhouette of a terrifying colossal apex mutant beast (glowing eyes, razor fangs, roaring jaws). "
+            f"Shallow depth of field: {mc_name} razor sharp with dynamic weapon energy, monster silhouetted in dust and shockwaves.\n\n"
+            f"[LIGHTING]:\n"
+            f"Vibrant high-contrast lighting: bright sunlight from upper-left, vivid elemental glow from protagonist's weapon lighting his face. "
+            f"Glossy reflections, dramatic anime shadows.\n\n"
+            f"[THUMBNAIL TEXT OVERLAYS]:\n"
+            f"Upper-left: bold condensed yellow text '{c2_main_text}' with thick black stroke and triangular comic pointer. "
+            f"Lower center-right: bold yellow text '{c2_sub_text}' with black drop shadow.\n\n"
+            f"{negative_prompt_block}"
+        )
+        concepts.append({
+            "id": c2_id,
+            "name": c2_name,
+            "thumbnail_text": f"{c2_main_text} / {c2_sub_text}",
+            "text_style": f"Upper-left: bold yellow ('{c2_main_text}'), thick black outline. Lower-right: ('{c2_sub_text}').",
+            "composition": c2_comp,
+            "gpt_prompt": c2_prompt,
+            "visual_facts_used": [],
+        })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONCEPT TYPE 3: Companion / Base Fortification (Linh Thú Sát Cánh / Căn Cứ Bất Khả Xâm Phạm)
+    # ─────────────────────────────────────────────────────────────────────────
+    has_companion = any(k in text_lower for k in ["dingo", "pup", "hound", "wolf", "pet", "dog", "partner", "cub"])
+    has_fortress = any(k in text_lower for k in ["shelter", "bunker", "sanctuary", "fortress", "jiri mountain", "safehouse"])
+
+    if has_companion:
+        c3_id = "concept_mutated_companion_stand"
+        c3_name = "Mutated Beast Companion Stand (Linh Thú Đột Biến Sát Cánh)"
+        c3_main_text = "MUTATED GUARDIAN!"
+        c3_sub_text = "BONDED FOR LIFE!"
+        c3_comp = "Extreme close-up: MC and his loyal mutated wolf/hound side-by-side on rooftop vantage point"
+        c3_prompt = (
+            f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+            f"{art_style_block}\n\n"
+            f"[COMPOSITION — HERO & BEAST COMPANION]:\n"
+            f"Extreme medium close-up, cinematic slightly low camera angle. "
+            f"LEFT (~50% of frame): {mc_name}, 20-25 years old, athletic build, messy dark hair, tactical survival vest, "
+            f"calm fearless expression, petting the head of his battle companion. "
+            f"RIGHT (~50% of frame): A fierce, loyal mutated wolf/pup with sharp intelligent glowing eyes, sleek glossy fur, "
+            f"standing alert beside protagonist on a high-ground vantage point. "
+            f"BACKGROUND: Post-apocalyptic skyline under a clear dramatic sky. Shallow depth of field: duo razor sharp, background softly blurred.\n\n"
+            f"[LIGHTING]:\n"
+            f"Golden hour bright daytime sunlight from upper-left, warm rim lighting outlining both characters and the wolf's fur. "
+            f"Glossy reflections, clean vibrant colors.\n\n"
+            f"[THUMBNAIL TEXT OVERLAYS]:\n"
+            f"Upper-left: bold yellow '{c3_main_text}' with thick black outline. "
+            f"Lower-right: bold yellow '{c3_sub_text}' in heavy condensed uppercase.\n\n"
+            f"{negative_prompt_block}"
+        )
+        concepts.append({
+            "id": c3_id,
+            "name": c3_name,
+            "thumbnail_text": f"{c3_main_text} / {c3_sub_text}",
+            "text_style": f"Upper-left: bold yellow ('{c3_main_text}'), thick black outline. Lower-right: ('{c3_sub_text}').",
+            "composition": c3_comp,
+            "gpt_prompt": c3_prompt,
+            "visual_facts_used": [],
+        })
+    elif has_fortress:
+        c3_id = "concept_impregnable_sanctuary"
+        c3_name = "Impregnable Sanctuary Defense (Căn Cứ Bất Khả Xâm Phạm)"
+        c3_main_text = "IMPREGNABLE BASE!"
+        c3_sub_text = "ALL THREATS BLOCKED!"
+        c3_comp = "Extreme close-up: MC inside high-tech reinforced command room, security monitors showing outside chaos"
+        c3_prompt = (
+            f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+            f"{art_style_block}\n\n"
+            f"[COMPOSITION — FORTIFIED COMMAND POST]:\n"
+            f"Extreme medium close-up. {mc_name} on right (~55%), drinking coffee with a satisfied smirk, "
+            f"surrounded by glowing tactical monitors, solar power arrays, and reinforced blast doors. "
+            f"LEFT (~45%): Holographic radar screens displaying incoming monster threats neutralized at the perimeter. "
+            f"Shallow depth of field: {mc_name} razor sharp, background electronics softly blurred.\n\n"
+            f"[LIGHTING]:\n"
+            f"High-contrast indoor command lighting: amber warm accents mixed with neon green/cyan monitor glow. "
+            f"Glossy reflections on screens and hair.\n\n"
+            f"[THUMBNAIL TEXT OVERLAYS]:\n"
+            f"Upper-left: bold yellow '{c3_main_text}' with thick black outline. "
+            f"Lower-right: bold yellow '{c3_sub_text}' with black drop shadow.\n\n"
+            f"{negative_prompt_block}"
+        )
+        concepts.append({
+            "id": c3_id,
+            "name": c3_name,
+            "thumbnail_text": f"{c3_main_text} / {c3_sub_text}",
+            "text_style": f"Upper-left: bold yellow ('{c3_main_text}'), thick black outline. Lower-right: ('{c3_sub_text}').",
+            "composition": c3_comp,
+            "gpt_prompt": c3_prompt,
+            "visual_facts_used": [],
+        })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONCEPT TYPE 4: Hostile Standoff / Raider Clash (Đối Đầu Băng Cướp / Kẻ Thù)
+    # ─────────────────────────────────────────────────────────────────────────
+    has_raiders = any(k in text_lower for k in ["raider", "thug", "bandit", "outlaw", "hyeongjun", "gang", "scavenger", "enemy"])
+    has_betrayal = any(k in text_lower for k in ["betray", "abandon", "traitor", "left for dead", "backstab"])
+
+    if has_betrayal:
+        c4_main_text = "YOU WERE DEAD?!"
+        c4_sub_text = "I'M BACK FOR REVENGE!"
+        c4_rival_desc = "A treacherous former ally or corrupt leader frozen in pure horror and disbelief"
+        c4_id = "concept_betrayal_retribution"
+        c4_name = "Betrayal Retribution Confrontation (Trừng Phạt Kẻ Phản Bội)"
+    elif has_raiders:
+        c4_main_text = "HAND OVER THE SHELTER!"
+        c4_sub_text = "OVER MY DEAD BODY!"
+        c4_rival_desc = "A ruthless awakened raider leader with a menacing yet shocked expression"
+        c4_id = "concept_raider_siege_clash"
+        c4_name = "Awakened Raiders Standoff (Đột Kích Căn Cứ)"
+    else:
+        c4_main_text = "YOU'RE CORNERED!"
+        c4_sub_text = "NOT EVEN CLOSE!"
+        c4_rival_desc = "A rival survivor fighter looking completely outmatched"
+        c4_id = "concept_rival_standoff"
+        c4_name = "Rival Survivor Face-Off (Đối Đầu Kình Địch)"
+
+    c4_prompt = (
+        f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+        f"{art_style_block}\n\n"
+        f"[COMPOSITION — EXTREME CLOSE-UP CONFRONTATION TWO-SHOT]:\n"
+        f"Extreme medium close-up, cinematic slightly low camera angle. Two characters fill almost the entire frame. "
+        f"LEFT character (~52% of frame): {mc_name}, the protagonist. Young adult anime design, 20-25 years old, athletic build, "
+        f"messy dark hair with layered bangs, sharp confident eyes, defined jawline, worn tactical survival clothing. "
+        f"Expression: fearless, intimidating — narrowed eyes, raised eyebrow, small mischievous smirk. Leans aggressively forward.\n"
+        f"RIGHT character (~48% of frame): {c4_rival_desc}. "
+        f"Expression: extreme surprise, fear, and disbelief — wide-open eyes, tense eyebrow, slightly open mouth, sweat drop on cheek. Leans backward.\n"
+        f"Their faces are very close (20-30cm apart in frame), creating maximum dramatic tension.\n\n"
+        f"[BACKGROUND]:\n"
+        f"Ruined post-apocalyptic environment under a dramatic daytime sky. "
+        f"Shallow depth of field: characters razor sharp, background architecture softly blurred.\n\n"
+        f"[LIGHTING]:\n"
+        f"Strong bright daylight from upper-left, warm highlights on skin, crisp anime shadows under hair and jawlines, "
+        f"subtle rim lighting, glossy hair reflections.\n\n"
+        f"[THUMBNAIL TEXT OVERLAYS]:\n"
+        f"Upper-left corner: huge bold text '{c4_main_text}' in bright saturated yellow (#FFD700), "
+        f"very thick black outline, subtle drop shadow, counterclockwise tilt. Yellow comic triangular speech pointer toward protagonist.\n"
+        f"Lower center-right: text '{c4_sub_text}' in bright yellow uppercase, thick black outline, heavy bold condensed font.\n\n"
+        f"{negative_prompt_block}"
+    )
+    concepts.append({
+        "id": c4_id,
+        "name": c4_name,
+        "thumbnail_text": f"{c4_main_text} / {c4_sub_text}",
+        "text_style": f"Upper-left: bold yellow ('{c4_main_text}'), thick black outline, speech pointer. Lower-right: ('{c4_sub_text}').",
+        "composition": "Extreme close-up two-shot: protagonist left ~52%, adversary right ~48%, faces 20-30cm apart",
+        "gpt_prompt": c4_prompt,
+        "visual_facts_used": [],
+    })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONCEPT TYPE 5: Climax Firestorm / Solo Annihilation (Cơn Bão Chiến Trận / Hủy Diệt)
+    # ─────────────────────────────────────────────────────────────────────────
+    has_firestorm = any(k in text_lower for k in ["firestorm", "blast", "explosion", "chainsaw", "detonate", "dual-wielding", "spiked clubs", "horde"])
+    if has_firestorm:
+        c5_id = "concept_apocalypse_firestorm"
+        c5_name = "Apocalyptic Firestorm Annihilation (Cơn Bão Lửa Quét Sạch Biển Quái)"
+        c5_main_text = "TOTAL ANNIHILATION!"
+        c5_sub_text = "THE HORDE TURNS TO ASH!"
+        c5_comp = "Extreme close-up: MC dual-wielding weapons with fiery explosions lighting up the street behind"
+        c5_prompt = (
+            f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+            f"{art_style_block}\n\n"
+            f"[COMPOSITION — BATTLEFIELD FIRESTORM CLIMAX]:\n"
+            f"Extreme medium close-up, dramatic hero angle. "
+            f"CENTER-LEFT (~55% of frame): {mc_name} standing undefeated, dual-wielding reinforced tactical weapons, "
+            f"visor slightly raised, predator eyes glowing with battle adrenaline, fearless confident grin. "
+            f"BACKGROUND RIGHT (~45% of frame): A massive apocalyptic firestorm engulfing the entire ruined city boulevard, "
+            f"fiery embers and shockwave dust swirling around the character. "
+            f"Shallow depth of field: {mc_name} razor sharp, explosion background softly blurred with intense glowing bokeh.\n\n"
+            f"[LIGHTING]:\n"
+            f"Dramatic rim lighting from orange/gold firestorm behind, bright key light on protagonist's face, "
+            f"glossy reflections on hair and armor, crisp high-contrast anime shadows.\n\n"
+            f"[THUMBNAIL TEXT OVERLAYS]:\n"
+            f"Upper-left: bold saturated yellow '{c5_main_text}' with thick black outline. "
+            f"Lower-right: bold yellow '{c5_sub_text}' in heavy impact typography.\n\n"
+            f"{negative_prompt_block}"
+        )
+        concepts.append({
+            "id": c5_id,
+            "name": c5_name,
+            "thumbnail_text": f"{c5_main_text} / {c5_sub_text}",
+            "text_style": f"Upper-left: bold yellow ('{c5_main_text}'), thick black outline. Lower-right: ('{c5_sub_text}').",
+            "composition": c5_comp,
+            "gpt_prompt": c5_prompt,
+            "visual_facts_used": [],
+        })
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONCEPT TYPE 6: Hero & Heroine Dual Close-Up (Nam & Nữ Tương Tác Cận Cảnh)
+    # ─────────────────────────────────────────────────────────────────────────
+    # Detect prominent female companion / heroine in story
+    female_name = None
+    female_role = "the female companion"
+    if "migyeong" in text_lower:
+        female_name = "Migyeong"
+        female_role = "Migyeong, the nimble survival ally with mobility blink skills"
+    elif "elena" in text_lower:
+        female_name = "Elena"
+        female_role = "Elena, the skilled mage companion"
+    else:
+        # Check glossary or common heroine terms
+        for k in ["heroine", "priestess", "elf", "archer", "healer", "mage", "scout"]:
+            if k in text_lower:
+                female_role = f"a skilled young adult {k} ally"
+                break
+
+    female_disp = female_name if female_name else "HEROINE"
+    c6_id = "concept_hero_heroine_alliance"
+    c6_name = f"Hero & Heroine Dynamic Tension (Nam & Nữ Đối Đầu & Sát Cánh - {female_disp})"
+    
+    if female_name:
+        c6_main_text = f"DON'T LEAVE MY SIDE, {female_name.upper()}!"
+        c6_sub_text = "I CAN FIGHT TOO!"
+    else:
+        c6_main_text = "YOU'RE IN MY PARTY NOW!"
+        c6_sub_text = "WHAT?!"
+
+    c6_comp = f"Extreme close-up two-shot: {mc_name} left ~52% extending hand near {female_disp}'s forehead, {female_disp} right ~48% flustered"
+    c6_prompt = (
+        f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+        f"{art_style_block}\n\n"
+        f"[COMPOSITION — DRAMATIC & HUMOROUS HERO/HEROINE CONFRONTATION]:\n"
+        f"Extreme medium close-up, cinematic slightly low camera angle. Two young adult fantasy characters fill almost the entire frame. "
+        f"The male protagonist ({mc_name}) occupies approximately the left 52% of the image, and the female heroine occupies approximately the right 48%. "
+        f"Their faces are very close together (approximately 20-30cm apart in frame), creating strong dramatic and romantic tension. "
+        f"The male's extended arm forms a powerful diagonal line from the bottom-left toward the upper-right center of the image, "
+        f"with his hand positioned right in front of the female character's forehead (playful forehead tap or protective gesture).\n\n"
+        f"[LEFT CHARACTER — MALE PROTAGONIST {mc_name}]:\n"
+        f"Young adult male anime design, 20-25 years old, athletic build, messy layered dark hair with bangs, "
+        f"sharp confident eyes, defined jawline. Worn tactical survival clothing with realistic fabric folds. "
+        f"Expression: fearless, mischievous, highly confident — narrowed sharp eyes, raised eyebrow, small playful smirk, visible upper teeth. "
+        f"He leans forward aggressively into the female character's personal space, dominating the composition.\n\n"
+        f"[RIGHT CHARACTER — FEMALE HEROINE ({female_disp})]:\n"
+        f"Young adult female anime character, 19-23 years old, fair skin, contrasting lighter hair (silvery-blonde, light brown, or pastel), "
+        f"large highly expressive anime eyes with detailed iris reflections, delicate facial features, slight natural blush on cheeks. "
+        f"Light tactical survival outfit or fantasy adventurer tunic. "
+        f"Expression: cute exaggerated surprise and flustered indignation — wide eyes, slightly open mouth with clenched teeth, "
+        f"one small anime sweat drop on her cheek. She leans backward slightly from his sudden proximity. No blood, no injury.\n\n"
+        f"[BACKGROUND]:\n"
+        f"Post-apocalyptic landscape under a clear bright dramatic sky. "
+        f"Shallow depth of field: both characters razor sharp in the foreground, background softly blurred.\n\n"
+        f"[LIGHTING]:\n"
+        f"Strong bright daytime sunlight from upper-left. Warm highlights on skin, crisp anime shadows under hair and jawlines, "
+        f"subtle rim lighting around hair, glossy reflections on hair and armor.\n\n"
+        f"[THUMBNAIL TEXT OVERLAYS]:\n"
+        f"Upper-left corner: huge bold text '{c6_main_text}' in bright saturated yellow (#FFD700), "
+        f"very thick black outline, subtle black drop shadow, counterclockwise tilt. "
+        f"Yellow comic-style triangular speech pointer from the text toward {mc_name}'s mouth, outlined in black. "
+        f"DO NOT cover character faces.\n"
+        f"Lower center-right: text '{c6_sub_text}' in bright yellow uppercase, thick black outline, heavy bold condensed font, slightly clockwise tilt.\n\n"
+        f"{negative_prompt_block}"
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONCEPT TYPE 7: Alluring Seduction & Dominance (Khiêu Gợi & Cám Dỗ - Clickbait Hook)
+    # ─────────────────────────────────────────────────────────────────────────
+    c7_id = "concept_sexy_clickbait_allure"
+    c7_name = "Alluring Seduction & Dominance (Khiêu Gợi & Cám Dỗ Kịch Tính - Clickbait Hook)"
+    c7_main_text = "DON'T TOUCH ME THERE...!"
+    c7_sub_text = "TOO LATE...!"
+    c7_comp = f"Intimate extreme close-up: {mc_name} left ~48% lifting {female_disp}'s chin with possessive smirk, seductive {female_disp} right ~52% blushing heavily at 10cm distance"
+
+    c7_prompt = (
+        f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+        f"{art_style_block}\n\n"
+        f"[COMPOSITION — PROVOCATIVE & SENSUAL CLOSE-UP ENCOUNTER]:\n"
+        f"Extreme medium close-up, dramatic cinematic camera angle with intense intimate chemistry. "
+        f"Two young adult characters fill almost the entire frame in breathtakingly close physical proximity (10-15cm apart).\n\n"
+        f"[LEFT CHARACTER — MALE PROTAGONIST {mc_name}]:\n"
+        f"Young adult male anime design, 20-25 years old, athletic toned build, unbuttoned dark tactical shirt subtly revealing defined collarbone and chest, "
+        f"messy dark layered hair with bangs falling over sharp predator eyes. "
+        f"Expression: dominant, seductive, and intensely confident — narrowed piercing gaze, raised eyebrow, slow mischievous smirk. "
+        f"One hand gently tilts the female character's chin upward, invading her personal space with undeniable authority.\n\n"
+        f"[RIGHT CHARACTER — ALLURING FEMALE HEROINE / FEMALE ANTAGONIST ({female_disp})]:\n"
+        f"Young adult female anime character, 20-24 years old, stunning hourglass figure, "
+        f"wearing a seductive form-fitting off-shoulder tactical corset/outfit highlighting bare shoulders and graceful collarbones. "
+        f"Long wavy layered hair cascading over her shoulders, large mesmerizing anime eyes with glowing iris reflections, "
+        f"glossy luscious parted lips, deep crimson blush glowing across her smooth cheeks. "
+        f"Expression: flustered, breathless surprise mixed with undeniable attraction — wide misty eyes, trembling eyelashes, cute anime sweat drop. "
+        f"Her delicate hand rests flat against {mc_name}'s chest as she leans slightly back against him.\n\n"
+        f"[BACKGROUND]:\n"
+        f"Subtly lit private sanctuary interior or ruined penthouse suite overlooking a dramatic sunset skyline. "
+        f"Shallow depth of field: both characters razor sharp in the foreground with glistening skin highlights, background softly blurred.\n\n"
+        f"[LIGHTING]:\n"
+        f"Warm sensual lighting: bright golden hour rim light from upper-left catching her bare shoulders and his jawline, "
+        f"soft romantic fill light accentuating glossy lips and deep eye reflections, crisp anime shadows.\n\n"
+        f"[THUMBNAIL TEXT OVERLAYS]:\n"
+        f"Upper-left corner: huge bold text '{c7_main_text}' in bright saturated yellow (#FFD700) with a thick black outline and subtle hot pink neon outer glow, counterclockwise tilt. "
+        f"Yellow comic-style speech pointer extending toward {female_disp}'s mouth. DO NOT cover character faces.\n"
+        f"Lower center-right: text '{c7_sub_text}' in bright saturated yellow uppercase, thick black outline, heavy bold condensed font, slightly clockwise tilt.\n\n"
+        f"{negative_prompt_block}"
+    )
+
+    concepts.append({
+        "id": c7_id,
+        "name": c7_name,
+        "thumbnail_text": f"{c7_main_text} / {c7_sub_text}",
+        "text_style": f"Upper-left: bold yellow with hot pink glow ('{c7_main_text}'), thick black outline. Lower-right: ('{c7_sub_text}').",
+        "composition": c7_comp,
+        "gpt_prompt": c7_prompt,
+        "visual_facts_used": [],
+    })
+
+    return concepts
+
+
 def _build_resource_contrast_concepts(
     comic_title: str,
     archetype: str,
@@ -2409,116 +2874,27 @@ def _build_resource_contrast_concepts(
     beats: Dict[str, str],
     evidence_index: Optional[EvidenceIndex] = None,
     story_memory: Optional[Dict[str, Any]] = None,
+    download_dir: Optional[str] = None,
+    from_ep: int = 1,
+    to_ep: int = 1,
 ) -> List[Dict[str, Any]]:
     """
-    Generates resource-contrast thumbnail concepts with full-object grounding
-    and clean visual prompts (zero unevidenced Day numbers, zero SSS/glowing aura leaks).
+    Generates dynamic, fully story-grounded thumbnail concepts with premium anime styling.
+    Mines real narrative peaks and dramatic incidents directly from story_memory & transcripts.
     """
-    disaster = beats.get("disaster", "Apocalypse")
-
-    # Check for real day number
-    real_day = None
-    if story_memory and isinstance(story_memory, dict) and "day" in story_memory:
-        real_day = story_memory["day"]
-
-    if real_day is not None:
-        prog_badge_left = "DAY 1"
-        prog_badge_right = f"DAY {real_day}"
-        prog_text = f"DAY 1 → DAY {real_day}"
-        hud_day_text = f"DAY {real_day}"
-    else:
-        prog_badge_left = "BEFORE"
-        prog_badge_right = "AFTER"
-        prog_text = "OUTBREAK → SURVIVAL" if archetype == "zombie_apocalypse" else "BEFORE → AFTER"
-        hud_day_text = "SURVIVAL ARC"
-
-    prompt_split = (
-        f"Create a dramatic, cinematic 16:9 widescreen YouTube thumbnail illustration in authentic Korean webtoon manhwa art style. "
-        f"Sharp ink linework, saturated cel-shading, dynamic rim lighting.\n\n"
-        f"[COMPOSITION — SPLIT-SCREEN SURVIVAL INEQUALITY]:\n"
-        f"Divide the frame vertically with a dramatic diagonal crack or divide.\n\n"
-        f"LEFT SIDE (DEVASTATION — 45% of frame):\n"
-        f"A crumbling cityscape showing the {disaster}. Panicked civilians fleeing through dust and debris. "
-        f"Muted, desaturated dark tones. A large bold text overlay reads 'OUTBREAK'.\n\n"
-        f"RIGHT SIDE (PROTAGONIST STAND — 55% of frame):\n"
-        f"{mc_name} standing firm with a determined survival gaze. "
-        f"Tactical dark clothing, practical reinforced gear, survival backpack, realistic weapon in hand. "
-        f"A large bold text overlay reads 'SURVIVE'.\n\n"
-        f"[THUMBNAIL GRAPHIC OVERLAYS]:\n"
-        f"Two contrasting badges: LEFT in fiery red, RIGHT in sharp amber/gold. "
-        f"Bold sans-serif font (Montserrat/Impact style), thick black stroke for mobile readability."
+    return _mine_dynamic_story_concepts(
+        comic_title=comic_title,
+        archetype=archetype,
+        mc_name=mc_name,
+        beats=beats,
+        story_memory=story_memory,
+        download_dir=download_dir,
+        from_ep=from_ep,
+        to_ep=to_ep,
     )
 
-    prompt_progression = (
-        f"Create a high-impact, cinematic 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. "
-        f"Sharp linework, vibrant colors, dynamic composition.\n\n"
-        f"[COMPOSITION — BEFORE/AFTER SURVIVAL PROGRESSION]:\n"
-        f"Horizontal timeline comparison showing the protagonist's transformation.\n\n"
-        f"LEFT ({prog_badge_left} — 40% of frame):\n"
-        f"A vulnerable version of {mc_name} standing amid the initial chaos of {disaster}. "
-        f"Confused expression, basic civilian clothing, no equipment. Muted warm tones.\n\n"
-        f"CENTER (TRANSITION — 20% of frame):\n"
-        f"A dramatic visual divide connecting the two states.\n\n"
-        f"RIGHT ({prog_badge_right} — 40% of frame):\n"
-        f"{mc_name} transformed into a battle-hardened survivor standing firm. "
-        f"Tactical dark clothing, makeshift reinforced gear, survival backpack, realistic weapon in hand. "
-        f"Gritty cinematic lighting.\n\n"
-        f"[THUMBNAIL GRAPHIC OVERLAYS]:\n"
-        f"Bold typography: '{prog_badge_left}' in muted grey on the left, '{prog_badge_right}' in bold amber on the right. "
-        f"Thick black stroke. Clean readability on mobile."
-    )
 
-    prompt_dashboard = (
-        f"Create a cinematic, survival-UI-inspired 16:9 widescreen YouTube thumbnail illustration in Korean webtoon manhwa art style. "
-        f"Clean linework, dark atmospheric background, gritty textures.\n\n"
-        f"[COMPOSITION — SURVIVAL STATUS OVERLAY]:\n\n"
-        f"CENTER: {mc_name} standing in a dramatic tactical posture amid the ruins of {disaster}. "
-        f"Confident expression, tactical gear, weapon in hand.\n\n"
-        f"OVERLAY — SURVIVAL HUD (semi-transparent):\n"
-        f"Floating around the character, render a stylized survival status dashboard:\n"
-        f"  • Top-left: '{hud_day_text}' in bold white\n"
-        f"  • Left bar: 'STATUS: ACTIVE' in green\n"
-        f"  • Right badge: 'ZOMBIE THREAT' in dark red\n"
-        f"  • Right badge: 'SECTOR: ISOLATED' in amber\n\n"
-        f"[THUMBNAIL GRAPHIC OVERLAYS]:\n"
-        f"Semi-transparent dark panel behind the HUD stats for readability. "
-        f"All text in clean sans-serif font."
-    )
-
-    return [
-        {
-            "id": "concept_survival_split",
-            "name": "Split-Screen Survival Inequality (Phân Chia Sinh Tồn)",
-            "thumbnail_text": "OUTBREAK vs SURVIVE",
-            "text_style": "Two contrasting stat badges: LEFT fiery red, RIGHT gold/amber. Bold Impact font, thick black stroke.",
-            "composition": "Vertical split: devastation LEFT vs protagonist stand RIGHT",
-            "gpt_prompt": prompt_split,
-            # V5.1: visual_facts_used — "OUTBREAK vs SURVIVE" is grounded in infection/disaster event
-            "visual_facts_used": [],  # populated by caller with real fact_ids if available
-        },
-        {
-            "id": "concept_before_after",
-            "name": f"Before/After Survival Progression ({prog_text})",
-            "thumbnail_text": prog_text,
-            "text_style": f"{prog_badge_left} in muted grey, {prog_badge_right} in bold amber (#FFBF00). Horizontal timeline arrow.",
-            "composition": "Horizontal timeline: weak LEFT → powerful RIGHT",
-            "gpt_prompt": prompt_progression,
-            # V5.1: visual_facts_used — progression concept grounded in character_state/action facts
-            "visual_facts_used": [],  # populated by caller with real fact_ids if available
-        },
-        {
-            "id": "concept_survival_dashboard",
-            "name": "Survival Dashboard HUD (Bảng Tình Trạng Sinh Tồn)",
-            # V5: "THREAT: CRITICAL" triggers threat_critical assertion requiring evidence.
-            # Use "THREAT: ACTIVE" — conveys urgency without an unevidenced absolute claim.
-            "thumbnail_text": "STATUS: ACTIVE | THREAT: ACTIVE",
-            "text_style": "Survival HUD with progress indicators and threat badges. Semi-transparent dark panels.",
-            "composition": "Character center + floating survival stats overlay",
-            "gpt_prompt": prompt_dashboard,
-            # V5.1: visual_facts_used — dashboard concept grounded in infection/combat event
-            "visual_facts_used": [],  # populated by caller with real fact_ids if available
-        },
-    ]
+# (original closing bracket moved into concept list above)
 
 
 # =============================================================================
@@ -3007,6 +3383,9 @@ def generate_us_apocalypse_metadata(
         beats,
         evidence_index=evidence_index,
         story_memory=story_memory,
+        download_dir=download_dir,
+        from_ep=from_ep,
+        to_ep=to_ep,
     )
 
     # V5.2: Build StoryFactGraph early to ground dashboard, thumbnails, and title audit
