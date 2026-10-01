@@ -100,3 +100,15 @@ DEFAULT_KR_VOICE_PITCH = os.getenv("DEFAULT_KR_VOICE_PITCH", "+0Hz")
 DEFAULT_JA_VOICE_ID    = os.getenv("DEFAULT_JA_VOICE_ID",    "ja-JP-KeitaNeural")
 DEFAULT_JA_VOICE_RATE  = os.getenv("DEFAULT_JA_VOICE_RATE",  "+0%")
 DEFAULT_JA_VOICE_PITCH = os.getenv("DEFAULT_JA_VOICE_PITCH", "+0Hz")
+
+# ─── Speech Bubble Overflow Crop (Stage 2b) ─────────────────────────────────
+# Detect & crop speech bubbles that bleed past the panel edge.
+# All values can be overridden per-run via task.payload with the same key names.
+BUBBLE_OVERFLOW_CROP_ENABLED = os.getenv("BUBBLE_OVERFLOW_CROP", "true").lower() in ("true", "1", "yes")
+BOC_MARGIN_PX         = int(os.getenv("BOC_MARGIN_PX",        "20"))   # px strip to scan near each edge
+BOC_WHITE_THRESH      = int(os.getenv("BOC_WHITE_THRESH",     "230"))  # brightness >= this => white (bubble bg)
+BOC_DARK_THRESH       = int(os.getenv("BOC_DARK_THRESH",      "30"))   # brightness <= this => dark bubble bg
+BOC_DENSITY_THRESH    = float(os.getenv("BOC_DENSITY_THRESH", "0.40")) # fraction of white/dark to trigger overflow
+BOC_CONTENT_THRESH    = float(os.getenv("BOC_CONTENT_THRESH", "0.15")) # fraction of mid-gray to mark as content
+BOC_MIN_REMAIN_RATIO  = float(os.getenv("BOC_MIN_REMAIN_RATIO","0.20"))# min fraction of original dim to keep
+BOC_MIN_REMAIN_PX     = int(os.getenv("BOC_MIN_REMAIN_PX",    "150"))  # absolute minimum px after crop

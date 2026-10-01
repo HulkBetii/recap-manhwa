@@ -3357,6 +3357,102 @@ class Stage2b_IntelligentRepagination(BaseStage):
                         
                     return y_top, y_bottom, x_left, x_right
 
+                def detect_bubble_overflow(slice_bgr, margin_px=20, white_thresh=230,
+                                           dark_thresh=30, density_thresh=0.40):
+                    """
+                    Detect speech bubble tran ra ngoai vien anh.
+                    Scan dai margin_px sat moi canh. Neu > density_thresh pixel la
+                    trang (>white_thresh) hoac den tuyet doi (<dark_thresh) -> bubble tran.
+                    SFX text (do/vang tren artwork) khong bi nham vi density thap.
+                    Returns: {'top': bool, 'bottom': bool, 'left': bool, 'right': bool}
+                    """
+                    h, w = slice_bgr.shape[:2]
+                    if h < 40 or w < 40:
+                        return {'top': False, 'bottom': False, 'left': False, 'right': False}
+                    gray = cv2.cvtColor(slice_bgr, cv2.COLOR_BGR2GRAY)
+                    m = max(5, min(margin_px, h // 6, w // 6))
+
+                    def _is_overflow(strip):
+                        white = float(np.mean(strip > white_thresh))
+                        dark  = float(np.mean(strip < dark_thresh))
+                        return (white > density_thresh) or (dark > density_thresh)
+
+                    return {
+                        'top':    _is_overflow(gray[:m, :]),
+                        'bottom': _is_overflow(gray[-m:, :]),
+                        'left':   _is_overflow(gray[:, :m]),
+                        'right':  _is_overflow(gray[:, -m:]),
+                    }
+
+                def smart_crop_bubble_overflow(slice_bgr, overflow,
+                                               scan_step=5, content_thresh=0.15,
+                                               min_remain_ratio=0.20, min_remain_px=150,
+                                               white_thresh=230, dark_thresh=30):
+                    """
+                    Crop bo phan bubble tran vien, giu content chinh.
+                    Scan tung scan_step px vao trong den khi gap content that
+                    (30 < brightness < 220). Guard: phan con lai < 20% -> giu nguyen.
+                    """
+                    h, w = slice_bgr.shape[:2]
+                    gray = cv2.cvtColor(slice_bgr, cv2.COLOR_BGR2GRAY)
+
+                    def _has_content_row(strip):
+                        mid = (strip > dark_thresh) & (strip < white_thresh)
+                        return float(np.mean(mid)) > content_thresh
+
+                    def _has_content_col(strip):
+                        mid = (strip > dark_thresh) & (strip < white_thresh)
+                        return float(np.mean(mid)) > content_thresh
+
+                    top_crop = 0
+                    if overflow.get('top'):
+                        max_scan = h // 3
+                        for y in range(0, max_scan, scan_step):
+                            strip = gray[y:y + scan_step, :]
+                            if strip.shape[0] > 0 and _has_content_row(strip):
+                                top_crop = max(0, y - scan_step)
+                                break
+
+                    bottom_crop = 0
+                    if overflow.get('bottom'):
+                        max_scan = h // 3
+                        for y in range(h, h - max_scan, -scan_step):
+                            strip = gray[max(0, y - scan_step):y, :]
+                            if strip.shape[0] > 0 and _has_content_row(strip):
+                                bottom_crop = max(0, h - y - scan_step)
+                                break
+
+                    left_crop = 0
+                    if overflow.get('left'):
+                        max_scan = w // 3
+                        for x in range(0, max_scan, scan_step):
+                            strip = gray[:, x:x + scan_step]
+                            if strip.shape[1] > 0 and _has_content_col(strip):
+                                left_crop = max(0, x - scan_step)
+                                break
+
+                    right_crop = 0
+                    if overflow.get('right'):
+                        max_scan = w // 3
+                        for x in range(w, w - max_scan, -scan_step):
+                            strip = gray[:, max(0, x - scan_step):x]
+                            if strip.shape[1] > 0 and _has_content_col(strip):
+                                right_crop = max(0, w - x - scan_step)
+                                break
+
+                    new_h = h - top_crop - bottom_crop
+                    new_w = w - left_crop - right_crop
+
+                    # Guard: phan con lai qua nho -> khong crop, giu nguyen
+                    if new_h < max(min_remain_px, int(h * min_remain_ratio)):
+                        return slice_bgr
+                    if new_w < max(min_remain_px, int(w * min_remain_ratio)):
+                        return slice_bgr
+
+                    b_end = h - bottom_crop if bottom_crop > 0 else h
+                    r_end = w - right_crop if right_crop > 0 else w
+                    return slice_bgr[top_crop:b_end, left_crop:r_end]
+
                 # Export new pages (Clear old files in directory first)
                 if os.path.exists(images_pdf_dir):
                     for old_f in os.listdir(images_pdf_dir):
@@ -3393,7 +3489,20 @@ class Stage2b_IntelligentRepagination(BaseStage):
                     
                     # Apply crop to image slice
                     cropped_slice = slice_img[y_top:y_bottom, x_left:x_right]
-                    
+
+                    # [BUBBLE OVERFLOW CROP] Detect & crop speech bubble tran vien
+                    if task.payload.get("bubble_overflow_crop", True):
+                        _boc_margin  = task.payload.get("boc_margin_px", 20)
+                        _boc_min_rem = task.payload.get("boc_min_remain_ratio", 0.20)
+                        _boc_min_px  = task.payload.get("boc_min_remain_px", 150)
+                        _overflow = detect_bubble_overflow(cropped_slice, margin_px=_boc_margin)
+                        if any(_overflow.values()):
+                            cropped_slice = smart_crop_bubble_overflow(
+                                cropped_slice, _overflow,
+                                min_remain_ratio=_boc_min_rem,
+                                min_remain_px=_boc_min_px,
+                            )
+
                     # Reject empty or minuscule slices after cropping
                     if cropped_slice is None or cropped_slice.shape[0] < 80 or cropped_slice.shape[1] < 80:
                         skipped_count += 1
