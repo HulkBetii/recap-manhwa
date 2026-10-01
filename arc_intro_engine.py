@@ -482,7 +482,9 @@ class DynamicHookDirector:
         origin_text: str = "",
         language: str = "en",
         custom_hook: Optional[str] = None,
-        archetype: Optional[HookArchetype] = None
+        archetype: Optional[HookArchetype] = None,
+        story_summary: str = "",
+        **kwargs
     ) -> Dict[str, Any]:
         """
         Master method to generate a retention hook:
@@ -600,7 +602,7 @@ class MicroIntroRenderer:
         language: str = "en",
         voice_id: str = "clone_andrew",
         ref_audio_path: Optional[str] = None,
-        enable_sfx: bool = True,
+        enable_sfx: bool = False,
         target_resolution: Tuple[int, int] = (1920, 1080),
         fps: int = 30
     ) -> Dict[str, Any]:
@@ -711,7 +713,8 @@ class MicroIntroRenderer:
                 loaded_pil[p] = im
 
                 # Smart panel isolation (cuts off speech bubbles & solid gutters)
-                bounds, focal, skin_ratio, _ = detect_clean_panel_and_focal_point(im)
+                _res = detect_clean_panel_and_focal_point(im)
+                bounds, focal, skin_ratio = _res[0], _res[1], _res[2]
                 image_meta[p] = (bounds, focal, skin_ratio)
 
                 # Precompute blurred ambient background from CLEAN panel only

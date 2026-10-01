@@ -2612,7 +2612,7 @@ class Stage11_FinalVideoAssembly(BaseStage):
                     language=language,
                     voice_id=voice_id,
                     ref_audio_path=ref_audio,
-                    enable_sfx=True
+                    enable_sfx=task.payload.get("enable_sfx", False)
                 )
 
                 intro_vid = intro_artifacts["video_path"]
