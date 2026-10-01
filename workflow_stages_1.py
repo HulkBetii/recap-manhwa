@@ -3366,22 +3366,26 @@ class Stage2b_IntelligentRepagination(BaseStage):
                     SFX text (do/vang tren artwork) khong bi nham vi density thap.
                     Returns: {'top': bool, 'bottom': bool, 'left': bool, 'right': bool}
                     """
+                def detect_bubble_overflow(slice_bgr, margin_px=20, white_thresh=230, dark_thresh=30, density_thresh=0.35):
+                    """
+                    Detect bubble overflow at 4 edges, returning (is_white, is_dark) for each edge.
+                    """
                     h, w = slice_bgr.shape[:2]
                     if h < 40 or w < 40:
-                        return {'top': False, 'bottom': False, 'left': False, 'right': False}
+                        return {'top': (False, False), 'bottom': (False, False), 'left': (False, False), 'right': (False, False)}
                     gray = cv2.cvtColor(slice_bgr, cv2.COLOR_BGR2GRAY)
                     m = max(5, min(margin_px, h // 6, w // 6))
 
-                    def _is_overflow(strip):
+                    def _edge_check(strip):
                         white = float(np.mean(strip > white_thresh))
                         dark  = float(np.mean(strip < dark_thresh))
-                        return (white > density_thresh) or (dark > density_thresh)
+                        return (white > density_thresh, dark > density_thresh)
 
                     return {
-                        'top':    _is_overflow(gray[:m, :]),
-                        'bottom': _is_overflow(gray[-m:, :]),
-                        'left':   _is_overflow(gray[:, :m]),
-                        'right':  _is_overflow(gray[:, -m:]),
+                        'top':    _edge_check(gray[:m, :]),
+                        'bottom': _edge_check(gray[-m:, :]),
+                        'left':   _edge_check(gray[:, :m]),
+                        'right':  _edge_check(gray[:, -m:]),
                     }
 
                 def smart_crop_bubble_overflow(slice_bgr, overflow,
@@ -3389,67 +3393,79 @@ class Stage2b_IntelligentRepagination(BaseStage):
                                                min_remain_ratio=0.20, min_remain_px=150,
                                                white_thresh=230, dark_thresh=30):
                     """
-                    Crop bo phan bubble tran vien, giu content chinh.
-                    Scan tung scan_step px vao trong den khi gap content that
-                    (30 < brightness < 220). Guard: phan con lai < 20% -> giu nguyen.
+                    BOC 2.0: Quét đơn hướng theo loại bóng thoại (trắng hoặc đen) để cắt sạch bóng thoại tràn viền.
+                    - Bóng thoại trắng: Quét vào trong cho tới khi dải pixel ra khỏi màu trắng (white_ratio < 0.30).
+                    - Bóng thoại đen: Quét vào trong cho tới khi dải pixel ra khỏi màu đen (dark_ratio < 0.30).
+                    - max_scan: Quét tối đa 55% chiều cao/rộng của panel để loại bỏ triệt để bóng thoại lớn.
                     """
                     h, w = slice_bgr.shape[:2]
                     gray = cv2.cvtColor(slice_bgr, cv2.COLOR_BGR2GRAY)
 
-                    def _has_content_row(strip):
-                        white_r = float(np.mean(strip > white_thresh))
-                        dark_r  = float(np.mean(strip < dark_thresh))
-                        mid_r   = float(np.mean((strip >= dark_thresh) & (strip <= white_thresh)))
-                        # Real artwork has low bubble-void background (< 40% white and < 40% solid black)
-                        # or high mid-tone/color complexity (>= 50%)
-                        return (white_r < 0.40 and dark_r < 0.40 and mid_r > 0.35) or (mid_r >= 0.50)
-
-                    def _has_content_col(strip):
-                        white_r = float(np.mean(strip > white_thresh))
-                        dark_r  = float(np.mean(strip < dark_thresh))
-                        mid_r   = float(np.mean((strip >= dark_thresh) & (strip <= white_thresh)))
-                        return (white_r < 0.40 and dark_r < 0.40 and mid_r > 0.35) or (mid_r >= 0.50)
+                    top_w, top_d = overflow.get('top', (False, False)) if isinstance(overflow.get('top'), (tuple, list)) else (overflow.get('top', False), False)
+                    bot_w, bot_d = overflow.get('bottom', (False, False)) if isinstance(overflow.get('bottom'), (tuple, list)) else (overflow.get('bottom', False), False)
+                    left_w, left_d = overflow.get('left', (False, False)) if isinstance(overflow.get('left'), (tuple, list)) else (overflow.get('left', False), False)
+                    right_w, right_d = overflow.get('right', (False, False)) if isinstance(overflow.get('right'), (tuple, list)) else (overflow.get('right', False), False)
 
                     top_crop = 0
-                    if overflow.get('top'):
-                        max_scan = h // 3
+                    if top_w or top_d:
+                        max_scan = int(h * 0.55)
                         for y in range(0, max_scan, scan_step):
                             strip = gray[y:y + scan_step, :]
-                            if strip.shape[0] > 0 and _has_content_row(strip):
-                                top_crop = max(0, y - scan_step)
+                            if strip.shape[0] == 0:
+                                break
+                            if top_w and float(np.mean(strip > white_thresh)) < 0.30:
+                                top_crop = max(0, y)
+                                break
+                            elif top_d and float(np.mean(strip < dark_thresh)) < 0.30:
+                                top_crop = max(0, y)
                                 break
 
                     bottom_crop = 0
-                    if overflow.get('bottom'):
-                        max_scan = h // 3
+                    if bot_w or bot_d:
+                        max_scan = int(h * 0.55)
                         for y in range(h, h - max_scan, -scan_step):
                             strip = gray[max(0, y - scan_step):y, :]
-                            if strip.shape[0] > 0 and _has_content_row(strip):
-                                bottom_crop = max(0, h - y - scan_step)
+                            if strip.shape[0] == 0:
+                                break
+                            if bot_w and float(np.mean(strip > white_thresh)) < 0.30:
+                                bottom_crop = max(0, h - y)
+                                break
+                            elif bot_d and float(np.mean(strip < dark_thresh)) < 0.30:
+                                bottom_crop = max(0, h - y)
                                 break
 
                     left_crop = 0
-                    if overflow.get('left'):
-                        max_scan = w // 3
+                    if left_w or left_d:
+                        max_scan = int(w * 0.55)
                         for x in range(0, max_scan, scan_step):
                             strip = gray[:, x:x + scan_step]
-                            if strip.shape[1] > 0 and _has_content_col(strip):
-                                left_crop = max(0, x - scan_step)
+                            if strip.shape[1] == 0:
+                                break
+                            if left_w and float(np.mean(strip > white_thresh)) < 0.30:
+                                left_crop = max(0, x)
+                                break
+                            elif left_d and float(np.mean(strip < dark_thresh)) < 0.30:
+                                left_crop = max(0, x)
                                 break
 
                     right_crop = 0
-                    if overflow.get('right'):
-                        max_scan = w // 3
+                    if right_w or right_d:
+                        max_scan = int(w * 0.55)
                         for x in range(w, w - max_scan, -scan_step):
                             strip = gray[:, max(0, x - scan_step):x]
-                            if strip.shape[1] > 0 and _has_content_col(strip):
-                                right_crop = max(0, w - x - scan_step)
+                            if strip.shape[1] == 0:
+                                break
+                            if right_w and float(np.mean(strip > white_thresh)) < 0.30:
+                                right_crop = max(0, w - x)
+                                break
+                            elif right_d and float(np.mean(strip < dark_thresh)) < 0.30:
+                                right_crop = max(0, w - x)
                                 break
 
                     new_h = h - top_crop - bottom_crop
                     new_w = w - left_crop - right_crop
 
-                    # Guard: phan con lai qua nho -> khong crop, giu nguyen
+                    # Guard: phần còn lại quá nhỏ -> không crop, giữ nguyên
                     if new_h < max(min_remain_px, int(h * min_remain_ratio)):
                         return slice_bgr
                     if new_w < max(min_remain_px, int(w * min_remain_ratio)):
