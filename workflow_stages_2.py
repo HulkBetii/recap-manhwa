@@ -34,7 +34,7 @@ from moderation_utils import (
 
 logger = logging.getLogger(__name__)
 
-BOUNDS_CACHE_VERSION = "v3"
+BOUNDS_CACHE_VERSION = "v4"
 
 
 def safe_cv2_imread(file_path: str, flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
@@ -894,6 +894,46 @@ def detect_focal_point(img_pil, bounds: tuple = None) -> tuple[float, float]:
     return focal_x, focal_y
 
 
+def detect_vertical_bubble_edges(img_rgb: np.ndarray, white_thresh: int = 215, min_width_coverage: float = 0.18) -> tuple[Optional[float], Optional[float]]:
+    """
+    Xác định ranh giới Y của bóng thoại nằm ở vùng đỉnh hoặc vùng đáy của khung tranh.
+    - top_bubble_bottom_y: Y mép dưới của bóng thoại ở đỉnh (camera trượt cần bắt đầu DƯỚI điểm này).
+    - bottom_bubble_top_y: Y mép trên của bóng thoại ở đáy (camera trượt cần DỪNG LẠI TRƯỚC điểm này).
+    """
+    H, W = img_rgb.shape[:2]
+    if H < 50 or W < 50:
+        return None, None
+
+    hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
+    v_chan = hsv[:, :, 2]
+    s_chan = hsv[:, :, 1]
+
+    bubble_pix = (v_chan > white_thresh) & (s_chan < 55)
+    row_bubble_ratio = np.mean(bubble_pix, axis=1)
+
+    bottom_bubble_top_y = None
+    if np.mean(row_bubble_ratio[int(0.82 * H):]) > 0.12:
+        y_scan = H - 1
+        while y_scan >= int(0.35 * H):
+            if row_bubble_ratio[y_scan] >= min_width_coverage:
+                bottom_bubble_top_y = float(y_scan)
+            elif bottom_bubble_top_y is not None and row_bubble_ratio[y_scan] < 0.05:
+                break
+            y_scan -= 1
+
+    top_bubble_bottom_y = None
+    if np.mean(row_bubble_ratio[:int(0.18 * H)]) > 0.12:
+        y_scan = 0
+        while y_scan <= int(0.65 * H):
+            if row_bubble_ratio[y_scan] >= min_width_coverage:
+                top_bubble_bottom_y = float(y_scan)
+            elif top_bubble_bottom_y is not None and row_bubble_ratio[y_scan] < 0.05:
+                break
+            y_scan += 1
+
+    return top_bubble_bottom_y, bottom_bubble_top_y
+
+
 import math
 
 def ease_in_out_sine(t: float) -> float:
@@ -984,6 +1024,8 @@ class CameraPlanner:
         speech_text: str = "",
         is_establishing_shot: bool = False,
         character_presence: float = 0.0,
+        bottom_bubble_top_y: Optional[float] = None,
+        top_bubble_bottom_y: Optional[float] = None,
     ) -> dict:
         """
         Generates a continuous, smooth cinematic camera plan for webtoon storytelling.
@@ -991,6 +1033,7 @@ class CameraPlanner:
           for all portrait and tall panels (aspect_ratio < 1.15).
         - Wide panels (aspect_ratio >= 1.15): Smooth continuous Horizontal Pan.
         - 2D Bubble Repulsion: Repels camera focal point away from speech bubble regions in both X and Y.
+        - Strict Bubble Viewport Clamping: Stops vertical glide right before revealing any speech bubbles.
         - Visual Impact Shake: Optical damped harmonic oscillation on frames with action verbs.
         - Zero-Clamping Freeze: Interpolation glides continuously across the full shot duration without stopping.
         """
@@ -1047,7 +1090,6 @@ class CameraPlanner:
         easing = "easeInOutCubic"
 
         # Mode A: Landscape / Wide Panels (aspect_ratio >= 1.70) -> Smooth Cinematic Horizontal Pan
-        # (Allows natural scanning across wide manga spreads, landscape battle scenes, and wide room shots)
         if aspect_ratio >= 1.70:
             animation_type = "cinematic_pan_horizontal"
             dir_x = 1.0 if (shot_index % 2 == 0) else -1.0
@@ -1096,6 +1138,24 @@ class CameraPlanner:
         # Exact safe viewport center Y boundaries (strictly synchronous with render_page_frame cy_min / cy_max)
         y_min_valid = float(h_cam_ref * 0.5)
         y_max_valid = float(max(y_min_valid, H_c - h_cam_ref * 0.5))
+
+        # Strict Bubble-Edge Clamping: Viewport bottom on panel is (cy + h_cam_ref * 0.5).
+        # Stop sliding BEFORE revealing speech bubbles at the bottom!
+        if bottom_bubble_top_y is not None:
+            max_allowed_cy = float(bottom_bubble_top_y - (h_cam_ref * 0.5) - 10.0)
+            if max_allowed_cy >= y_min_valid:
+                y_max_valid = min(y_max_valid, max_allowed_cy)
+            else:
+                y_max_valid = max(y_min_valid, max_allowed_cy)
+
+        # Stop sliding BEFORE revealing speech bubbles at the top!
+        if top_bubble_bottom_y is not None and not is_face_near_top:
+            min_allowed_cy = float(top_bubble_bottom_y + (h_cam_ref * 0.5) + 10.0)
+            if min_allowed_cy <= y_max_valid:
+                y_min_valid = max(y_min_valid, min_allowed_cy)
+            else:
+                y_min_valid = min(y_max_valid, min_allowed_cy)
+
         total_valid_span = max(0.0, y_max_valid - y_min_valid)
 
         # Mode B: Vertical Pan Glide for Vertical Panels (usable_v_travel >= 80px and total_valid_span >= 25px)
@@ -1110,12 +1170,11 @@ class CameraPlanner:
             
             # Smart Direction Selection:
             # 1. Bubble position guidance (avoid starting right on top of text)
-            if bubble_centroid and bubble_coverage_ratio > 0.18 and bubble_centroid[1] < 0.38 * H_c:
+            if (bubble_centroid and bubble_coverage_ratio > 0.18 and bubble_centroid[1] < 0.38 * H_c) or (top_bubble_bottom_y is not None):
                 direction = "bottom_to_top"
-            elif bubble_centroid and bubble_coverage_ratio > 0.18 and bubble_centroid[1] > 0.62 * H_c:
+            elif (bubble_centroid and bubble_coverage_ratio > 0.18 and bubble_centroid[1] > 0.62 * H_c) or (bottom_bubble_top_y is not None):
                 direction = "top_to_bottom"
             # 2. Composite Action / Subject Asymmetry:
-            # If focal point is detected in lower half (e.g. character reacting below), start from top (threat/monster) and glide down
             elif focal_point is not None and focal_point[1] > 0.55 * H_c:
                 direction = "top_to_bottom"
             elif focal_point is not None and focal_point[1] < 0.40 * H_c:
@@ -1132,20 +1191,6 @@ class CameraPlanner:
             else:
                 y_top = float(np.clip(y_anchor - actual_span * 0.5, y_min_valid, y_max_valid))
                 y_bot = float(np.clip(y_anchor + actual_span * 0.5, y_min_valid, y_max_valid))
-
-            # Bubble-Exclusion Clamping: Prevent camera from panning over speech bubbles at top/bottom
-            if bubble_centroid and bubble_coverage_ratio >= 0.15:
-                bubble_cx, bubble_cy = bubble_centroid
-                if bubble_cy < 0.35 * H_c and not is_face_near_top:
-                    bubble_bottom_edge = float(bubble_cy + H_c * 0.14)
-                    y_top = max(y_top, min(bubble_bottom_edge, y_anchor))
-                    y_top = min(y_top, y_bot - 20.0)
-                    y_top = float(np.clip(y_top, y_min_valid, y_max_valid))
-                elif bubble_cy > 0.65 * H_c:
-                    bubble_top_edge = float(bubble_cy - H_c * 0.14)
-                    y_bot = min(y_bot, max(bubble_top_edge, y_anchor))
-                    y_bot = max(y_bot, y_top + 20.0)
-                    y_bot = float(np.clip(y_bot, y_min_valid, y_max_valid))
 
             if y_top >= y_bot:
                 y_top = y_min_valid
@@ -1797,58 +1842,27 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 img_path = os.path.join(images_blur_dir, img_file)
                 
                 cached_data = bounds_cache.get(img_file)
-                if isinstance(cached_data, dict) and "bounds" in cached_data and "focal_point" in cached_data and "skin_ratio" in cached_data:
+                if isinstance(cached_data, dict) and "bounds" in cached_data and "focal_point" in cached_data and "skin_ratio" in cached_data and "bottom_bubble_top_y" in cached_data:
                     bounds = tuple(cached_data["bounds"])
                     focal_point = tuple(cached_data["focal_point"])
                     skin_ratio = float(cached_data["skin_ratio"])
-                    bubble_centroid = tuple(cached_data["bubble_centroid"]) if "bubble_centroid" in cached_data else None
+                    bubble_centroid = tuple(cached_data["bubble_centroid"]) if "bubble_centroid" in cached_data and cached_data["bubble_centroid"] else None
                     bubble_coverage_ratio = float(cached_data.get("bubble_coverage_ratio", 0.0))
-                elif isinstance(cached_data, dict) and "bounds" in cached_data and "focal_point" in cached_data:
-                    # Legacy cache entry without skin_ratio — recompute
-                    try:
-                        with Image.open(img_path) as img:
-                            bounds, focal_point, skin_ratio, bubble_centroid, bubble_coverage_ratio = detect_clean_panel_and_focal_point(img)
-                            bounds_cache[img_file] = {
-                                "bounds": list(bounds), "focal_point": list(focal_point),
-                                "skin_ratio": skin_ratio, "bubble_centroid": list(bubble_centroid) if bubble_centroid else [bounds[2] / 2.0, bounds[3] / 2.0],
-                                "bubble_coverage_ratio": bubble_coverage_ratio,
-                                "is_establishing_shot": bool(skin_ratio < 0.04 and bubble_coverage_ratio < 0.35),
-                            }
-                            dirty_cache = True
-                    except Exception:
-                        bounds = tuple(cached_data["bounds"])
-                        focal_point = tuple(cached_data["focal_point"])
-                        skin_ratio = 0.0
-                        bubble_centroid = None
-                        bubble_coverage_ratio = 0.0
-                elif isinstance(cached_data, list) and len(cached_data) == 4:
-                    bounds = tuple(cached_data)
-                    try:
-                        with Image.open(img_path) as img:
-                            _, focal_point_new, skin_ratio, bubble_centroid, bubble_coverage_ratio = detect_clean_panel_and_focal_point(img)
-                            focal_point = focal_point_new
-                    except Exception:
-                        focal_point = (bounds[2] / 2.0, bounds[3] / 2.0)
-                        skin_ratio = 0.0
-                        bubble_centroid = None
-                        bubble_coverage_ratio = 0.0
-                    bounds_cache[img_file] = {
-                        "bounds": list(bounds), "focal_point": list(focal_point),
-                        "skin_ratio": skin_ratio,
-                        "bubble_centroid": list(bubble_centroid) if bubble_centroid else [bounds[2] / 2.0, bounds[3] / 2.0],
-                        "bubble_coverage_ratio": bubble_coverage_ratio,
-                        "is_establishing_shot": bool(skin_ratio < 0.04 and bubble_coverage_ratio < 0.35),
-                    }
-                    dirty_cache = True
+                    bottom_bubble_top_y = cached_data.get("bottom_bubble_top_y")
+                    top_bubble_bottom_y = cached_data.get("top_bubble_bottom_y")
                 else:
                     try:
                         with Image.open(img_path) as img:
                             bounds, focal_point, skin_ratio, bubble_centroid, bubble_coverage_ratio = detect_clean_panel_and_focal_point(img)
+                            img_np = np.array(img.convert("RGB"))
+                            top_bubble_bottom_y, bottom_bubble_top_y = detect_vertical_bubble_edges(img_np)
                             bounds_cache[img_file] = {
                                 "bounds": list(bounds), "focal_point": list(focal_point),
                                 "skin_ratio": skin_ratio, "bubble_centroid": list(bubble_centroid) if bubble_centroid else [bounds[2] / 2.0, bounds[3] / 2.0],
                                 "bubble_coverage_ratio": bubble_coverage_ratio,
                                 "is_establishing_shot": bool(skin_ratio < 0.04 and bubble_coverage_ratio < 0.35),
+                                "bottom_bubble_top_y": bottom_bubble_top_y,
+                                "top_bubble_bottom_y": top_bubble_bottom_y,
                             }
                             dirty_cache = True
                     except Exception:
@@ -1857,6 +1871,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         skin_ratio = 0.0
                         bubble_centroid = None
                         bubble_coverage_ratio = 0.0
+                        bottom_bubble_top_y = None
+                        top_bubble_bottom_y = None
                 
                 is_last_page = (idx == len(page_displays) - 1)
                 trans = "dip_to_black" if is_last_page else "cross_fade"
@@ -1879,6 +1895,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     speech_text=pd.get("speech", ""),
                     is_establishing_shot=is_establishing_shot,
                     character_presence=char_p_cached,
+                    bottom_bubble_top_y=bottom_bubble_top_y,
+                    top_bubble_bottom_y=top_bubble_bottom_y,
                 )
                 plans.append(plan)
                 

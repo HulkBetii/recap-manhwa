@@ -3397,12 +3397,18 @@ class Stage2b_IntelligentRepagination(BaseStage):
                     gray = cv2.cvtColor(slice_bgr, cv2.COLOR_BGR2GRAY)
 
                     def _has_content_row(strip):
-                        mid = (strip > dark_thresh) & (strip < white_thresh)
-                        return float(np.mean(mid)) > content_thresh
+                        white_r = float(np.mean(strip > white_thresh))
+                        dark_r  = float(np.mean(strip < dark_thresh))
+                        mid_r   = float(np.mean((strip >= dark_thresh) & (strip <= white_thresh)))
+                        # Real artwork has low bubble-void background (< 40% white and < 40% solid black)
+                        # or high mid-tone/color complexity (>= 50%)
+                        return (white_r < 0.40 and dark_r < 0.40 and mid_r > 0.35) or (mid_r >= 0.50)
 
                     def _has_content_col(strip):
-                        mid = (strip > dark_thresh) & (strip < white_thresh)
-                        return float(np.mean(mid)) > content_thresh
+                        white_r = float(np.mean(strip > white_thresh))
+                        dark_r  = float(np.mean(strip < dark_thresh))
+                        mid_r   = float(np.mean((strip >= dark_thresh) & (strip <= white_thresh)))
+                        return (white_r < 0.40 and dark_r < 0.40 and mid_r > 0.35) or (mid_r >= 0.50)
 
                     top_crop = 0
                     if overflow.get('top'):
