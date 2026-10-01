@@ -36,6 +36,16 @@ from tts_settings import get_ai33pro_voice_id, uses_ai33pro, is_voicevox, parse_
 import config
 from app import find_ffmpeg
 
+# Ensure FFmpeg directory is always on PATH so external libraries like Whisper find it
+_ffmpeg_exe = find_ffmpeg()
+if _ffmpeg_exe:
+    _ffmpeg_dir = os.path.dirname(_ffmpeg_exe)
+    if _ffmpeg_dir and _ffmpeg_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = _ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+_venv_scripts = os.path.abspath(os.path.join(os.path.dirname(__file__), ".venv", "Scripts"))
+if os.path.exists(_venv_scripts) and _venv_scripts not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _venv_scripts + os.pathsep + os.environ.get("PATH", "")
+
 logger = logging.getLogger("TTSProvider")
 
 

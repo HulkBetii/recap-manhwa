@@ -3753,59 +3753,37 @@ def generate_gemini_prompt(
             p_name = str(previous_context.get("protagonist_name", "")).strip()
             p_gender = previous_context.get("protagonist_gender", "auto")
             if p_name and len(p_name) > 2 and p_name.upper() not in ["MC", "HERO", "GUY", "BOY", "GIRL"]:
-                ip_guidance.append(f'- CONFIRMED PROTAGONIST NAME: "{p_name}" (You MUST explicitly introduce "{p_name}" in Segment 1 or 2!).')
+                ip_guidance.append(f'- CONFIRMED PROTAGONIST NAME: "{p_name}".')
                 gender_str = {"male": "Male", "female": "Female"}.get(str(p_gender).lower(), "Unknown")
                 identity_box = (
                     f"\n\nCONFIRMED PROTAGONIST IDENTITY:"
                     f"\n- Name: {p_name}"
                     f"\n- Gender: {gender_str}"
-                    f'\n- You MUST explicitly introduce "{p_name}" in Segment 1 or 2!'
                     f"\n- This identity is authoritative. Use it consistently throughout the script."
                 )
             u_hook = previous_context.get("unique_hook") or previous_context.get("setting")
             if u_hook:
-                ip_guidance.append(f'- IP CONTEXT & HOOK ELEMENT: "{u_hook}" (Weave this specific crisis/hook into the opening!).')
-                identity_box += f'\n- IP CONTEXT & HOOK ELEMENT: "{u_hook}"'
+                ip_guidance.append(f'- IP CONTEXT: "{u_hook}"')
+                identity_box += f'\n- IP CONTEXT: "{u_hook}"'
 
         ip_guidance_text = (("\n" + "\n".join(ip_guidance) + identity_box) if (ip_guidance or identity_box) else "")
 
         intro_rule = f"""
-EPISODE 1 HIGH-RETENTION HOOK (0–5s GOLDEN RULE & 0-15s GOLDEN HOOK RULE):
+EPISODE 1 OPENING DIRECTIVE (DIRECT IN MEDIA RES - ZERO SYNTHETIC INTRO):
 
-The very first output line MUST be an explosive, high-retention opening hook that instantly grips the viewer's curiosity and prevents drop-off in the first 5-15 seconds.
+- Jump DIRECTLY into the story from Page 1 with NO artificial intro, NO premise recap, and NO synthetic trailer hook.
+- Do NOT fabricate an opening summary sentence describing the overall premise or future setup of the story.
+- Narrate the exact action/scene depicted on the first page immediately and naturally.{ip_guidance_text}
+- Zero throat-clearing: NEVER start with greetings ('Welcome', 'Today we are watching', 'Let\\'s dive in', 'Chào mừng các bạn', 'Cùng theo dõi').
 
-- PROTAGONIST NAME IDENTIFICATION & ANCHORING (CRITICAL):
-  * Identify the protagonist's actual name from the comic pages (e.g. dialogue, character status window, subtitles, or title, such as 'Paran', 'Jinwoo', etc.).
-  * The opening hook (Segment 1 or 2, 0-15s) MUST explicitly introduce the protagonist by their actual name so the audience immediately knows who the central character is.
-  * NEVER leave the audience guessing who the protagonist is.{ip_guidance_text}
-
-- Hook Formula:
-  [Shocking Paradox / Dire Crisis / Insane Disparity] + [Protagonist Name] + [Hidden Power / Ruthless Retaliation / Secret Advantage Teaser]
-
-- Examples of Top US & Global Manhwa Hooks:
-  * "Everyone called Paran a lunatic for spending billions hoarding 100,000 tons of food—until the global ice age hit and the world froze to minus one hundred degrees."
-  * "Branded the weakest hunter on Earth and left for dead in a double dungeon, Jinwoo is about to wake up with a power that defies the gods."
-  * "Betrayed and executed by his own guild in his past life, Arthur wakes up ten years in the past with an infinite spatial warehouse."
-
-- Requirements:
-  * Write in punchy, natural {lang_name} (< 18 words, 2.5s–4.0s spoken).
-  * Maximum curiosity gap: make it impossible for the viewer to click away.
-  * Zero throat-clearing: NEVER start with greetings ('Welcome', 'Today we are watching', 'Let\\'s dive in', 'Chào mừng các bạn').
-  * Assign this hook to the most visually striking opening page showing the protagonist or the inciting incident.
-  * No comedy or sarcasm in this opening line—keep it tense, cinematic, and high-stakes.
-
-CHARACTER-FIRST OPENING OVERRIDE (CRITICAL FOR RETENTION):
-Even if the opening comic pages (Pages 1-5) depict only:
-  - city destruction / smoke / rubble
-  - wide-angle disaster establishing shots
-  - crowds in panic without a clear protagonist
-You MUST narrate the event through the protagonist's survival lens from Line 1!
-
-Segment 1 or Segment 2 (0-15s) must communicate:
-  1. WHO the protagonist is (name + one defining trait)
-  2. WHERE they are when the crisis hits
-  3. ONE immediately-gripping edge they have (secret skill, prep item, hidden status)
-NEVER open with pure scenery or crowd narration alone. Anchor the protagonist immediately.
+PROTAGONIST EARLY LOCK (CRITICAL FOR RETENTION):
+The protagonist MUST appear by name or clear personal action within Segments 1–3.
+If Pages 1–5 depict only environment/disaster/crowds with no visible protagonist:
+- Cover the establishing context in 1 segment MAXIMUM.
+- Immediately anchor the protagonist in Segment 2 or 3.
+- VI example: "Trên mọi màn hình, bản tin thảm họa phát liên tục. Còn Seongho? Tắt TV. Anh đã biết trước từ lâu."
+- EN example: "Every screen showed the same disaster broadcast. Meanwhile, [MC name] had already switched it off — he'd known this was coming for months."
+NEVER spend more than 1 segment on pure environment/background before anchoring the protagonist.
 """
 
     elif previous_context:
@@ -3890,11 +3868,13 @@ LANGUAGE & VIETNAMESE CONVERSATIONAL STORYTELLING RULES:
    Thay bằng: mô tả CHI TIẾT CỤ THỂ (vết sẹo, ánh mắt, giọt mồ hôi, hành vi, vật thể) để khán giả TỰ CẢM NHẬN.
 
 5. GIỮ CHÂN KHÁN GIẢ (AUDIENCE PULSE CHECK — Phá Vỡ Bức Tường Thứ 4):
-   Cứ mỗi 4-6 segment, BẮT BUỘC chèn 1 trong các kỹ thuật:
+   Cứ mỗi 3 segment, BẮT BUỘC chèn 1 trong các kỹ thuật:
    (a) Câu hỏi tu từ: "Đoán xem?" / "Bạn nghĩ sao?" / "Có quá tay không? Có thể. Nhưng hiệu quả không? Tuyệt đối."
    (b) Xưng hô trực tiếp: "Và thay vì bỏ chạy, anh làm gì?" / "Đến nước này thì ai mà đỡ nổi?"
    (c) Hook dự báo: "Nhưng cái điên rồ nhất còn ở phía sau." / "Kịch hay giờ mới thực sự bắt đầu."
-   Tối thiểu 2 lần / tập, tối đa 1 lần / 45 giây.
+   (d) Câu phán quyết (Staccato Verdict): "Xong.", "Không có cửa.", "Chuẩn bài.", "Bài học đắt giá.", "Ai bảo không?"
+   (e) Đối lập tương phản: "Bên ngoài [khổ sở / hoảng loạn]. Bên trong? [ung dung / sẵn sàng áp đảo]."
+   Tối thiểu 1 lần / 3 segment (~25–33% tổng câu). Tối đa 1 lần / 20 giây — KHÔNG dồn cụm liên tiếp.
 
 PHONG CÁCH THAM CHIẾU — TRƯỚC VÀ SAU (STYLE REFERENCE: BEFORE vs AFTER):
 
@@ -3941,7 +3921,7 @@ PHONG CÁCH THAM CHIẾU — TRƯỚC VÀ SAU (STYLE REFERENCE: BEFORE vs AFTER)
 
 ĐỊNH DANH NHÂN VẬT CHÍNH (CONTEXTUAL PROTAGONIST ANCHORING):
 - CHỈ gọi tên riêng ở 4 vị trí then chốt:
-  1. Hook mở đầu (0-15s): Neo định danh nhân vật lập tức.
+  1. Phân cảnh mở đầu: Neo định danh khi nhân vật xuất hiện.
   2. Chuyển cảnh / bước nhảy thời gian: Nhắc lại khi chuyển bối cảnh hoặc dòng thời gian.
   3. Phân biệt đông người: Làm rõ ai là người ra đòn khi có nhiều nhân vật trong cảnh.
   4. Flex cao trào: Xướng tên khi diệt boss, tăng cấp hoặc lật ngược tình thế.
@@ -4015,11 +3995,13 @@ ACTION SLANG & HIGH-VELOCITY ACTIVE VERBS LEXICON:
    and let the audience FEEL the emotion without being told what to feel.
 
 5. AUDIENCE PULSE CHECK (Break the 4th Wall Strategically):
-   Every 4-6 segments, insert ONE of these engagement techniques:
+   Every 3 segments, insert ONE of these engagement techniques:
    (a) Rhetorical question: 'Was it overkill? Maybe. Did it solve the problem? Instantly.'
    (b) Direct address: 'And instead of running, guess what he does?'
    (c) Anticipation hook: 'But the craziest part hasn\\'t even started yet.'
-   Minimum 2 per episode, maximum 1 per 45 seconds of narration.
+   (d) Staccato Verdict: 'Done.', 'Not even close.', 'Classic.', 'Easy money.', 'Problem solved.'
+   (e) Contrast beat: 'Outside? [chaos/desperation/panic]. Inside? [calm dominance/preparation/comfort].'
+   Minimum 1 per 3 segments (~25-33% of total output). Maximum 1 per 20 seconds. Do NOT cluster back-to-back.
 
 STYLE REFERENCE — BEFORE vs AFTER (STUDY THESE, WRITE LIKE "AFTER"):
 
@@ -4067,7 +4049,7 @@ HERO SUBJECT ALIGNMENT MANDATE & DYNAMIC MULTI-PANEL PACING:
 CONTEXTUAL PROTAGONIST ANCHORING (ORGANIC FLOW & ZERO FORMULAIC REPETITION):
 - DO NOT mechanically force the protagonist's proper name into every 2nd or 3rd sentence! Robotic name repetition destroys immersion.
 - Restrict direct proper name usage to ONLY 4 CRITICAL CONTEXTUAL ANCHORS:
-  1. Opening Hook (0-15s): Anchor identity immediately in the first sentence.
+  1. Opening Scene: Anchor identity as soon as the character appears in the scene.
   2. Scene & Time Transitions: Re-anchor when jumping across time or shifting locations.
   3. Multi-Character Disambiguation: Explicitly use the protagonist's name when multiple characters act.
   4. Climax Milestone & Signature Flex: During pivotal boss takedowns, major level-ups, or epic revelations.
@@ -4279,7 +4261,7 @@ Do not force a joke into every line.
 
 Do not change the meaning of the original events for the sake of humor.
 
-Episode 1 hook is exempt from the humor requirement.
+Episode 1 opening is exempt from the humor requirement.
 
 --------------------------------------------------
 5. ACCURACY
@@ -4400,8 +4382,24 @@ Do not continue beyond the supplied pages.
 Do not use a credits page, title card, or unrelated final image as the
 ending anchor.
 
+MANDATORY CLIFFHANGER TENSION (BINGE-WATCH RETENTION RULE):
+The FINAL segment of every episode MUST land on one of these tension states:
+  (a) Imminent Threat / Danger: an enemy appears, a trap triggers, or stakes suddenly escalate.
+  (b) Countdown / Deadline: a ticking clock, time-sensitive crisis, or expiry warning looms.
+  (c) Shocking Reveal / Mystery: an unexpected discovery that demands explanation.
+  (d) High-Stakes Action Launch: the protagonist commits to battle, departure, or detonation.
+
+FORBIDDEN closing beats (these kill binge-watch momentum):
+  - Mundane daily routines without threat context: cleaning, organizing, sleeping, eating.
+  - Fully resolved, peaceful endings with zero forward tension.
+  - Pure logistics (restocking, crafting, tidying) with no danger implication.
+
+If the final available page shows only a mundane action with no tension:
+Select the NEAREST PRECEDING page containing a threat, reveal, or high-stakes moment
+as the closing anchor instead.
+
 --------------------------------------------------
-9. EPISODE 1 & RETENTION HOOK
+9. EPISODE OPENING DIRECTIVE
 --------------------------------------------------
 
 {intro_rule}

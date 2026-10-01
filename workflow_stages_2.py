@@ -1029,13 +1029,13 @@ class CameraPlanner:
     ) -> dict:
         """
         Generates a continuous, smooth cinematic camera plan for webtoon storytelling.
-        - Primary motion: Smooth continuous Vertical Pan (sliding top-to-bottom or bottom-to-top)
-          for all portrait and tall panels (aspect_ratio < 1.15).
-        - Wide panels (aspect_ratio >= 1.15): Smooth continuous Horizontal Pan.
-        - 2D Bubble Repulsion: Repels camera focal point away from speech bubble regions in both X and Y.
-        - Strict Bubble Viewport Clamping: Stops vertical glide right before revealing any speech bubbles.
-        - Visual Impact Shake: Optical damped harmonic oscillation on frames with action verbs.
-        - Zero-Clamping Freeze: Interpolation glides continuously across the full shot duration without stopping.
+        - Mode A (Wide / Panoramic Panels: W/H >= 1.70): Smooth continuous Horizontal Pan.
+        - Mode B (Tall Webtoon Panels: usable_v_travel >= 70px or aspect_ratio < 0.70):
+          Smooth continuous Vertical Pan (Top-to-Bottom or Bottom-to-Top based on character focal context).
+        - Mode C (Standard / Beautiful Cut Panels):
+          Subtle continuous Zoom In (1.00 -> 1.06) or Zoom Out (1.06 -> 1.00) centered on focal point.
+        - Zero Stuttering: 100% continuous 2-keyframe motion with uniform velocity (soft_linear_glide),
+          guaranteeing no freezes, mid-shot pauses, or jerky transitions.
         """
         has_impact_shake = detect_action_impact(speech_text)
         cb_x, cb_y, W_c, H_c = bounds
@@ -1043,7 +1043,7 @@ class CameraPlanner:
         center_y = H_c / 2.0
         aspect_ratio = W_c / max(1.0, float(H_c))
 
-        # Enhanced 2D Bubble-Centroid Repulsion & Exclusion Offset (X & Y)
+        # 2D Bubble Repulsion for focal point centering
         y_bias = 0.0
         x_bias = 0.0
         if bubble_centroid:
@@ -1052,49 +1052,36 @@ class CameraPlanner:
             dx_bubble = center_x - bubble_cx
             if abs(dx_bubble) > W_c * 0.05:
                 x_bias = dx_bubble * repulsion_strength
-            
-            # Y repulsion: push away from bubbles at the top or bottom of panel
             dy_bubble = center_y - bubble_cy
             if abs(dy_bubble) > H_c * 0.05:
                 y_bias = dy_bubble * repulsion_strength
 
-            # Strong vertical directional push when bubble is concentrated at top or bottom
-            if bubble_coverage_ratio >= 0.18:
-                if bubble_cy < 0.38 * H_c:
-                    y_bias = max(y_bias, H_c * 0.20)
-                elif bubble_cy > 0.62 * H_c:
-                    y_bias = min(y_bias, -H_c * 0.22)
-                if bubble_cx < 0.38 * W_c:
-                    x_bias = max(x_bias, W_c * 0.16)
-                elif bubble_cx > 0.62 * W_c:
-                    x_bias = min(x_bias, -W_c * 0.16)
-
-        is_face_near_top = (focal_point is not None and float(focal_point[1]) < 0.25 * H_c)
+        is_face_near_top = (focal_point is not None and float(focal_point[1]) < 0.28 * H_c)
         if focal_point is None:
             focal_x = center_x + x_bias
             focal_y = center_y + y_bias
         else:
             fx_raw, fy_raw = focal_point
-            focal_x = center_x * 0.25 + float(fx_raw) * 0.75 + x_bias
-            focal_y = center_y * 0.25 + float(fy_raw) * 0.75 + y_bias
+            focal_x = center_x * 0.20 + float(fx_raw) * 0.80 + x_bias
+            focal_y = center_y * 0.20 + float(fy_raw) * 0.80 + y_bias
 
         focal_x = float(np.clip(focal_x, 0.15 * W_c, 0.85 * W_c))
         if is_face_near_top:
             focal_y = float(np.clip(focal_y, 0.05 * H_c, 0.82 * H_c))
         else:
-            focal_y = float(np.clip(focal_y, 0.18 * H_c, 0.82 * H_c))
+            focal_y = float(np.clip(focal_y, 0.15 * H_c, 0.85 * H_c))
 
-        # Default easing for Mode C (Ken Burns zoom + drift): easeInOutCubic gives organic,
-        # cinematographer feel. Mode A (horizontal pan) and Mode B (vertical glide) override
-        # this with their own easing values; only Mode C falls through to this default.
-        easing = "easeInOutCubic"
+        # Default easing: soft_linear_glide provides uniform continuous velocity without mid-shot pauses
+        easing = "soft_linear_glide"
 
-        # Mode A: Landscape / Wide Panels (aspect_ratio >= 1.70) -> Smooth Cinematic Horizontal Pan
+        # =====================================================================
+        # Mode A: Landscape / Wide Panels (aspect_ratio >= 1.70) -> Horizontal Pan
+        # =====================================================================
         if aspect_ratio >= 1.70:
             animation_type = "cinematic_pan_horizontal"
             dir_x = 1.0 if (shot_index % 2 == 0) else -1.0
             direction = "left_to_right" if dir_x > 0 else "right_to_left"
-            wide_scale = 1.15 if aspect_ratio >= 2.2 else 1.08
+            wide_scale = 1.12 if aspect_ratio >= 2.2 else 1.06
             w_cam = W_c / wide_scale
             x_min_safe = float(w_cam * 0.5)
             x_max_safe = float(max(x_min_safe, W_c - w_cam * 0.5))
@@ -1124,23 +1111,17 @@ class CameraPlanner:
             }
 
         # Measure usable vertical travel distance for vertical pan
-        # Webtoon vertical strips (aspect_ratio < 0.72) have ample vertical sliding headroom
         h_cam_ref = W_c / 0.68
         if aspect_ratio < 0.72:
-            # Auto-Upgrade Motion for Tall Panels (aspect_ratio < 0.55): guarantee vertical glide
-            if aspect_ratio < 0.55:
-                usable_v_travel = max(180.0, H_c - min(H_c, h_cam_ref))
-            else:
-                usable_v_travel = max(0.0, H_c - min(H_c, h_cam_ref))
+            usable_v_travel = max(0.0, H_c - min(H_c, h_cam_ref))
         else:
             usable_v_travel = 0.0
 
-        # Exact safe viewport center Y boundaries (strictly synchronous with render_page_frame cy_min / cy_max)
+        # Safe viewport center Y boundaries
         y_min_valid = float(h_cam_ref * 0.5)
         y_max_valid = float(max(y_min_valid, H_c - h_cam_ref * 0.5))
 
-        # Strict Bubble-Edge Clamping: Viewport bottom on panel is (cy + h_cam_ref * 0.5).
-        # Stop sliding BEFORE revealing speech bubbles at the bottom!
+        # Strict Bubble-Edge Clamping
         if bottom_bubble_top_y is not None:
             max_allowed_cy = float(bottom_bubble_top_y - (h_cam_ref * 0.5) - 10.0)
             if max_allowed_cy >= y_min_valid:
@@ -1148,7 +1129,6 @@ class CameraPlanner:
             else:
                 y_max_valid = max(y_min_valid, max_allowed_cy)
 
-        # Stop sliding BEFORE revealing speech bubbles at the top!
         if top_bubble_bottom_y is not None and not is_face_near_top:
             min_allowed_cy = float(top_bubble_bottom_y + (h_cam_ref * 0.5) + 10.0)
             if min_allowed_cy <= y_max_valid:
@@ -1158,34 +1138,31 @@ class CameraPlanner:
 
         total_valid_span = max(0.0, y_max_valid - y_min_valid)
 
-        # Mode B: Vertical Pan Glide for Vertical Panels (usable_v_travel >= 80px and total_valid_span >= 25px)
-        # Cap speed at 150px/s so pan covers the full strip smoothly without motion sickness
-        MAX_PAN_SPEED_PX_PER_SEC = 150.0
+        # =====================================================================
+        # Mode B: Tall Vertical Webtoon Panels -> Continuous Vertical Pan Glide
+        # =====================================================================
+        MAX_PAN_SPEED_PX_PER_SEC = 120.0
         max_travel_by_speed = max(20.0, float(duration) * MAX_PAN_SPEED_PX_PER_SEC)
         actual_span = min(total_valid_span, max_travel_by_speed)
 
-        if (usable_v_travel >= 80.0 or aspect_ratio < 0.55) and actual_span >= 25.0:
+        is_tall_panel = (aspect_ratio < 0.70 and usable_v_travel >= 100.0) and actual_span >= 30.0
+
+        if is_tall_panel:
             animation_type = "vertical_pan_glide"
-            easing = "easeInOutCubic"
             
-            # Smart Direction Selection:
-            # 1. Bubble position guidance (avoid starting right on top of text)
-            if (bubble_centroid and bubble_coverage_ratio > 0.18 and bubble_centroid[1] < 0.38 * H_c) or (top_bubble_bottom_y is not None):
-                direction = "bottom_to_top"
-            elif (bubble_centroid and bubble_coverage_ratio > 0.18 and bubble_centroid[1] > 0.62 * H_c) or (bottom_bubble_top_y is not None):
+            # Context-Aware Direction Selection:
+            # 1. If face/character is at the top -> Top to Bottom (reveal action/scene downward)
+            if is_face_near_top or (focal_point is not None and focal_point[1] < 0.45 * H_c) or (top_bubble_bottom_y is not None):
                 direction = "top_to_bottom"
-            # 2. Composite Action / Subject Asymmetry:
-            elif focal_point is not None and focal_point[1] > 0.55 * H_c:
-                direction = "top_to_bottom"
-            elif focal_point is not None and focal_point[1] < 0.40 * H_c:
+            # 2. If character is at the bottom looking up / monster looming -> Bottom to Top
+            elif (focal_point is not None and focal_point[1] > 0.55 * H_c) or (bottom_bubble_top_y is not None):
                 direction = "bottom_to_top"
-            # 3. Default: Alternating motion to maintain dynamic rhythm
+            # 3. Default: Alternating motion to maintain cinematic rhythm
             else:
                 direction = "top_to_bottom" if (shot_index % 2 == 0) else "bottom_to_top"
 
             y_anchor = float(np.clip(focal_y, y_min_valid + actual_span * 0.5, y_max_valid - actual_span * 0.5))
             if is_face_near_top:
-                # Pin top boundary directly at top viewport edge to preserve 100% hair and crown
                 y_top = y_min_valid
                 y_bot = float(np.clip(y_top + actual_span, y_min_valid, y_max_valid))
             else:
@@ -1201,14 +1178,13 @@ class CameraPlanner:
             else:
                 y_start, y_end = y_bot, y_top
 
-            # 3-keyframe breathing: slight zoom-in at midpoint (1.03) while panning
-            # keeps pan as primary motion; subtle scale pulse adds organic life without motion sickness
-            t_mid = duration * 0.5
-            y_mid = (y_start + y_end) * 0.5
+            # Clean 2-keyframe continuous glide with subtle organic depth scaling
+            is_zoom_in = (shot_index % 2 == 0)
+            scale_start = 1.00 if is_zoom_in else 1.03
+            scale_end = 1.03 if is_zoom_in else 1.00
             keyframes = [
-                {"time": 0.0,      "x": focal_x, "y": y_start, "scale": 1.00, "progress": 0.0},
-                {"time": t_mid,    "x": focal_x, "y": y_mid,   "scale": 1.03, "progress": 0.5},
-                {"time": duration, "x": focal_x, "y": y_end,   "scale": 1.00, "progress": 1.0},
+                {"time": 0.0,      "x": focal_x, "y": y_start, "scale": scale_start, "progress": 0.0},
+                {"time": duration, "x": focal_x, "y": y_end,   "scale": scale_end,   "progress": 1.0},
             ]
             return {
                 "page": page_num,
@@ -1223,84 +1199,21 @@ class CameraPlanner:
                 "has_impact_shake": has_impact_shake,
             }
 
-        # Mode C: Standard / Square / Landscape Panels (usable_v_travel < 160px)
-        # Ultra-Long Duration (> 7.0s): Dual-phase continuous Ken Burns motion (Scale 1.00 -> 1.10 -> 1.00)
-        # Prevents visual stagnation on long narration without jarring cuts
-        if duration > 7.0:
-            animation_type = "dual_shot_cinematic"
-            direction = "zoom_in_out"
-            t_split = round(duration * 0.5, 3)
-            keyframes = [
-                {"time": 0.0, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 0.0},
-                {"time": t_split, "x": focal_x, "y": focal_y, "scale": 1.08, "progress": 0.5},
-                {"time": duration, "x": focal_x, "y": focal_y, "scale": 1.00, "progress": 1.0},
-            ]
-            return {
-                "page": page_num,
-                "duration": duration,
-                "animation_type": animation_type,
-                "direction": direction,
-                "easing": easing,
-                "keyframes": keyframes,
-                "transition": transition,
-                "bubble_centroid": bubble_centroid,
-                "bubble_coverage_ratio": bubble_coverage_ratio,
-                "has_impact_shake": has_impact_shake,
-            }
+        # =====================================================================
+        # Mode C: Standard / Square / Portrait / Beautiful Panels -> Subtle Continuous Zoom
+        # =====================================================================
+        # Subtle Zoom In (1.00 -> 1.06) or Zoom Out (1.06 -> 1.00)
+        # Keeps character/face centered, perfectly continuous with zero pause or jerkiness.
+        is_zoom_in = (shot_index % 2 == 0)
+        scale_start = 1.00 if is_zoom_in else 1.06
+        scale_end = 1.06 if is_zoom_in else 1.00
+        animation_type = "subtle_focal_zoom_in" if is_zoom_in else "subtle_focal_zoom_out"
+        direction = "zoom_in" if is_zoom_in else "zoom_out"
 
-        # Ken Burns 2D: simultaneous zoom + horizontal/vertical drift for natural cinema feel.
-        # Drift magnitude: ±6% X and ±3% Y for establishing shots (scenic panoramas need wider roam),
-        # ±4% X for character panels (face stays centered). Direction alternates per shot index.
-        # Clamped within [15%, 85%] safe zone to prevent edge overshoots on narrow panels.
-        drift_factor = 0.06 if is_establishing_shot else 0.04
-        raw_drift = float(W_c) * drift_factor * (1.0 if shot_index % 2 == 0 else -1.0)
-        x_drift_end = float(np.clip(focal_x + raw_drift, 0.15 * W_c, 0.85 * W_c))
-        x_drift_rev = float(np.clip(focal_x - raw_drift, 0.15 * W_c, 0.85 * W_c))
-
-        if is_establishing_shot:
-            # Diagonal drift: ±3% Y for scenic panels (alternates direction with shot_index)
-            y_drift_factor = 0.03
-            raw_y_drift = float(H_c) * y_drift_factor * (1.0 if shot_index % 2 == 0 else -1.0)
-            y_drift_end = float(np.clip(focal_y + raw_y_drift, 0.15 * H_c, 0.85 * H_c))
-            y_drift_rev = float(np.clip(focal_y - raw_y_drift, 0.15 * H_c, 0.85 * H_c))
-        else:
-            y_drift_end = focal_y
-            y_drift_rev = focal_y
-
-        # Shot distribution: % 3 gives equal 33%/33%/33% across Zoom-In, Zoom-Out, Action Punch.
-        if shot_index % 3 == 0:
-            # Dual-zone Ken Burns: tight face zoom → gentle scene reveal pullback (requires character presence & dur >= 5s)
-            has_character = (character_presence >= 60.0 or skin_ratio >= 0.10) and not is_establishing_shot
-            if has_character and duration >= 5.0:
-                animation_type = "dual_zone_ken_burns"
-                direction = "zoom_in_reveal"
-                t_split = duration * 0.60
-                keyframes = [
-                    {"time": 0.0,      "x": focal_x,     "y": focal_y,     "scale": 1.00, "progress": 0.0},
-                    {"time": t_split,  "x": x_drift_end, "y": y_drift_end, "scale": 1.15, "progress": 0.6},
-                    {"time": duration, "x": focal_x,     "y": focal_y,     "scale": 1.08, "progress": 1.0},
-                ]
-            else:
-                animation_type = "focal_zoom_in"
-                direction = "zoom_in"
-                keyframes = [
-                    {"time": 0.0,      "x": focal_x,     "y": focal_y,     "scale": 1.00, "progress": 0.0},
-                    {"time": duration, "x": x_drift_end, "y": y_drift_end, "scale": 1.08, "progress": 1.0}
-                ]
-        elif shot_index % 3 == 1:
-            animation_type = "focal_zoom_out"
-            direction = "zoom_out"
-            keyframes = [
-                {"time": 0.0,      "x": focal_x,     "y": focal_y,     "scale": 1.08, "progress": 0.0},
-                {"time": duration, "x": x_drift_rev, "y": y_drift_rev, "scale": 1.00, "progress": 1.0}
-            ]
-        else:
-            animation_type = "action_punch_zoom"
-            direction = "punch_in"
-            keyframes = [
-                {"time": 0.0,      "x": focal_x,     "y": focal_y,     "scale": 1.00, "progress": 0.0},
-                {"time": duration, "x": x_drift_end, "y": y_drift_end, "scale": 1.08, "progress": 1.0}
-            ]
+        keyframes = [
+            {"time": 0.0,      "x": focal_x, "y": focal_y, "scale": scale_start, "progress": 0.0},
+            {"time": duration, "x": focal_x, "y": focal_y, "scale": scale_end,   "progress": 1.0}
+        ]
 
         return {
             "page": page_num,
@@ -1328,9 +1241,7 @@ def interpolate_camera_progress(plan: dict, t_local: float) -> float:
         return float(keyframes[-1].get("progress", 1.0))
     
     easing_name = plan.get("easing", "soft_linear_glide")
-    if easing_name == "soft_linear_glide":
-        ease_func = soft_linear_glide
-    elif easing_name == "linear":
+    if easing_name == "soft_linear_glide" or easing_name == "linear":
         ease_func = lambda t: t
     elif easing_name == "easeInOutSine":
         ease_func = ease_in_out_sine
@@ -1339,7 +1250,7 @@ def interpolate_camera_progress(plan: dict, t_local: float) -> float:
     elif easing_name == "easeInOutCubic":
         ease_func = ease_in_out_cubic
     else:
-        ease_func = soft_linear_glide
+        ease_func = lambda t: t
 
     dur = t1 - t0
     if dur <= 0.001:
@@ -1356,9 +1267,7 @@ def interpolate_camera_plan(plan: dict, t_local: float) -> tuple:
         return keyframes[-1]["x"], keyframes[-1]["y"], keyframes[-1]["scale"]
 
     easing_name = plan.get("easing", "soft_linear_glide")
-    if easing_name == "soft_linear_glide":
-        ease_func = soft_linear_glide
-    elif easing_name == "linear":
+    if easing_name == "soft_linear_glide" or easing_name == "linear":
         ease_func = lambda t: t
     elif easing_name == "easeInOutSine":
         ease_func = ease_in_out_sine
@@ -1367,7 +1276,7 @@ def interpolate_camera_plan(plan: dict, t_local: float) -> tuple:
     elif easing_name == "easeInOutCubic":
         ease_func = ease_in_out_cubic
     else:
-        ease_func = soft_linear_glide
+        ease_func = lambda t: t
 
     for i in range(len(keyframes) - 1):
         kf1 = keyframes[i]
@@ -1431,7 +1340,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
             overlay_path = os.path.join(project_dir, "images", "overlay.png")
         subtitles_enabled = bool(task.payload.get("burn_subtitles", False))
 
-        def _render_episode_video_sync_impl(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, stderr_file=None, stderr_log_path=None, min_panel_duration=3.5, hard_floor_duration=3.0, **kwargs):
+        def _render_episode_video_sync_impl(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, stderr_file=None, stderr_log_path=None, min_panel_duration=3.0, hard_floor_duration=2.0, **kwargs):
             from PIL import Image, ImageFilter, ImageEnhance, ImageDraw
             import subprocess
             import numpy as np
@@ -1535,10 +1444,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 char_p = bd.get("character_presence", 0.0)
                                 is_bad = (
                                     bd.get("is_meaningless", False)
-                                    or sc < 50
-                                    or (bubble_cov > 0.25 and char_p < 50.0)
-                                    or bubble_cov > 0.35
-                                    or (char_p < 25.0 and not bd.get("is_establishing_shot", False))
+                                    or sc < 25
+                                    or (bubble_cov > 0.50 and sc < 35)
                                 )
                             except Exception:
                                 sc, char_p, is_bad = 70, 50.0, False
@@ -1581,19 +1488,17 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 it[0]["priority"] = float(it[0].get("priority", 1.0)) / max(0.001, tot_p)
                         seg_images = [it[0] for it in valid_art]
                     else:
-                        # All images are bad, meaningless, low-character, or bubble-heavy — find best adjacent page as replacement
-                        # Ranked by composite score: 60% total + 40% character_presence (character-first priority)
+                        # All images are bad, meaningless, or broken slice — find closest adjacent page in same scene as replacement
                         best_item = max(scored_candidates, key=lambda x: x[1]) if scored_candidates else None
                         if best_item:
                             bad_page_idx = int(best_item[0]["page"]) - 1
                             best_composite = -1
                             best_idx = bad_page_idx
-                            for delta in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8, -8, 9, -9, 10, -10]:
+                            for delta in [1, -1, 2, -2]:
                                 candidate = bad_page_idx + delta
                                 if 0 <= candidate < len(image_files):
                                     cand_page = candidate + 1
-                                    # Strict Deduplication: Do NOT pick any page that was displayed in the last 4 shots or already used as a donor elsewhere
-                                    if cand_page in recent_displayed_pages[-4:] or cand_page in global_used_donors:
+                                    if cand_page in recent_displayed_pages[-3:] or cand_page in global_used_donors:
                                         continue
                                     im_path = os.path.join(images_blur_dir, image_files[candidate])
                                     if not os.path.exists(im_path):
@@ -1604,14 +1509,11 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                         char_p = bd.get("character_presence", 0.0)
                                         bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
                                         is_est = bd.get("is_establishing_shot", False)
-                                        # Stateful Deduplication Penalty: penalize recently used pages
-                                        recent_penalty = 25.0 if cand_page in recent_displayed_pages[-3:] else 0.0
-                                        composite = sc * 0.60 + char_p * 0.40 - recent_penalty
-                                        # Strict Donor Qualification: reject any bubble-dominant panels
+                                        composite = sc * 0.60 + char_p * 0.40
                                         donor_valid = (
                                             not bd.get("is_meaningless", False)
-                                            and bubble_cov < 0.30
-                                            and (char_p >= 35.0 or (is_est and sc >= 60))
+                                            and bubble_cov < 0.35
+                                            and sc >= 35
                                             and composite > best_composite
                                         )
                                         if donor_valid:
@@ -1619,61 +1521,30 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                             best_idx = candidate
                                     except Exception:
                                         pass
-                            if best_composite >= 45:
+                            if best_composite >= 35:
                                 chosen_page = best_idx + 1
                                 global_used_donors.add(chosen_page)
                                 seg_images = [{"page": chosen_page, "priority": 1.0}]
-                                print(f"  [Stage10] Replaced low-quality/junk/bubble page {bad_page_idx + 1} with character page {chosen_page} (composite={best_composite:.1f})")
+                                print(f"  [Stage10] Replaced low-quality page {bad_page_idx + 1} with scene page {chosen_page} (composite={best_composite:.1f})")
                             else:
-                                # Fallback: search globally for best hero panel in episode
-                                global_best_page = None
-                                global_best_comp = -1
-                                for g_idx in range(len(image_files)):
-                                    g_page = g_idx + 1
-                                    if g_page in recent_displayed_pages[-2:]:
-                                        continue
-                                    g_path = os.path.join(images_blur_dir, image_files[g_idx])
-                                    if not os.path.exists(g_path):
-                                        g_path = os.path.join(images_pdf_dir, image_files[g_idx])
-                                    try:
-                                        g_bgr = safe_cv2_imread(g_path)
-                                        g_sc, g_bd = VisualSemanticScorer.calculate_score(g_bgr)
-                                        if not g_bd.get("is_meaningless", False) and g_bd.get("bubble_coverage_ratio", 0.0) < 0.25:
-                                            g_comp = g_sc * 0.6 + g_bd.get("character_presence", 0.0) * 0.4
-                                            if g_comp > global_best_comp:
-                                                global_best_comp = g_comp
-                                                global_best_page = g_page
-                                    except Exception:
-                                        pass
-                                if global_best_page:
-                                    global_used_donors.add(global_best_page)
-                                    seg_images = [{"page": global_best_page, "priority": 1.0}]
-                                    print(f"  [Stage10] Global fallback replaced page {bad_page_idx + 1} with page {global_best_page} (comp={global_best_comp:.1f})")
-                                elif best_item:
-                                    seg_images = [{"page": best_item[0]["page"], "priority": 1.0}]
+                                seg_images = [{"page": best_item[0]["page"], "priority": 1.0}]
 
-                # Long-Duration Multi-Image Auto-Donor Injection (v2.1.0):
-                # Two-pass search strategy:
-                #   Pass 1 (quality-first): ±3 pages, sc >= 48, composite >= 48.0
-                #   Pass 2 (wider fallback): ±8 pages, sc >= 42, composite >= 40.0
-                # Threshold lowered from 4.8s → 4.0s (MIN_SUB_DURATION=2.0s × 2 shots)
-                # to capture clone_andrew TTS segments averaging 3.8–4.2s.
-                # Injected images are tagged _is_donor=True so the pacing guardrail
-                # can apply a lenient 2.0s sub-floor instead of 3.5s.
-                MIN_SUB_DURATION = 2.0   # minimum sub-shot duration for donor cutaways
-                INJECT_FLOOR = 2 * MIN_SUB_DURATION  # 4.0s trigger
+                # Long-Duration Multi-Image Auto-Donor Injection:
+                # Preserves 100% semantic matching between narration and comic artwork.
+                # Only active for extreme monologue segments (>= 8.5s), searching only immediate adjacent pages (±1, ±2).
+                MIN_SUB_DURATION = 3.0
+                INJECT_FLOOR = 8.5
                 if seg_images and len(seg_images) == 1 and segment_duration >= INJECT_FLOOR:
                     orig_page_idx = int(seg_images[0]["page"]) - 1
 
                     def _find_long_dur_donors(deltas, sc_floor, composite_floor):
-                        """Scan candidate pages; return sorted (cand_idx, composite) list."""
                         donors = []
                         for delta in deltas:
                             cand_idx = orig_page_idx + delta
                             if not (0 <= cand_idx < len(image_files)):
                                 continue
                             cand_page_num = cand_idx + 1
-                            if (cand_page_num in recent_displayed_pages[-4:]
+                            if (cand_page_num in recent_displayed_pages[-3:]
                                     or cand_page_num == (orig_page_idx + 1)
                                     or cand_page_num in global_used_donors):
                                 continue
@@ -1685,16 +1556,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
                                 char_p = bd.get("character_presence", 0.0)
                                 bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
-                                is_est = bd.get("is_establishing_shot", False)
                                 is_meaningless = bd.get("is_meaningless", False)
-                                # Strict Donor qualification:
-                                # Must NOT be meaningless, bubble_cov must be < 0.30, and must have real character presence or true establishing shot
-                                is_bad = (
-                                    is_meaningless
-                                    or sc < sc_floor
-                                    or bubble_cov > 0.30
-                                    or (char_p < 35.0 and not is_est)
-                                )
+                                is_bad = is_meaningless or sc < sc_floor or bubble_cov > 0.35
                                 if not is_bad:
                                     composite = sc * 0.60 + char_p * 0.40
                                     if composite >= composite_floor:
@@ -1704,35 +1567,13 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         donors.sort(key=lambda x: x[1], reverse=True)
                         return donors
 
-                    # Pass 1: strict quality (original behavior)
-                    best_donors = _find_long_dur_donors([1, -1, 2, -2, 3, -3],
-                                                        sc_floor=48, composite_floor=48.0)
-
-                    # Pass 2: wider search only if Pass 1 yielded nothing
-                    if not best_donors:
-                        best_donors = _find_long_dur_donors([4, -4, 5, -5, 6, -6, 7, -7, 8, -8],
-                                                            sc_floor=42, composite_floor=42.0)
-                        if best_donors:
-                            print(f"  [Stage10] LongDur Pass2 donor Seg{s_idx} "
-                                  f"pg{orig_page_idx+1} composite={best_donors[0][1]:.1f}")
-                        else:
-                            print(f"  [Stage10] LongDur Seg{s_idx} pg{orig_page_idx+1} "
-                                  f"dur={segment_duration:.1f}s: no donor in ±8 pages")
-
+                    best_donors = _find_long_dur_donors([1, -1, 2, -2], sc_floor=40, composite_floor=40.0)
                     if best_donors:
                         orig_page = orig_page_idx + 1
-                        if segment_duration >= 9.0 and len(best_donors) >= 2:
-                            d1 = best_donors[0][0] + 1
-                            d2 = best_donors[1][0] + 1
-                            global_used_donors.add(d1)
-                            global_used_donors.add(d2)
-                            seq = sorted([orig_page, d1, d2])
-                            seg_images = [{"page": p, "priority": 1.0/3.0, "_is_donor": True} for p in seq]
-                        else:
-                            d1 = best_donors[0][0] + 1
-                            global_used_donors.add(d1)
-                            seq = sorted([orig_page, d1])
-                            seg_images = [{"page": p, "priority": 0.5, "_is_donor": True} for p in seq]
+                        d1 = best_donors[0][0] + 1
+                        global_used_donors.add(d1)
+                        seq = sorted([orig_page, d1])
+                        seg_images = [{"page": p, "priority": 0.5, "_is_donor": True} for p in seq]
 
                 # Cinematic Pacing Guardrail & Dynamic Hero Image Selector:
                 # For normal multi-image segments: min sub-shot = min_panel_duration (3.5s).
@@ -2314,7 +2155,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 except Exception:
                     pass
 
-        def render_episode_video_sync(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, min_panel_duration=3.5, hard_floor_duration=3.0, **kwargs):
+        def render_episode_video_sync(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, min_panel_duration=3.0, hard_floor_duration=2.0, **kwargs):
             stderr_log_path = os.path.join(os.path.dirname(output_video_path), "ffmpeg_render_stderr.log")
             stderr_file = open(stderr_log_path, "w", encoding="utf-8")
             try:
@@ -2487,8 +2328,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
 
             working_encoder = get_working_encoder(ffmpeg_exe, os.path.join(images_blur_dir, image_files[0]))
             fps = task.payload.get("fps", 30)
-            min_panel_duration = float(task.payload.get("min_panel_duration", 3.5))
-            hard_floor_duration = float(task.payload.get("hard_floor_duration", 3.0))
+            min_panel_duration = float(task.payload.get("min_panel_duration", 3.0))
+            hard_floor_duration = float(task.payload.get("hard_floor_duration", 2.0))
 
             # Compile episode directly in one single pass
             temp_video_path = output_video_path + ".tmp.mp4"

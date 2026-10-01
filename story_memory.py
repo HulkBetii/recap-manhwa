@@ -264,6 +264,15 @@ class StoryMemory:
             "Tuy", "Dù", "Ngay", "Đúng", "Cùng", "Toàn", "Khắp", "Mọi",
             "Quân", "Đích", "Tiểu", "Vị", "Bản", "Cơn", "Trận", "Cuộc",
             "Hết", "Cả", "Mỗi", "Tất", "Chính", "Người", "Bộ", "Nơi",
+            # Vietnamese Narrative & Descriptive Stopwords
+            "Gọn", "Gọn gàng", "Nhanh", "Mau", "Khẽ", "Chợt", "Đột nhiên", "Thay vì",
+            "Nhìn", "Mở", "Cầm", "Bắt gặp", "Trời", "Dưới", "Toàn bộ", "Dù sao",
+            "Không", "Có", "Một", "Hai", "Ba", "Bốn", "Năm", "Sáu", "Bảy", "Tám", "Chín", "Mười",
+            "Vừa", "Lúc", "Đoạn", "Hầu hết", "Dường như", "Dường", "Hình như", "Bất ngờ",
+            "Lập tức", "Bỗng", "Bỗng nhiên", "Thoáng", "Quay", "Bước", "Chạy", "Đứng",
+            "Ngồi", "Nằm", "Thở", "Cúi", "Ngẩng", "Nâng", "Hạ", "Kéo", "Đẩy", "Chỉ",
+            "Vẫn", "Đã", "Đang", "Sẽ", "Chưa", "Từng", "Rất", "Quá", "Lắm", "Tuyệt đối",
+            "Chắc chắn", "Có lẽ", "Bên", "Phía", "Đằng", "Mặt", "Đầu", "Cuối",
             # Titles & Pronouns
             "Tổng", "Tổng thống", "Chủ tịch", "Thủ tướng", "Đại tá", "Trung tá", "Thiếu tá",
             "Đại úy", "Thượng úy", "Trung úy", "Thiếu úy", "Tướng", "Bộ trưởng", "Thứ trưởng",
