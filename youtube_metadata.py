@@ -4,6 +4,7 @@ import json
 import os
 import re
 import glob
+import random
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Tuple, Set
 
@@ -14,18 +15,12 @@ try:
         FACT_USAGE_POLICY, can_use_fact_for_surface
     )
 except ImportError:
-    try:
-        from story_fact_graph import (
-            StoryFactGraph, GroundedFact, validate_fact_entailment, ExtractionRule,
-            FACT_USAGE_POLICY, can_use_fact_for_surface
-        )
-    except ImportError:
-        StoryFactGraph = None           # type: ignore
-        GroundedFact = None             # type: ignore
-        validate_fact_entailment = None # type: ignore
-        ExtractionRule = None           # type: ignore
-        FACT_USAGE_POLICY = {}          # type: ignore
-        can_use_fact_for_surface = None # type: ignore
+    StoryFactGraph = None           # type: ignore
+    GroundedFact = None             # type: ignore
+    validate_fact_entailment = None # type: ignore
+    ExtractionRule = None           # type: ignore
+    FACT_USAGE_POLICY = {}          # type: ignore
+    can_use_fact_for_surface = None # type: ignore
 
 
 # =============================================================================
@@ -1413,9 +1408,10 @@ def get_character_names(comic_title: str, story_memory: Optional[Dict[str, Any]]
     """Resolves protagonist and key supporting character names."""
     title_lower = (comic_title or "").lower()
     mc_name = ""
+    generic_words = ["a", "an", "the", "he", "she", "they", "we", "our", "him", "his", "her", "their", "it", "its", "protagonist", "mc", "unknown", "hero", "guy", "man"]
     if story_memory:
         raw_mc = story_memory.get("protagonist_name", "").strip()
-        if raw_mc and len(raw_mc) > 1 and raw_mc.lower() not in ["a", "protagonist", "mc", "unknown"]:
+        if raw_mc and len(raw_mc) > 1 and raw_mc.lower() not in generic_words:
             mc_name = raw_mc
 
     if not mc_name:
@@ -1427,8 +1423,8 @@ def get_character_names(comic_title: str, story_memory: Optional[Dict[str, Any]]
             mc_name = "Sung Jinwoo"
         elif "doom breaker" in title_lower or "reincarnation of the suicidal" in title_lower:
             mc_name = "Zephyr"
-        elif "veteran" in title_lower:
-            mc_name = "The Veteran Survivor"
+        elif "veteran of the apocalypse" in title_lower or title_lower.strip().startswith("veteran of"):
+            mc_name = "Kang Seongho"
         elif any(k in title_lower for k in ["zombie", "82-08", "8208"]):
             mc_name = "Tae"
         else:
@@ -2282,36 +2278,58 @@ def generate_dynamic_titles(
 # TAG ENGINE
 # =============================================================================
 
-def build_minimal_tags(comic_title: str, archetype: str) -> List[str]:
-    """Builds a minimal, high-value tag stack (5-8 tags)."""
+def build_minimal_tags(
+    comic_title: str,
+    archetype: str,
+    from_ep: int = 1,
+    to_ep: int = 1,
+) -> List[str]:
+    """Builds a high-value tag stack (10-14 tags, <= 500 chars total).
+
+    Includes base identity tags, episodic range tag for discoverability,
+    long-tail genre tags, and 3 archetype-specific tags.
+    Backward-compatible: from_ep/to_ep default to 1 so existing callers
+    with 2 positional args continue to work unchanged.
+    """
+    ep_range_str = f"ep {from_ep}" if from_ep == to_ep else f"ep {from_ep} {to_ep}"
+    title_lower = comic_title.lower()
+
     tags = [
         "manhwa recap",
-        comic_title.lower(),
-        f"{comic_title.lower()} recap",
+        title_lower,
+        f"{title_lower} recap",
+        "manhwa summary",
+        "manhwa english",
+        f"{title_lower} {ep_range_str}",
     ]
 
     archetype_tags = {
-        "zombie_apocalypse": ["zombie manhwa", "apocalypse manhwa"],
-        "bunker_prepper": ["survival manhwa", "apocalypse manhwa"],
-        "tower_anti_regression": ["tower manhwa", "regression manhwa"],
-        "hunter_gate": ["hunter manhwa", "dungeon manhwa"],
-        "game_system_reality": ["game manhwa", "system manhwa"],
-        "regression_prep": ["regression manhwa", "apocalypse manhwa"],
-        "farming_kingdom": ["farming manhwa", "kingdom manhwa"],
-        "murim_apocalypse": ["murim manhwa", "martial arts manhwa"],
-        "general_apocalypse": ["apocalypse manhwa", "survival manhwa"],
+        "zombie_apocalypse":     ["zombie manhwa", "apocalypse manhwa", "zombie survival manhwa"],
+        "bunker_prepper":        ["survival manhwa", "apocalypse manhwa", "prepper manhwa"],
+        "tower_anti_regression": ["tower manhwa", "regression manhwa", "tower climber manhwa"],
+        "hunter_gate":           ["hunter manhwa", "dungeon manhwa", "awakening manhwa"],
+        "game_system_reality":   ["game manhwa", "system manhwa", "isekai manhwa"],
+        "regression_prep":       ["regression manhwa", "apocalypse manhwa", "time travel manhwa"],
+        "farming_kingdom":       ["farming manhwa", "kingdom manhwa", "territory manhwa"],
+        "murim_apocalypse":      ["murim manhwa", "martial arts manhwa", "cultivation manhwa"],
+        "general_apocalypse":    ["apocalypse manhwa", "survival manhwa", "action manhwa"],
     }
-    tags.extend(archetype_tags.get(archetype, ["apocalypse manhwa"]))
+    tags.extend(archetype_tags.get(archetype, ["apocalypse manhwa", "survival manhwa"]))
 
-    seen = set()
-    cleaned = []
+    # Deduplicate + enforce 500-char total limit (YouTube tag box constraint)
+    seen: Set[str] = set()
+    cleaned: List[str] = []
+    total_chars = 0
     for t in tags:
         t_clean = t.strip().lower()
-        if t_clean and t_clean not in seen:
+        # Each tag costs len(tag) + 2 for the ", " separator (except the first)
+        separator_cost = 2 if cleaned else 0
+        if t_clean and t_clean not in seen and (total_chars + separator_cost + len(t_clean)) <= 490:
             seen.add(t_clean)
             cleaned.append(t_clean)
+            total_chars += separator_cost + len(t_clean)
 
-    return cleaned[:8]
+    return cleaned[:15]
 
 
 # =============================================================================
@@ -2414,8 +2432,17 @@ def _mine_dynamic_story_concepts(
 ) -> List[Dict[str, Any]]:
     """
     Mines real narrative peaks and dramatic incidents from story_memory & transcripts.
-    Generates fully custom, story-specific visual concepts (dynamic layout, camera, scene, text).
-    Zero hardcoded concept molds.
+    Generates story-specific visual concepts based on 7 typed concept templates:
+      1. Catalyst / Inciting Incident (asteroid, freeze, or generic outbreak)
+      2. Apex Predator / Colossal Beast Clash (if beast/monster detected)
+      3. Companion Stand or Fortress Defense (companion vs fortress signal)
+      4. Hostile Standoff / Betrayal Retribution (betrayal vs raider vs generic)
+      5. Climax Firestorm / Solo Annihilation (if firestorm/explosion detected)
+      6. Hero & Heroine Dynamic Tension (always included)
+      7. Alluring Seduction & Dominance clickbait hook (always included)
+    Template selection and content are driven by story signals in aggregated_text
+    and story_memory — not pure hardcoded molds, but typed templates with
+    story-adaptive fill-ins (mc_name, female_name, beast_name, rival_desc, etc.).
     """
     # 1. Aggregate story text & individual episode peaks
     all_episodes_data = []
@@ -3081,9 +3108,99 @@ def format_mini_status_block(
 
 def generate_engagement_question(archetype: str) -> str:
     """Selects a contextual engagement question for pinned comment."""
-    import random
     questions = ENGAGEMENT_QUESTIONS.get(archetype, ENGAGEMENT_QUESTIONS["general_apocalypse"])
     return random.choice(questions) if questions else "What was your favorite moment? Drop your thoughts below! 👇"
+
+
+def generate_community_posts(
+    comic_title: str,
+    mc_name: str,
+    archetype: str,
+    from_ep: int,
+    to_ep: int,
+    disaster: str = "the Apocalypse",
+) -> Dict[str, str]:
+    """
+    Generates 3 high-engagement YouTube Community Tab posts:
+      1. post_a_poll_hook: Interactive question & poll teaser to drive early comments & algorithmic activity.
+      2. post_b_cliffhanger_teaser: Pre-launch dramatic sneak peek with thumbnail/image hook.
+      3. post_c_launch_announcement: Direct release announcement with CTA.
+    """
+    ep_range = f"Chapters {from_ep}–{to_ep}" if from_ep != to_ep else f"Chapter {from_ep}"
+    hashtag_slug = re.sub(r"[^a-zA-Z0-9]", "", comic_title.lower())
+
+    poll_post = (
+        f"🔥 NEW RECAP INCOMING: {comic_title} ({ep_range})!\n\n"
+        f"When {disaster.lower()} struck, {mc_name} had to make a brutal survival choice. "
+        f"If you were in {mc_name}'s shoes during the outbreak, what would be your #1 priority?\n\n"
+        f"📊 POLL / VOTE IN COMMENTS:\n"
+        f"1️⃣ Fortify the base & hoard food supplies\n"
+        f"2️⃣ Go solo and hunt mutated threats for loot\n"
+        f"3️⃣ Build a loyal party of awakened survivors\n"
+        f"4️⃣ Betray everyone before they betray you\n\n"
+        f"Drop your vote below! The full recap is dropping soon — make sure notifications are ON 🔔👇"
+    )
+
+    teaser_post = (
+        f"🚨 SNEAK PEEK: '{comic_title}' ({ep_range})!\n\n"
+        f"\"{mc_name} didn't hesitate for a single second...\"\n\n"
+        f"The collapse just reached a whole new level. New powers awakened, traitors exposed, "
+        f"and the biggest swarm yet is closing in.\n\n"
+        f"🎬 Episode premieres today! Who do you think will survive the final stand?\n\n"
+        f"#{hashtag_slug} #manhwarecap #apocalypsemanhwa"
+    )
+
+    launch_post = (
+        f"⚡ OUT NOW: {comic_title} ({ep_range}) Full Story Recap!\n\n"
+        f"From the initial collapse to total dominance — watch {mc_name} defy all odds in the ultimate {archetype.replace('_', ' ')} recap.\n\n"
+        f"🍿 Grab your snacks and binge the full arc right now!\n"
+        f"👉 Watch here: [LINK]\n\n"
+        f"Let me know in the comments which scene gave you chills! Don't forget to Like & Subscribe ❤️"
+    )
+
+    return {
+        "post_a_poll_hook": poll_post,
+        "post_b_cliffhanger_teaser": teaser_post,
+        "post_c_launch_announcement": launch_post,
+    }
+
+
+def recommend_card_and_endscreen_anchors(
+    narrative_chapters: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Recommends optimal YouTube Cards and End Screen timestamp placements
+    to maximize Viewer Session Watch Time and Binge-Watching.
+    """
+    card_playlist_timestamp = "02:00"
+    card_next_episode_timestamp = "08:00"
+
+    if narrative_chapters and len(narrative_chapters) >= 3:
+        # Card 1 (Playlist/Subscribe) around Chapter 2
+        card_playlist_timestamp = narrative_chapters[1].get("timestamp", "02:00")
+        # Card 2 (Next/Previous Arc) near Climax (penultimate chapter)
+        card_next_episode_timestamp = narrative_chapters[-2].get("timestamp", "08:00")
+
+    return {
+        "card_1_playlist": {
+            "recommended_timestamp": card_playlist_timestamp,
+            "card_type": "Playlist / Series Link",
+            "teaser_text": "Watch Full Series Playlist!",
+        },
+        "card_2_next_arc": {
+            "recommended_timestamp": card_next_episode_timestamp,
+            "card_type": "Video / Next Episode",
+            "teaser_text": "Up Next: Continue The Story!",
+        },
+        "end_screen": {
+            "timing": "Final 20 seconds of video",
+            "recommended_elements": [
+                "1x Video (Best for Viewer)",
+                "1x Playlist (Full Series Arc)",
+                "1x Subscribe Button",
+            ],
+        },
+    }
 
 
 def find_character_image_references(
@@ -3262,6 +3379,9 @@ def generate_us_apocalypse_metadata(
     image_references: Optional[Dict[str, Any]] = None,
     download_dir: Optional[str] = None,
     chapters_explicitly_disabled: bool = False,
+    playlist_url: Optional[str] = None,
+    previous_part_url: Optional[str] = None,
+    next_part_url: Optional[str] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -3309,16 +3429,39 @@ def generate_us_apocalypse_metadata(
         if not narrative_chapters and not chapters_explicitly_disabled:
             chapter_warnings.append("UNGROUNDED_CHAPTER_BLOCKED")
 
-    # ── 3. DESCRIPTION — Research-validated tier structure ──────────────────
+    # ── 3. DESCRIPTION — Research-validated tier structure with Series Navigation ──────────
     disaster = beats.get("disaster", "the Apocalypse")
+    
+    # Calculate previous and next arc bounds for Watch Time / Suggested Chaining
+    span = to_ep - from_ep + 1
+    prev_from = max(1, from_ep - span)
+    prev_to = from_ep - 1
+    next_from = to_ep + 1
+    next_to = to_ep + span
+
+    clean_title_slug = re.sub(r"[^a-zA-Z0-9]+", "-", comic_title.lower()).strip("-")
+    resolved_playlist = playlist_url or f"https://www.youtube.com/playlist?list={clean_title_slug}-full-recap"
+
     desc_lines = [
         f"When {disaster.lower()} strikes, everyone scrambles to survive—but {mc_name} fights to hold the line.",
         f"This manhwa recap covers {comic_title} ({ep_range}).",
         "",
+        "📺 SERIES NAVIGATION (Watch Full Story):",
+        f"• Full Playlist: {resolved_playlist}",
+    ]
+    if from_ep > 1:
+        prev_link = previous_part_url or f"[Watch Ep {prev_from}–{prev_to} in Playlist]"
+        desc_lines.append(f"• ⏪ Previous Arc (Eps {prev_from}–{prev_to}): {prev_link}")
+
+    next_link = next_part_url or "[Coming Soon — Subscribe & Ring 🔔]"
+    desc_lines.append(f"• ⏩ Next Arc (Eps {next_from}–{next_to}): {next_link}")
+
+    desc_lines.extend([
+        "",
         f"📖 Series: {comic_title}",
         f"Genre: apocalypse, survival, {archetype.replace('_', ' ')}",
         "",
-    ]
+    ])
     if narrative_chapters:
         desc_lines.append("⏱️ Chapters:")
         for ch in narrative_chapters:
@@ -3373,7 +3516,7 @@ def generate_us_apocalypse_metadata(
         desc_bytes = len(desc_text.encode("utf-8"))
 
     # ── 4. TAGS (5-8 tags, < 500 chars) ───────────────────────────────────
-    tags = build_minimal_tags(comic_title, archetype)
+    tags = build_minimal_tags(comic_title, archetype, from_ep=from_ep, to_ep=to_ep)
 
     # ── 5. THUMBNAIL CONCEPTS ──────────────────────────────────────────────
     thumbnail_concepts = _build_resource_contrast_concepts(
@@ -3452,6 +3595,32 @@ def generate_us_apocalypse_metadata(
                     break
             concept["visual_facts_used"] = vfacts
 
+    # EvidenceIndex fallback: if a concept still has no visual_facts_used
+    # (happens when _vfg is None — no download_dir or StoryFactGraph unavailable),
+    # use EvidenceIndex transcript evidence directly. quality=None distinguishes
+    # these from FactGraph-sourced facts in the audit report.
+    for concept in thumbnail_concepts:
+        if concept.get("visual_facts_used"):
+            continue  # already populated by _vfg above
+        fallback_facts = []
+        for patterns, visual_claim in [
+            (["zombie", "infected", "outbreak", "disaster", "threat", "collapse"], "disaster/threat scene"),
+            (["survive", "fight", "escape", "combat", "defend", "battle"], "protagonist survival action"),
+        ]:
+            units = evidence_index.find_evidence(patterns)
+            if units:
+                best = units[0]
+                fallback_facts.append({
+                    "fact_id": f"evidence_unit_{best.source}_{best.episode}_{best.segment_index}",
+                    "visual_claim": visual_claim,
+                    "quality": None,  # None = EvidenceIndex origin, not FactGraph
+                    "source_type": best.source,
+                    "evidence_snippet": best.snippet[:80],
+                })
+                break
+        if fallback_facts:
+            concept["visual_facts_used"] = fallback_facts
+
     # ── 7. PINNED COMMENT with mini status block ───────────────────────────
     status_block = format_mini_status_block(archetype, survival_dashboard)
     engagement_q = generate_engagement_question(archetype)
@@ -3463,6 +3632,17 @@ def generate_us_apocalypse_metadata(
         f"💬 {engagement_q}\n\n"
         "👉 Like & Subscribe for more full-arc manhwa recaps!"
     )
+
+    # ── 7.1. COMMUNITY POSTS & END SCREEN RECOMMENDATIONS ──────────────────
+    community_posts = generate_community_posts(
+        comic_title=comic_title,
+        mc_name=mc_name,
+        archetype=archetype,
+        from_ep=from_ep,
+        to_ep=to_ep,
+        disaster=disaster,
+    )
+    card_anchors = recommend_card_and_endscreen_anchors(narrative_chapters)
 
     # ── 8. PACKAGING CONSISTENCY AUDIT ─────────────────────────────────────
     packaging_audit = validate_packaging_consistency(
@@ -3615,16 +3795,22 @@ def generate_us_apocalypse_metadata(
             "-" * 80,
         ])
 
-    kit_lines.extend([
+    _dash_lines: List[str] = [
         "",
         "=" * 80,
         "[6. SURVIVAL DASHBOARD OVERLAY DATA (For video editing)]",
         f"  Story Arc: {survival_dashboard['story_arc']}",
-        f"  Outside Condition: {survival_dashboard['outside_condition']}",
-        f"  Threat: {survival_dashboard['threat_description']}",
-        f"  Base Security: {survival_dashboard.get('base_security_level', 'Makeshift Safehouse')}",
-        "=" * 80,
-        "",
+    ]
+    if survival_dashboard.get("outside_condition"):
+        _dash_lines.append(f"  Outside Condition: {survival_dashboard['outside_condition']}")
+    if survival_dashboard.get("threat_description"):
+        _dash_lines.append(f"  Threat: {survival_dashboard['threat_description']}")
+    if survival_dashboard.get("base_security_level"):
+        _dash_lines.append(f"  Base Security: {survival_dashboard['base_security_level']}")
+    _dash_lines.append("=" * 80)
+    _dash_lines.append("")
+    kit_lines.extend(_dash_lines)
+    kit_lines.extend([
         "=" * 80,
         "[7. 2026 PRE-PUBLISH QUALITY AUDIT SUMMARY]",
         f"  • Overall Validation: {'PASS' if prepublish_audit['passed'] else 'FAIL'}",
@@ -3636,6 +3822,36 @@ def generate_us_apocalypse_metadata(
         f"  • Chapter 00:00 Present: {'PASS' if compliance_flags['first_chapter_is_zero'] else 'FAIL'}",
         f"  • YPP Originality Statement: {'PASS' if compliance_flags['ypp_originality_statement_present'] else 'FAIL'}",
         f"  • Unsupported Claims: {', '.join(unsupported_claims) if unsupported_claims else 'NONE (Clean)'}",
+        "=" * 80,
+        "",
+        "=" * 80,
+        "[8. YOUTUBE COMMUNITY TAB POSTS (Pre-launch & Launch Hype)]",
+        "=" * 80,
+        "",
+        "★ POST OPTION A (Interactive Poll Hook — Post 24h before or on release):",
+        "-" * 80,
+        community_posts["post_a_poll_hook"],
+        "-" * 80,
+        "",
+        "★ POST OPTION B (Dramatic Cliffhanger Sneak Peek — Post with thumbnail):",
+        "-" * 80,
+        community_posts["post_b_cliffhanger_teaser"],
+        "-" * 80,
+        "",
+        "★ POST OPTION C (Release Day Drop Announcement):",
+        "-" * 80,
+        community_posts["post_c_launch_announcement"],
+        "-" * 80,
+        "",
+        "=" * 80,
+        "[9. RECOMMENDED CARDS & END SCREEN PLACEMENT (Session Watch Time Booster)]",
+        "=" * 80,
+        f"  • Card 1 (Series Playlist Link) : Place at timestamp [{card_anchors['card_1_playlist']['recommended_timestamp']}]",
+        f"    Teaser Text: \"{card_anchors['card_1_playlist']['teaser_text']}\"",
+        f"  • Card 2 (Next/Previous Arc)    : Place at timestamp [{card_anchors['card_2_next_arc']['recommended_timestamp']}]",
+        f"    Teaser Text: \"{card_anchors['card_2_next_arc']['teaser_text']}\"",
+        f"  • End Screen Timing             : {card_anchors['end_screen']['timing']}",
+        f"    Elements: {', '.join(card_anchors['end_screen']['recommended_elements'])}",
         "=" * 80,
     ])
 
@@ -3666,6 +3882,13 @@ def generate_us_apocalypse_metadata(
         "thumbnail_concepts": thumbnail_concepts,
         "engagement_question": engagement_q,
         "survival_dashboard": survival_dashboard,
+        "community_posts": community_posts,
+        "card_anchors": card_anchors,
+        "series_navigation": {
+            "playlist_url": resolved_playlist,
+            "previous_arc": f"Ep {prev_from}–{prev_to}" if from_ep > 1 else None,
+            "next_arc": f"Ep {next_from}–{next_to}",
+        },
         "compliance_flags": compliance_flags,
         "prepublish_audit": prepublish_audit,
         "fact_usage_audit": fact_usage_audit,
@@ -3679,3 +3902,4 @@ def generate_us_apocalypse_metadata(
 # Convenience alias (no-market public API)
 def generate_youtube_metadata(comic_title, from_ep, to_ep, chapters=None, story_memory=None, download_dir=None, **kwargs):
     return generate_us_apocalypse_metadata(comic_title, from_ep, to_ep, chapters=chapters, story_memory=story_memory, download_dir=download_dir, **kwargs)
+

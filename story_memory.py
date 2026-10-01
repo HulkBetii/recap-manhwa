@@ -248,6 +248,10 @@ class StoryMemory:
             return ""
 
         stopwords = {
+            "The", "A", "An", "He", "She", "They", "We", "You", "It", "His", "Her", "Their", "Our", "My", "Its",
+            "All", "Some", "Many", "Few", "Another", "Other", "Both", "Each", "Such", "No", "Not", "Never",
+            "Always", "Soon", "Now", "Today", "Tomorrow", "Yesterday", "First", "Second", "Third", "Next", "Last",
+            "Meanwhile", "However", "Finally", "Eventually",
             "When", "Everyone", "After", "With", "While", "Panic", "Then",
             "Here", "What", "This", "There", "Turns", "Once", "Even", "Just",
             "Only", "Because", "From", "Into", "Over", "Under", "Before",
