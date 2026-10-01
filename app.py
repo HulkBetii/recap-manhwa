@@ -445,7 +445,7 @@ class NavigationManager:
 
         self.navigation_history.append((now, url))
 
-    async def safe_goto(self, page, url: str, reason: str, caller: str):
+    async def safe_goto(self, page, url: str, reason: str, caller: str, wait_until: str = "domcontentloaded", timeout: int = 45000):
         async with self.mutex:
             self.current_url = url
             self.track_navigation(url, caller)
@@ -467,7 +467,15 @@ class NavigationManager:
             await self.log(f"Starting page.goto to: {url}", "info", reason, caller)
 
             try:
-                response = await page.goto(url, timeout=60000)
+                try:
+                    response = await page.goto(url, wait_until=wait_until, timeout=timeout)
+                except Exception as nav_err:
+                    if "Timeout" in type(nav_err).__name__ or "timeout" in str(nav_err).lower():
+                        await self.log(f"Navigation to {url} timed out on '{wait_until}'. Retrying with 'commit'...", "warning", reason, caller)
+                        response = await page.goto(url, wait_until="commit", timeout=20000)
+                    else:
+                        raise nav_err
+
                 final_url = page.url
                 self.current_url = final_url
 
@@ -3920,10 +3928,15 @@ PHONG CÁCH THAM CHIẾU — TRƯỚC VÀ SAU (STYLE REFERENCE: BEFORE vs AFTER)
 "Và thay vì im lặng tận hưởng, anh làm gì? Lên diễn đàn khoe hầm. Đương nhiên là bị đám anh hùng bàn phím xúm lại chửi cho tơi bời."
 
 6. KHỚP ĐÚNG CHỦ THỂ HÌNH ẢNH & ĐIỀU PHỐI ĐA PANEL (DYNAMIC MULTI-PANEL PACING):
+   - CHỈ TIÊU ĐỊNH LƯỢNG: Hướng tới 15%–25% tổng số phân đoạn là ghép đa khung [Trang_A:70%, Trang_B:30%].
+   - Áp dụng ghép đa khung cho MỌI LOẠI PHÂN CẢNH (không chỉ riêng đánh nhau):
+     * Đối thoại & Tương tác: [Người nói: 70%, Người nghe/Phản ứng: 30%]
+     * Bản tin / Thảm họa: [Màn hình TV/Bản đồ: 30%, Nhân vật/Dân chúng bàng hoàng: 70%]
+     * Chuẩn bị / Gom đồ: [Kho lương/Phòng ốc: 30%, Nhân vật thao tác: 70%]
+     * Hồi hộp / Xuất hiện: [Cánh cổng/Cảnh báo: 30%, Quyết tâm của nhân vật: 70%]
+     * Hành động / Phản đòn: [Đòn đánh: 70%, Trúng đòn/Phản ứng: 30%]
    - Khi lời dẫn miêu tả quái vật, vũ khí, chiêu thức, hoặc bảng hệ thống, BẮT BUỘC chọn đúng trang đặc tả cận cảnh rõ nét của chủ thể đó.
-   - Tuyệt đối KHÔNG chọn ảnh phụ (như lưng hay biểu cảm mờ nhạt của nhân vật) khi lời đọc đang mô tả quái vật lao tới.
-   - PHỐI HỢP ĐA PANEL CHO CẢNH DÀI: Với mọi phân cảnh miêu tả hành động biến chuyển hoặc câu thoại dài hơn 70 ký tự (>3.5s), BẮT BUỘC ghép 2-3 trang ảnh (Đại cảnh hành động/bối cảnh + Cận cảnh phản ứng/chi tiết, ví dụ [39:70%, 40:30%] hoặc [14, 15]).
-   - Khi ghép 2 trang (Đòn đánh -> Phản ứng / Đột kích -> Hậu quả): BẮT BUỘC gán trọng số phần trăm [Trang_chính:70%, Trang_phụ:30%] (ví dụ [39:75%, 40:25%]), KHÔNG chia đều 50/50 làm loãng cảnh hành động chính.
+   - Khi ghép 2 trang: BẮT BUỘC gán trọng số phần trăm [Trang_chính:70%, Trang_phụ:30%] hoặc [Trang_bối_cảnh:30%, Trang_nhân_vật:70%].
    - CẤM giữ 1 hình ảnh tĩnh đơn lẻ quá 4.5 giây trên các phân cảnh hành động liên hoàn!
 
 ĐỊNH DANH NHÂN VẬT CHÍNH (CONTEXTUAL PROTAGONIST ANCHORING):
@@ -4040,11 +4053,15 @@ STYLE REFERENCE — BEFORE vs AFTER (STUDY THESE, WRITE LIKE "AFTER"):
 "And instead of laying low, what does he do? Posts his bunker online. Naturally, the keyboard warriors descended like vultures."
 
 HERO SUBJECT ALIGNMENT MANDATE & DYNAMIC MULTI-PANEL PACING:
+- MULTI-PANEL FREQUENCY TARGET: Target 15%–25% of total segments to be dynamic weighted multi-panel pairings [<page_a>:70%, <page_b>:30%].
+- Apply multi-panel pairings across ALL scene archetypes:
+  * Dialogue & Interaction: [Speaker: 70%, Listener Reaction: 30%]
+  * News / Broadcast / Disaster: [Broadcast Screen: 30%, Crowd/Character Shock: 70%]
+  * Hoarding / Prepper / Prep: [Stockpile / Vault: 30%, Hero Packing Action: 70%]
+  * Suspense & Reveal: [Ominous Anomaly: 30%, Hero Resolve: 70%]
+  * Combat & Action: [Hero Strike: 70%, Monster Counter: 30%]
 - Direct Alignment: If the narration mentions a monster, boss, weapon, explosive attack, or system window, the selected page MUST clearly depict THAT SPECIFIC SUBJECT.
-- NEVER pair a monster/attack sentence with a panel merely showing the character's back or generic reaction if a dedicated action panel exists!
-- MULTI-PANEL DYNAMIC SEQUENCING: For action sequences, revelations, or spoken lines longer than 70 characters (>3.5s), ALWAYS pair the primary action/establishing panel with a secondary reaction/detail panel (e.g. [14:70%, 15:30%] or [14, 15]).
-- WEIGHTED MULTI-PANEL RULE: When pairing 2 pages for cause-and-effect (e.g. Monster lunges -> Character counters), ALWAYS use weighted percentages: [<hero_page>:70%, <reaction_page>:30%] (e.g. [14:75%, 15:25%]).
-- DO NOT use unweighted 50/50 splits on action scenes when one panel is the primary visual subject!
+- WEIGHTED MULTI-PANEL RULE: Always use weighted percentages: [<hero_page>:70%, <reaction_page>:30%] or [<context_page>:30%, <hero_action_page>:70%].
 - NEVER hold a single static image for more than 4.5 seconds on continuous action!
 
 CONTEXTUAL PROTAGONIST ANCHORING (ORGANIC FLOW & ZERO FORMULAIC REPETITION):
@@ -4096,14 +4113,14 @@ MAX 18 WORDS PER SEGMENT:
             _mc_ex = _ex_name
 
     if lang_key in {"en", "english"}:
-        prompt_examples = f"""5 - Turns out, {_mc_ex} wasn't crazy after all—the moment the sirens blare, they're the only one ready.#
+        prompt_examples = f"""[4:30%, 5:70%] - The president delivers the grim broadcast while citizens freeze in absolute shock.#
 [12:75%, 13:25%] - A mutated beast lunges straight at them, but {_mc_ex} simply sidesteps and folds it in half with one clean slash.#
-[14, 15, 16] - With one clean strike, our protagonist drops the monster cold, leaving the greedy teammates with their jaws on the floor.#
+[15:70%, 16:30%] - {_mc_ex} packs the emergency gear and double-checks the bunker supplies one last time.#
 24 - But just as they catch their breath, an ominous red system alert warns that the real nightmare has only begun.#"""
     else:
-        prompt_examples = f"""5 - Hóa ra {_mc_ex} chẳng hề gàn dở—ngay khi còi báo động vang lên, đây là người duy nhất sẵn sàng nghênh đón thảm họa.#
+        prompt_examples = f"""[4:30%, 5:70%] - Tổng thống cúi đầu trên truyền hình khiến toàn dân bàng hoàng chết lặng.#
 [12:75%, 13:25%] - Một con quái vật đột biến lao thẳng tới, nhưng {_mc_ex} chỉ nhẹ nhàng né sang một bên rồi chém đứt cánh tay nó trong chớp mắt.#
-[14, 15, 16] - Một đòn dứt khoát tiễn con quái vật đo ván tại chỗ, khiến đám đồng đội hám danh chỉ biết đứng hình há hốc mồm.#
+[15:70%, 16:30%] - {_mc_ex} nhanh chóng gom đồ sinh tồn, khóa chặt cánh cửa hầm trú ẩn an toàn.#
 24 - Thế nhưng vừa mới kịp thở phào, một dòng cảnh báo đỏ rực từ hệ thống bất ngờ hiện lên, báo hiệu cơn ác mộng thực sự mới chỉ bắt đầu.#"""
 
     _seg_lo = max(22, total_pages // 2)
@@ -4302,23 +4319,32 @@ Do not randomly translate character names or established fictional terms
 unless the glossary or the target language convention clearly supports it.
 
 --------------------------------------------------
-7. PAGE & PANEL SELECTION (HIGH-IMPACT STORY PANELS ONLY & MULTI-PANEL DENSITY)
+7. PAGE & PANEL SELECTION (HIGH-IMPACT STORY PANELS & 15%–25% MULTI-PANEL DENSITY)
 --------------------------------------------------
 
 Every output segment must be assigned to the exact page/panel number(s)
 from the provided comic that visually depicts the event, character, or action
 described in that segment.
 
-Crucial Visual Grounding & Expressiveness Rules:
+Crucial Visual Grounding & Multi-Panel Pacing Rules:
+- MULTI-PANEL FREQUENCY TARGET (15%–25% RATIO MANDATE):
+  * Target 15%–25% of total segments across the episode to be dynamic weighted multi-panel pairings [<page_a>:<percent>%, <page_b>:<percent>%] (e.g. [4:30%, 5:70%], [12:75%, 13:25%], [39:70%, 40:30%]).
+  * Apply multi-panel pairings across ALL narrative scene archetypes (not just combat!):
+    1. Dialogue & Interaction: [<speaker_page>:70%, <listener_reaction_page>:30%]
+    2. World-Building / Broadcast / Disaster: [<broadcast_or_map_page>:30%, <crowd_or_hero_reaction_page>:70%]
+    3. Hoarding / Prepper / Storage: [<vault_or_stockpile_page>:30%, <hero_packing_action_page>:70%]
+    4. Suspense & Reveal: [<ominous_anomaly_page>:30%, <hero_resolve_page>:70%]
+    5. Combat & Action: [<hero_attack_page>:70%, <impact_or_counter_page>:30%]
+
 - DIRECT VISUAL MATCHING / HERO SUBJECT ALIGNMENT (CRITICAL):
   * Direct Alignment: If the narration mentions a monster, boss, weapon, explosive attack, or system window, the selected page MUST be the direct closeup/action panel of THAT EXACT SUBJECT.
   * NEVER assign a monster attack sentence to a panel showing only the character's back/reaction if a dedicated monster action panel exists!
-  * WEIGHTED MULTI-PANEL RULE: When pairing 2 pages for cause-and-effect (e.g. Monster lunges -> Character knocked back), ALWAYS use weighted percentages: [<hero_subject_page>:70%, <reaction_page>:30%] (e.g. [39:75%, 40:25%]).
+  * WEIGHTED MULTI-PANEL RULE: When pairing 2 pages, ALWAYS use weighted percentages: [<hero_subject_page>:70%, <reaction_page>:30%] or [<context_page>:30%, <hero_action_page>:70%].
   * DO NOT use equal 50/50 splits on action scenes when one panel is the primary visual subject!
-- Multi-Panel Density on Key Scenes: Select multi-panel ranges (e.g. [5, 6] or [12:70%, 13:30%]) whenever describing consecutive character actions, reactions, or combats within the same meaningful scene.
+
 - DENSE VISUAL PACING & IMAGE ALLOCATION:
-  * For longer narrative sentences exceeding 100 characters (or duration > 6s), allocate 2 distinct consecutive pages with clear visual evidence (e.g. [<page1>, <page2>]) to maintain visual momentum and prevent viewer fatigue.
-  * For short, punchy phrases (< 40 characters), allocate exactly 1 page. Never assign multiple pages to rapid short phrases.
+  * Whenever a sentence bridges cause-and-effect, a dialogue exchange, a broadcast-to-reaction, or an action-to-impact (even within 10-18 words), allocate a weighted 2-page pairing [<page1>:70%, <page2>:30%].
+  * For rapid, ultra-short punchlines (< 4 words like 'Done.', 'Not even close.'), allocate exactly 1 page.
 - POINT SCORE HARD REQUIREMENT (STRICT ANTI-FILLER):
   * Check the watermark header on every page in the PDF: "Page: <number> - Point: <score>".
   * Point >= {point_score_threshold} is a HARD REQUIREMENT for normal page selection.

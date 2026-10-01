@@ -132,42 +132,12 @@ async def main():
 
     ctx = ConsoleContext(task)
 
-    # Clean downstream artifacts to force fresh Gemini regeneration with new prompt rules
-    clean_target_dir = os.path.join("downloads", "veteran_of_the_apocalypse_1_2_vi_e826e8f9")
-    if os.path.exists(clean_target_dir):
-        print("[RESET] Dọn dẹp kịch bản, âm thanh và video cũ để sinh mới 100% với chuẩn Contextual Anchoring...")
-        story_mem = os.path.join(clean_target_dir, "story_memory.json")
-        if os.path.exists(story_mem):
-            try:
-                os.remove(story_mem)
-            except Exception:
-                pass
-        out_dir = os.path.join(clean_target_dir, "output")
-        if os.path.exists(out_dir):
-            try:
-                shutil.rmtree(out_dir, ignore_errors=True)
-            except Exception:
-                pass
-        for ep in [1, 2]:
-            ep_d = os.path.join(clean_target_dir, f"episode_{ep}")
-            if os.path.exists(ep_d):
-                pdf_dir = os.path.join(ep_d, "pdf")
-                if os.path.exists(pdf_dir):
-                    try:
-                        shutil.rmtree(pdf_dir, ignore_errors=True)
-                    except Exception:
-                        pass
-                for f_del in [
-                    "raw_gemini_response.txt", "recap.json", "narration.txt",
-                    "audio.mp3", "transcript.srt", "video.mp4", "artifact_manifest.json",
-                    "tts_config.json", "content_bounds_cache.json"
-                ]:
-                    f_path = os.path.join(ep_d, f_del)
-                    if os.path.exists(f_path):
-                        try:
-                            os.remove(f_path)
-                        except Exception:
-                            pass
+    # Ensure 100% clean run: Remove any existing veteran_of_the_apocalypse_1_2_vi_* download directory
+    for item in os.listdir("downloads"):
+        if item.startswith("veteran_of_the_apocalypse_1_2_vi"):
+            target_p = os.path.join("downloads", item)
+            print(f"[RESET] Xóa toàn bộ dữ liệu cũ tại {target_p} để thực thi 100% mới từ đầu...")
+            shutil.rmtree(target_p, ignore_errors=True)
 
     pipeline = [
         Stage0_ProjectInit(),
@@ -192,28 +162,6 @@ async def main():
         print(f"\n=======================================================")
         print(f"  >>> BẮT ĐẦU: {stage.name}")
         print(f"=======================================================")
-
-        # Fast-track Image Crawling if raw images exist from previous crawl
-        if stage.name == "Stage 2 - Image Crawling":
-            download_dir = task.artifacts.get("download_dir")
-            if download_dir:
-                for ep in [1, 2]:
-                    target_img_dir = os.path.join(download_dir, f"episode_{ep}", "images")
-                    cached_img_dir = os.path.join("downloads", "veteran_of_the_apocalypse_1_30_en_e826e8f9", f"episode_{ep}", "images")
-                    if os.path.exists(cached_img_dir) and len(os.listdir(cached_img_dir)) > 30:
-                        if not os.path.exists(target_img_dir) or len(os.listdir(target_img_dir)) == 0:
-                            os.makedirs(target_img_dir, exist_ok=True)
-                            print(f"[CACHE] Tự động tái sử dụng {len(os.listdir(cached_img_dir))} ảnh gốc tập {ep} từ đợt crawl trước...")
-                            for fname in os.listdir(cached_img_dir):
-                                src_f = os.path.join(cached_img_dir, fname)
-                                dst_f = os.path.join(target_img_dir, fname)
-                                if not os.path.exists(dst_f):
-                                    shutil.copy2(src_f, dst_f)
-                            from artifact_cache import EpisodeStageCache, stage_fingerprint
-                            ep_dir = os.path.join(download_dir, f"episode_{ep}")
-                            cache = EpisodeStageCache(ep_dir)
-                            fingerprint = stage_fingerprint(task, "image_crawl", ep, extra=task.artifacts.get("chapter_slugs", []))
-                            cache.commit(stage="image_crawl", fingerprint=fingerprint, outputs=[target_img_dir])
 
         for s in task.stages:
             if s["name"] == stage.name:

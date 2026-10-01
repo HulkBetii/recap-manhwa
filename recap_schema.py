@@ -320,6 +320,91 @@ def enforce_monotonic_page_order(segments: list[dict[str, Any]]) -> list[dict[st
     return sanitized
 
 
+def ensure_minimum_multipanel_density(
+    segments: list[dict[str, Any]],
+    *,
+    min_ratio: float = 0.15,
+    target_ratio: float = 0.20,
+    max_page_diff: int = 3,
+) -> list[dict[str, Any]]:
+    """
+    Intelligent Multi-Panel Pacing Enhancer.
+    If the multi-panel ratio in the generated recap is below `min_ratio` (e.g. 15%),
+    identifies suitable single-panel segments (longer narration >= 8 words
+    with adjacent or nearby page context) and safely pairs them with a 70%/30% weighted
+    split to ensure a dynamic, cinematic 15-20% multi-panel ratio.
+    """
+    if not isinstance(segments, list) or len(segments) < 4:
+        return segments
+
+    total = len(segments)
+    multi_count = sum(1 for s in segments if isinstance(s.get("images"), list) and len(s["images"]) > 1)
+    current_ratio = multi_count / total
+
+    if current_ratio >= min_ratio:
+        return segments
+
+    needed_multis = int(math.ceil(total * target_ratio)) - multi_count
+    if needed_multis <= 0:
+        return segments
+
+    enhanced = [dict(s) for s in segments]
+    added = 0
+
+    for i in range(len(enhanced)):
+        if added >= needed_multis:
+            break
+
+        seg = enhanced[i]
+        imgs = seg.get("images", [])
+        if not isinstance(imgs, list) or len(imgs) != 1:
+            continue
+
+        speech = seg.get("speech", "")
+        if len(speech.split()) < 8:
+            continue
+
+        curr_page = imgs[0].get("page")
+        if not isinstance(curr_page, int) or curr_page <= 0:
+            continue
+
+        pair_page = None
+        pair_mode = None
+
+        # Look at next segment
+        if i + 1 < len(enhanced):
+            next_imgs = enhanced[i + 1].get("images", [])
+            if isinstance(next_imgs, list) and len(next_imgs) >= 1:
+                np = next_imgs[0].get("page")
+                if isinstance(np, int) and 0 < np - curr_page <= max_page_diff:
+                    pair_page = np
+                    pair_mode = "curr_70_next_30"
+
+        # If next is not suitable, look at previous segment
+        if not pair_page and i > 0:
+            prev_imgs = enhanced[i - 1].get("images", [])
+            if isinstance(prev_imgs, list) and len(prev_imgs) >= 1:
+                pp = prev_imgs[-1].get("page")
+                if isinstance(pp, int) and 0 < curr_page - pp <= max_page_diff:
+                    pair_page = pp
+                    pair_mode = "prev_30_curr_70"
+
+        if pair_page:
+            if pair_mode == "curr_70_next_30":
+                seg["images"] = [
+                    {"page": curr_page, "priority": 0.7},
+                    {"page": pair_page, "priority": 0.3},
+                ]
+            else:
+                seg["images"] = [
+                    {"page": pair_page, "priority": 0.3},
+                    {"page": curr_page, "priority": 0.7},
+                ]
+            added += 1
+
+    return enhanced
+
+
 def validate_recap_file(path: str | Path, *, max_page: int | None = None) -> bool:
     try:
         load_recap(path, max_page=max_page)

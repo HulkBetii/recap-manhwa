@@ -1592,7 +1592,7 @@ class Stage5_GeminiAutomation(BaseStage):
                         response_text = clean_gemini_response(api_text)
                         parsed_data = parse_gemini_recap_text(response_text)
                         if parsed_data and len(parsed_data) >= 10:
-                            from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops, auto_split_long_segments, enforce_monotonic_page_order
+                            from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops, auto_split_long_segments, enforce_monotonic_page_order, ensure_minimum_multipanel_density
                             has_loop, loop_idx = detect_recap_loop(parsed_data, max_page=len(image_files))
                             if has_loop:
                                 pruned_data, was_pruned = prune_recap_loops(parsed_data, max_page=len(image_files))
@@ -1605,6 +1605,7 @@ class Stage5_GeminiAutomation(BaseStage):
                                     parsed_data = pruned_data
 
                             parsed_data = auto_split_long_segments(parsed_data, max_words=20)
+                            parsed_data = ensure_minimum_multipanel_density(parsed_data, min_ratio=0.15, target_ratio=0.20)
                             parsed_data = enforce_monotonic_page_order(parsed_data)
 
                             normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
@@ -2177,7 +2178,7 @@ class Stage5_GeminiAutomation(BaseStage):
                         await context.log(f"[DEBUG] Phản hồi Gemini quá ngắn ({len(parsed_data)} phân đoạn): {preview}", "warning", episode=ep)
                         raise Exception(f"Kịch bản recap từ {vlm_name} quá ngắn ({len(parsed_data)} phân đoạn), yêu cầu ít nhất 10 phân đoạn.")
                     
-                    from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops, auto_split_long_segments, enforce_monotonic_page_order
+                    from recap_schema import parse_recap_data, detect_recap_loop, prune_recap_loops, auto_split_long_segments, enforce_monotonic_page_order, ensure_minimum_multipanel_density
                     has_loop, loop_idx = detect_recap_loop(parsed_data, max_page=len(image_files))
                     if has_loop:
                         pruned_data, was_pruned = prune_recap_loops(parsed_data, max_page=len(image_files))
@@ -2192,6 +2193,7 @@ class Stage5_GeminiAutomation(BaseStage):
                             raise Exception(f"Kịch bản recap từ {vlm_name} bị lỗi lặp vòng cốt truyện tại phân cảnh {loop_idx} và không thể tự phục hồi an toàn.")
 
                     parsed_data = auto_split_long_segments(parsed_data, max_words=20)
+                    parsed_data = ensure_minimum_multipanel_density(parsed_data, min_ratio=0.15, target_ratio=0.20)
                     parsed_data = enforce_monotonic_page_order(parsed_data)
 
                     normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
