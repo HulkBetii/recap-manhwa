@@ -2,7 +2,6 @@ import os
 import pytest
 import config
 from tts_provider import get_ref_audio_text
-from markets.us_apocalypse import US_APOCALYPSE_MARKET
 from tts_settings import normalize_tts_voice_mode, uses_ai33pro
 
 def test_config_english_voice_settings():
@@ -23,8 +22,9 @@ def test_preset_ref_audio_text_cached():
     text = get_ref_audio_text(ref_path)
     assert text == config.OMNIVOICE_PRESETS["andrew"]["ref_text"]
 
-def test_us_market_default_voice_is_clone_andrew():
-    assert US_APOCALYPSE_MARKET.default_voice_id == "clone_andrew"
+def test_default_voice_is_clone_andrew():
+    # Formerly tested via US_APOCALYPSE_MARKET — now directly from config
+    assert getattr(config, "DEFAULT_EN_VOICE_ID", None) == "clone_andrew"
     assert normalize_tts_voice_mode(None) == "clone_andrew"
     assert normalize_tts_voice_mode("") == "clone_andrew"
     assert uses_ai33pro("clone_andrew") is False

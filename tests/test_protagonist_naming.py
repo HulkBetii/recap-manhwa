@@ -2,12 +2,12 @@ import os
 import json
 import pytest
 from app import generate_gemini_prompt
-from markets.us_apocalypse.prompt import get_us_apocalypse_prompt
+from app import generate_gemini_prompt
 from story_memory import StoryMemory
 
 
 def test_us_apocalypse_prompt_ep1_has_name_anchoring_and_gender_adaptive():
-    prompt = get_us_apocalypse_prompt("Veteran of the Apocalypse", ep=1, total_pages=30)
+    prompt = generate_gemini_prompt("Veteran of the Apocalypse", ep=1, total_pages=30)
     # Check Name Anchoring in Episode 1
     assert "PROTAGONIST NAME IDENTIFICATION & ANCHORING" in prompt
     assert "MUST explicitly introduce the protagonist by their actual name" in prompt
@@ -102,7 +102,7 @@ def test_story_memory_female_protagonist_propagation_to_subsequent_episodes():
     assert ctx_ep2["protagonist_gender"] == "female"
 
     # Test prompt generation for Episode 2 with female protagonist
-    prompt_ep2_us = get_us_apocalypse_prompt("Villainess Reverse", ep=2, total_pages=25, previous_context=ctx_ep2)
+    prompt_ep2_us = generate_gemini_prompt("Villainess Reverse", ep=2, total_pages=25, previous_context=ctx_ep2)
     assert 'Protagonist Name Anchor: "Penelope"' in prompt_ep2_us
     assert "Protagonist Gender: FEMALE" in prompt_ep2_us
     assert "our girl" in prompt_ep2_us

@@ -95,7 +95,6 @@ def test_crawl_request_naver_market_auto_assignment():
             "from_episode": 1,
             "to_episode": 1,
             "language": "en",  # Default en should be auto-switched to ko with korea_apocalypse
-            "market_id": None
         }
 
         res = client.post("/api/crawl", json=payload)
@@ -109,5 +108,4 @@ def test_crawl_request_naver_market_auto_assignment():
         assert task is not None
         assert task.comic_url == "https://comic.naver.com/webtoon/list?titleId=836848"
         assert task.comic_title == "Naver_836848"
-        assert task.payload.get("market_id") == "korea_apocalypse"
         assert task.payload.get("language") == "ko"

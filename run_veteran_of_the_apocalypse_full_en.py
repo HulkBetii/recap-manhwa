@@ -155,7 +155,6 @@ async def main():
         payload={
             "vlm_model": "3.8 Flash",
             "language": "en",
-            "market_id": "us_apocalypse",
             "market": "us_apocalypse",
             "voice_id": config.DEFAULT_EN_VOICE_ID,
             "ref_audio_path": config.DEFAULT_EN_REF_AUDIO,

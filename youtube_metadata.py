@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional, Tuple, Set
 
 # V5: StoryFactGraph for evidence-first structured fact generation
 try:
-    from markets.us_apocalypse.story_fact_graph import (
+    from story_fact_graph import (
         StoryFactGraph, GroundedFact, validate_fact_entailment, ExtractionRule,
         FACT_USAGE_POLICY, can_use_fact_for_surface
     )
@@ -3674,3 +3674,8 @@ def generate_us_apocalypse_metadata(
         "formatted_kit": formatted_kit,
         "provenance_summary": provenance_summary_out,
     }
+
+
+# Convenience alias (no-market public API)
+def generate_youtube_metadata(comic_title, from_ep, to_ep, chapters=None, story_memory=None, download_dir=None, **kwargs):
+    return generate_us_apocalypse_metadata(comic_title, from_ep, to_ep, chapters=chapters, story_memory=story_memory, download_dir=download_dir, **kwargs)

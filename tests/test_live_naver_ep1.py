@@ -17,7 +17,6 @@ from workflow_stages_1 import (
     safe_cv2_imread,
 )
 from workflow_stages_2 import draw_subtitles_on_frame
-import markets
 
 
 class DummyWorkflowManager:
@@ -53,7 +52,6 @@ async def test_live_naver_crawling_and_repagination_ep1():
 
     payload = {
         "language": "ko",
-        "market_id": "korea_apocalypse",
         "concurrency": 8,
         "burn_subtitles": True,
         "repage_use_ocr": False,

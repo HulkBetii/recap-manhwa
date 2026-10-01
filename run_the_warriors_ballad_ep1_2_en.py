@@ -123,7 +123,6 @@ async def main():
             "vlm_model": "3.8 Flash",
             "ninerouter_model": "ag/gemini-3.8-flash-high",
             "language": "en",
-            "market_id": "us_apocalypse",
             "voice_id": config.DEFAULT_EN_VOICE_ID,
             "ref_audio_path": config.DEFAULT_EN_REF_AUDIO,
             "enable_flash_forward_intro": False,

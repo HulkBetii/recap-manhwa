@@ -536,11 +536,6 @@ async def get_voicevox_speakers():
     raise HTTPException(status_code=502, detail="Failed to fetch speakers from VOICEVOX Engine")
 
 
-@app.get("/api/markets")
-async def get_available_markets():
-    from markets import list_markets
-    return list_markets()
-
 
 
 @app.post("/api/config")
@@ -868,7 +863,6 @@ class CrawlRequest(BaseModel):
     remove_text_conf: float = 0.3
     remove_text_radius: int = 3
     comix_group_id: Optional[str] = None
-    market_id: Optional[str] = None
     enable_flash_forward_intro: bool = False
     flash_forward_custom_hook: Optional[str] = None
     streaming_pipeline: bool = True
@@ -3449,30 +3443,27 @@ async def crawl(payload: CrawlRequest):
                 slug = parts[-2]
             comic_title = slug.replace("-", " ").title()
 
-    market_id = payload.market_id
-    if not market_id and "comic.naver.com" in parsed.netloc.lower():
-        market_id = "korea_apocalypse"
-        await sse_logger.log("Tự động kích hoạt Market Profile Hàn Quốc: korea_apocalypse cho Naver Webtoon", "info")
-
     lang = payload.language
+    # Auto-detect Korean for Naver Webtoon URLs
+    if "comic.naver.com" in parsed.netloc.lower() and lang not in ("ko",):
+        lang = "ko"
+        await sse_logger.log("Tự động đặt ngôn ngữ Korean cho Naver Webtoon", "info")
+
+    import config as app_cfg
     v_id = normalize_tts_voice_mode(payload.voice_id)
-    if market_id == "korea_apocalypse":
-        if lang == "en":
-            lang = "ko"
-        from markets.korea_apocalypse.tts import DEFAULT_KR_VOICE_ID
+    if lang == "ko":
+        _kr_default = getattr(app_cfg, "DEFAULT_KR_VOICE_ID", "ko-KR-InJoonNeural")
         if not payload.voice_id or payload.voice_id in ("clone_andrew", "ai33pro", "auto", "default"):
-            v_id = DEFAULT_KR_VOICE_ID
+            v_id = _kr_default
         else:
             v_id = normalize_tts_voice_mode(payload.voice_id)
     elif lang in ("en", "english"):
-        import config as app_cfg
         default_en = getattr(app_cfg, "DEFAULT_EN_VOICE_ID", "clone_andrew")
         if not payload.voice_id or payload.voice_id in ("auto", "default", "ai33pro"):
             v_id = default_en
         else:
             v_id = normalize_tts_voice_mode(payload.voice_id)
     elif lang in ("vi", "vietnamese"):
-        import config as app_cfg
         default_vi = getattr(app_cfg, "DEFAULT_VI_VOICE_ID", "clone")
         if not payload.voice_id or payload.voice_id in ("clone_andrew", "ai33pro", "auto", "default"):
             v_id = default_vi
@@ -3699,16 +3690,10 @@ def generate_gemini_prompt(
     total_pages: int,
     target_language: str = "en",
     glossary: str = None,
-    market_id: str = None,
     point_score_threshold: int = 65,
     previous_context: dict = None,
 ) -> str:
     comic_title = re.sub(r'[\r\n\t"\\]', ' ', str(comic_title or "")).strip()[:150]
-    if market_id:
-        from markets import get_market
-        market = get_market(market_id)
-        if market:
-            return market.get_gemini_prompt(comic_title, ep, total_pages, glossary, previous_context=previous_context)
 
     language_map = {
         "vi": "Vietnamese",
@@ -3755,15 +3740,26 @@ def generate_gemini_prompt(
     # ---------------------------------------------------------
     if ep == 1:
         ip_guidance = []
+        identity_box = ""
         if previous_context:
             p_name = str(previous_context.get("protagonist_name", "")).strip()
+            p_gender = previous_context.get("protagonist_gender", "auto")
             if p_name and len(p_name) > 2 and p_name.upper() not in ["MC", "HERO", "GUY", "BOY", "GIRL"]:
                 ip_guidance.append(f'- CONFIRMED PROTAGONIST NAME: "{p_name}" (You MUST explicitly introduce "{p_name}" in Segment 1 or 2!).')
+                gender_str = {"male": "Male", "female": "Female"}.get(str(p_gender).lower(), "Unknown")
+                identity_box = (
+                    f"\n\nCONFIRMED PROTAGONIST IDENTITY:"
+                    f"\n- Name: {p_name}"
+                    f"\n- Gender: {gender_str}"
+                    f'\n- You MUST explicitly introduce "{p_name}" in Segment 1 or 2!'
+                    f"\n- This identity is authoritative. Use it consistently throughout the script."
+                )
             u_hook = previous_context.get("unique_hook") or previous_context.get("setting")
             if u_hook:
                 ip_guidance.append(f'- IP CONTEXT & HOOK ELEMENT: "{u_hook}" (Weave this specific crisis/hook into the opening!).')
-        
-        ip_guidance_text = ("\n" + "\n".join(ip_guidance)) if ip_guidance else ""
+                identity_box += f'\n- IP CONTEXT & HOOK ELEMENT: "{u_hook}"'
+
+        ip_guidance_text = (("\n" + "\n".join(ip_guidance) + identity_box) if (ip_guidance or identity_box) else "")
 
         intro_rule = f"""
 EPISODE 1 HIGH-RETENTION HOOK (0–5s GOLDEN RULE & 0-15s GOLDEN HOOK RULE):
@@ -3789,6 +3785,19 @@ The very first output line MUST be an explosive, high-retention opening hook tha
   * Zero throat-clearing: NEVER start with greetings ('Welcome', 'Today we are watching', 'Let\\'s dive in', 'Chào mừng các bạn').
   * Assign this hook to the most visually striking opening page showing the protagonist or the inciting incident.
   * No comedy or sarcasm in this opening line—keep it tense, cinematic, and high-stakes.
+
+CHARACTER-FIRST OPENING OVERRIDE (CRITICAL FOR RETENTION):
+Even if the opening comic pages (Pages 1-5) depict only:
+  - city destruction / smoke / rubble
+  - wide-angle disaster establishing shots
+  - crowds in panic without a clear protagonist
+You MUST narrate the event through the protagonist's survival lens from Line 1!
+
+Segment 1 or Segment 2 (0-15s) must communicate:
+  1. WHO the protagonist is (name + one defining trait)
+  2. WHERE they are when the crisis hits
+  3. ONE immediately-gripping edge they have (secret skill, prep item, hidden status)
+NEVER open with pure scenery or crowd narration alone. Anchor the protagonist immediately.
 """
 
     elif previous_context:
@@ -3942,6 +3951,13 @@ GIỚI TÍNH & NHÂN VẬT PHỤ:
 AN TOÀN YOUTUBE (YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY):
 - Dùng: 'tiêu diệt', 'hạ gục', 'tiễn lên đường', 'xử đẹp', 'quét sạch', 'cho đo ván', 'thổi bay'.
 - Dùng chữ Latin tiêu chuẩn tiếng Việt. Giữ nguyên tên riêng từ glossary.
+
+THUẬT NGỮ THỂ LOẠI SINH TỒN & MANHWA TIẾNG VIỆT:
+- Kho không gian / Nhẫn không gian / Kho vô hạn, Trọng sinh / Xuyên không, Thức tỉnh / Tỉnh thức, Cấp S / Rank S, Dungeon / Hố không gian, Bảng trạng thái / Cửa sổ hệ thống, OP / Bá đạo / Bất bại.
+
+GIỚI HẠN ĐỘ DÀI SEGMENT (MAX 18 WORDS PER SEGMENT):
+- Mỗi segment tối đa 18 từ. Câu quá dài → TÁCH làm 2 segment riêng biệt.
+- Segment ngắn, súc tích ưu tiên hơn segment dài rườm rà.
 """
     else:
         language_rules = f"""
@@ -4065,17 +4081,29 @@ YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY:
 - To prevent YouTube demonetization, NEVER use graphic prohibited terms (suicide, murder, massacre, slaughter, bloodbath, kill, decapitate).
 - Always use dramatic high-energy safe alternatives: 'eliminated', 'dispatched', 'wiped out', 'taken down', 'neutralized', 'sent to the afterlife', 'erased', 'finished off', 'crushed'.
 - Follow the glossary consistently.
+
+MAX 18 WORDS PER SEGMENT:
+- Each segment: 1-2 punchy sentences, MAX 18 WORDS total. Split longer narration into separate segments.
+- Short and punchy beats viewer fatigue every time.
 """
 
+
+    # Dynamic example name — use confirmed MC from context, otherwise generic placeholder
+    _mc_ex = "the protagonist"
+    if previous_context:
+        _ex_name = str(previous_context.get("protagonist_name", "")).strip()
+        if _ex_name and len(_ex_name) > 2 and _ex_name.upper() not in ["MC", "HERO", "GUY", "BOY", "GIRL"]:
+            _mc_ex = _ex_name
+
     if lang_key in {"en", "english"}:
-        prompt_examples = """5 - Turns out, Paran wasn't crazy after all—the moment the sirens blare, he's the only one ready.#
-[12:75%, 13:25%] - A mutated beast lunges straight for him, but Paran simply sidesteps and folds it in half with one clean slash.#
-[14, 15, 16] - With one clean strike, our boy drops the monster cold, leaving his greedy teammates with their jaws on the floor.#
-24 - But just as he catches his breath, an ominous red system alert warns him that the real nightmare has only begun.#"""
+        prompt_examples = f"""5 - Turns out, {_mc_ex} wasn't crazy after all—the moment the sirens blare, they're the only one ready.#
+[12:75%, 13:25%] - A mutated beast lunges straight at them, but {_mc_ex} simply sidesteps and folds it in half with one clean slash.#
+[14, 15, 16] - With one clean strike, our protagonist drops the monster cold, leaving the greedy teammates with their jaws on the floor.#
+24 - But just as they catch their breath, an ominous red system alert warns that the real nightmare has only begun.#"""
     else:
-        prompt_examples = """5 - Hóa ra Paran chẳng hề gàn dở—ngay khi còi báo động vang lên, cậu là người duy nhất sẵn sàng nghênh đón thảm họa.#
-[12:75%, 13:25%] - Một con quái vật đột biến lao thẳng tới, nhưng Paran chỉ nhẹ nhàng né sang một bên rồi chém đứt cánh tay nó trong chớp mắt.#
-[14, 15, 16] - Một đòn dứt khoát của thanh niên nhà ta tiễn con quái vật đo ván tại chỗ, khiến hai gã đồng đội hám danh chỉ biết đứng hình há hốc mồm.#
+        prompt_examples = f"""5 - Hóa ra {_mc_ex} chẳng hề gàn dở—ngay khi còi báo động vang lên, đây là người duy nhất sẵn sàng nghênh đón thảm họa.#
+[12:75%, 13:25%] - Một con quái vật đột biến lao thẳng tới, nhưng {_mc_ex} chỉ nhẹ nhàng né sang một bên rồi chém đứt cánh tay nó trong chớp mắt.#
+[14, 15, 16] - Một đòn dứt khoát tiễn con quái vật đo ván tại chỗ, khiến đám đồng đội hám danh chỉ biết đứng hình há hốc mồm.#
 24 - Thế nhưng vừa mới kịp thở phào, một dòng cảnh báo đỏ rực từ hệ thống bất ngờ hiện lên, báo hiệu cơn ác mộng thực sự mới chỉ bắt đầu.#"""
 
     _seg_lo = max(22, total_pages // 2)

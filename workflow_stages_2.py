@@ -130,40 +130,21 @@ class Stage8_LocalTTS(BaseStage):
         download_dir = task.artifacts.get("download_dir")
         
         language = task.payload.get("language", "en")
-        market_id = task.payload.get("market_id")
         raw_voice_id = task.payload.get("voice_id")
         rate = "+0%"
         pitch = "+0Hz"
 
-        from markets import get_market
-        market = get_market(market_id)
-        if market:
-            if not raw_voice_id or raw_voice_id in ("ai33pro", "auto", "default"):
-                voice_id = market.default_voice_id
-            else:
-                voice_id = raw_voice_id
-            if market.voice_rate:
-                rate = market.voice_rate
-            if market.voice_pitch:
-                pitch = market.voice_pitch
-        elif language == "ko":
-            from markets.korea_apocalypse.tts import (
-                DEFAULT_KR_VOICE_ID,
-                DEFAULT_KR_VOICE_RATE,
-                DEFAULT_KR_VOICE_PITCH,
-            )
-            voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else DEFAULT_KR_VOICE_ID
-            rate = DEFAULT_KR_VOICE_RATE
-            pitch = DEFAULT_KR_VOICE_PITCH
+        import config as _tts_cfg
+        if language == "ko":
+            _default = getattr(_tts_cfg, "DEFAULT_KR_VOICE_ID", "ko-KR-InJoonNeural")
+            voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else _default
+            rate  = getattr(_tts_cfg, "DEFAULT_KR_VOICE_RATE",  "+0%")
+            pitch = getattr(_tts_cfg, "DEFAULT_KR_VOICE_PITCH", "+0Hz")
         elif language in ("ja", "japanese"):
-            from markets.japan_isekai_territory.tts import (
-                DEFAULT_JA_VOICE_ID,
-                DEFAULT_JA_VOICE_RATE,
-                DEFAULT_JA_VOICE_PITCH,
-            )
-            voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else DEFAULT_JA_VOICE_ID
-            rate = DEFAULT_JA_VOICE_RATE
-            pitch = DEFAULT_JA_VOICE_PITCH
+            _default = getattr(_tts_cfg, "DEFAULT_JA_VOICE_ID", "ja-JP-KeitaNeural")
+            voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else _default
+            rate  = getattr(_tts_cfg, "DEFAULT_JA_VOICE_RATE",  "+0%")
+            pitch = getattr(_tts_cfg, "DEFAULT_JA_VOICE_PITCH", "+0Hz")
         elif language in ("vi", "vietnamese"):
             import config
             default_vi_voice = getattr(config, "DEFAULT_VI_VOICE_ID", "clone")
@@ -2957,32 +2938,28 @@ class Stage12_MetadataReports(BaseStage):
             "flash_forward_intro": task.artifacts.get("flash_forward_intro")
         }
 
-        market_id = task.payload.get("market_id")
-        if market_id:
-            try:
-                from markets import get_market
-                m = get_market(market_id)
-                if m:
-                    chapters = task.artifacts.get("chapters")
-                    story_memory = None
-                    story_mem_path = os.path.join(download_dir, "story_memory.json")
-                    if os.path.exists(story_mem_path):
-                        try:
-                            with open(story_mem_path, "r", encoding="utf-8") as smf:
-                                story_memory = json.load(smf)
-                        except Exception:
-                            pass
-                    metadata["youtube_metadata"] = m.generate_youtube_metadata(
-                        task.comic_title or "Comic",
-                        task.from_episode or 1,
-                        task.to_episode or 1,
-                        chapters=chapters,
-                        story_memory=story_memory,
-                        download_dir=download_dir,
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to generate market YouTube metadata: {e}")
-        
+        try:
+            from youtube_metadata import generate_youtube_metadata
+            chapters = task.artifacts.get("chapters")
+            story_memory = None
+            story_mem_path = os.path.join(download_dir, "story_memory.json")
+            if os.path.exists(story_mem_path):
+                try:
+                    with open(story_mem_path, "r", encoding="utf-8") as smf:
+                        story_memory = json.load(smf)
+                except Exception:
+                    pass
+            metadata["youtube_metadata"] = generate_youtube_metadata(
+                task.comic_title or "Comic",
+                task.from_episode or 1,
+                task.to_episode or 1,
+                chapters=chapters,
+                story_memory=story_memory,
+                download_dir=download_dir,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate YouTube metadata: {e}")
+
         yt_meta = metadata.get("youtube_metadata")
         compliance_audit = None
         if yt_meta:

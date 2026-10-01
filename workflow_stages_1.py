@@ -1383,7 +1383,6 @@ class Stage5_GeminiAutomation(BaseStage):
             recap_json_path = os.path.join(ep_dir, "recap.json")
 
             image_files = list_image_files(images_pdf_dir)
-            market_id = task.payload.get("market_id")
 
             # Load rolling story context from previous episode if available
             previous_context = None
@@ -1428,19 +1427,7 @@ class Stage5_GeminiAutomation(BaseStage):
             elif task.payload.get("protagonist_name"):
                 confirmed_mc_name = str(task.payload["protagonist_name"]).strip()
 
-            # Priority 2: Market metadata character dictionary
-            if not confirmed_mc_name:
-                try:
-                    from markets.us_apocalypse.metadata import get_character_names
-                    mem_dict = memory.__dict__ if hasattr(memory, '__dict__') else None
-                    char_dict = get_character_names(comic_title, story_memory=mem_dict)
-                    resolved_mc = char_dict.get("mc", "").strip()
-                    if resolved_mc and resolved_mc not in ["The Lone Survivor", "The Veteran Survivor", ""]:
-                        confirmed_mc_name = resolved_mc
-                except Exception:
-                    pass
-
-            # Priority 3: Existing memory / glossary
+            # Priority 2: Existing memory / glossary
             if not confirmed_mc_name and memory and memory.protagonist_name:
                 confirmed_mc_name = memory.protagonist_name
                 confirmed_gender = memory.protagonist_gender
@@ -1461,7 +1448,6 @@ class Stage5_GeminiAutomation(BaseStage):
                 ep,
                 len(image_files),
                 language,
-                market_id=market_id,
                 previous_context=previous_context,
             )
 

@@ -93,16 +93,11 @@ class StreamingPipelineConsumer:
         srt_path = os.path.join(ep_dir, "transcript.srt")
         tts_cache_path = os.path.join(ep_dir, "tts_cache.json") if os.path.exists(os.path.join(ep_dir, "tts_cache.json")) else os.path.join(ep_dir, "tts_config.json")
 
-        market_id = task.payload.get("market_id")
         raw_voice_id = task.payload.get("voice_id")
-        from markets import get_market
-        market = get_market(market_id)
-        voice_id = market.default_voice_id if market and (not raw_voice_id or raw_voice_id in ("ai33pro", "auto", "default")) else (raw_voice_id or "auto")
-        rate = market.voice_rate if market and market.voice_rate else "+0%"
-        pitch = market.voice_pitch if market and market.voice_pitch else "+0Hz"
-        ref_audio_path = getattr(market, "reference_audio", None) if market else None
-        if not ref_audio_path:
-            ref_audio_path = task.payload.get("ref_audio_path")
+        voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else "auto"
+        rate = "+0%"
+        pitch = "+0Hz"
+        ref_audio_path = task.payload.get("ref_audio_path")
         if not ref_audio_path and voice_id in ("auto", "clone", "omnivoice", "default"):
             import config
             language = task.payload.get("language", "en")

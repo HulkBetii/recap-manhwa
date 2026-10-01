@@ -3,7 +3,6 @@ import json
 import pytest
 from story_memory import StoryMemory
 from app import generate_gemini_prompt
-import markets
 
 
 def test_story_memory_save_and_load(tmp_path):
@@ -94,8 +93,7 @@ def test_generate_gemini_prompt_with_previous_context_vietnamese():
     assert "BINGE TRANSITION RULE FOR LINE 1" in prompt
 
 
-def test_us_apocalypse_prompt_with_previous_context():
-    market = markets.get_market("us_apocalypse")
+def test_generate_gemini_prompt_with_previous_context_en_continuation():
     prev_ctx = {
         "previous_episode": 1,
         "closing_cliffhanger": "The siren wailed as millions of subterranean worms breached the surface.",
@@ -103,11 +101,10 @@ def test_us_apocalypse_prompt_with_previous_context():
         "macro_context": "",
     }
 
-    prompt = market.get_gemini_prompt("Veteran of the Apocalypse", ep=2, total_pages=30, previous_context=prev_ctx)
-    assert "EPISODE CONTINUATION (BINGE-WATCHING PACING & ROLLING STORY MEMORY)" in prompt
+    prompt = generate_gemini_prompt("Veteran of the Apocalypse", 2, 30, target_language="en", previous_context=prev_ctx)
     assert "subterranean worms" in prompt
     assert "BINGE TRANSITION RULE FOR LINE 1" in prompt
-    assert "Start immediately in media res" in prompt
+    assert "in media res" in prompt.lower()
 
 
 def test_rolling_macro_context_sliding_window():

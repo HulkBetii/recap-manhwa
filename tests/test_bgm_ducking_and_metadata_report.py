@@ -26,7 +26,6 @@ async def test_stage12_metadata_and_youtube_kit(tmp_path):
         from_episode=1,
         to_episode=2,
         payload={
-            "market_id": "us_apocalypse",
         }
     )
     task.artifacts["download_dir"] = str(download_dir)
