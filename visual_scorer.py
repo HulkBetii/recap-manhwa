@@ -140,6 +140,8 @@ class VisualSemanticScorer:
         gray = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2GRAY)
         hsv = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2HSV)
         ycrcb = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2YCrCb)
+        sat = hsv[:, :, 1]
+        val = hsv[:, :, 2]
 
         if bg_val is None:
             border = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
@@ -237,6 +239,30 @@ class VisualSemanticScorer:
         # AI Face Detection (YuNet ONNX)
         detected_faces = cls.detect_faces(small_bgr)
         num_faces = len(detected_faces)
+        img_area = float(calc_w * calc_h)
+        face_area = sum(f[2] * f[3] for f in detected_faces) if num_faces > 0 else 0
+        face_area_ratio = float(face_area / img_area)
+
+        # Morphological speech bubble detection (includes enclosed text + bubble borders)
+        bubble_pixels = ((gray > 190) & (sat < 40)).astype(np.uint8)
+        kernel_size = max(15, min(calc_w, calc_h) // 25)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        closed_bubble = cv2.morphologyEx(bubble_pixels, cv2.MORPH_CLOSE, kernel)
+        bubble_contours, _ = cv2.findContours(closed_bubble, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        max_bubble_area = max([cv2.contourArea(c) for c in bubble_contours], default=0.0)
+        closed_bubble_ratio = float(max_bubble_area / img_area)
+        max_b_cnt = max(bubble_contours, key=cv2.contourArea) if bubble_contours else None
+        if max_b_cnt is not None:
+            _bx, _by, _bw, _bh = cv2.boundingRect(max_b_cnt)
+            bubble_bbox_ratio = float((_bw * _bh) / img_area)
+            bubble_bw_ratio = float(_bw / max(1, calc_w))
+            bubble_bh_ratio = float(_bh / max(1, calc_h))
+        else:
+            bubble_bbox_ratio = bubble_bw_ratio = bubble_bh_ratio = 0.0
+
+        raw_bubble_coverage = float(np.mean(bubble_pixels))
+        bubble_coverage_ratio = max(raw_bubble_coverage, closed_bubble_ratio)
+
         if num_faces > 0:
             max_conf = float(max(f[-1] for f in detected_faces))
             # Human/character face strongly anchors character presence
@@ -246,11 +272,18 @@ class VisualSemanticScorer:
             )
         else:
             # When NO face is detected, prevent false-positive skin-tone artifacts
-            # (e.g. orange wooden walls, sunlight, or bare walking legs) from inflating score.
+            # (e.g. orange wooden walls, sunlight, or bare walking legs) or central speech bubbles from inflating score.
             capped_skin = min(25.0, skin_score)
-            character_presence = float(
+            raw_char_p = float(
                 np.clip(0.35 * capped_skin + 0.35 * focal_score + 0.30 * contour_score, 0.0, 60.0)
             )
+            # If bubble occupies significant space without faces, suppress fake character presence from text
+            if closed_bubble_ratio >= 0.35 or bubble_bbox_ratio >= 0.50:
+                character_presence = min(raw_char_p, 5.0)
+            elif closed_bubble_ratio >= 0.20:
+                character_presence = min(raw_char_p, 15.0)
+            else:
+                character_presence = raw_char_p
 
         # ==================================================================
         # 4. Action / Context  (Weight: 0.10)
@@ -303,11 +336,6 @@ class VisualSemanticScorer:
         white_ratio = float(np.mean(gray > 205))
         black_ratio = float(np.mean(gray < 40))
         void_ratio = white_ratio + black_ratio
-
-        # Bubble coverage ratio: fraction of image covered by speech bubble
-        # regions (bright white blobs with very low saturation)
-        bubble_cov_mask = (gray > 205) & (sat < 30)
-        bubble_coverage_ratio = float(np.mean(bubble_cov_mask))
         gray_std = float(np.std(gray))
 
         from moderation_utils import is_text_bubble_dominant
@@ -319,9 +347,11 @@ class VisualSemanticScorer:
             or (h < 400 and (void_ratio > 0.65 or art_color_ratio < 0.20) and skin_ratio < 0.02)
         )
         is_mostly_bubble = (
-            # First condition: pure text-only panels (no face, no skin) with heavy bubble coverage.
-            # num_faces == 0 guard ensures "talking head" panels are never marked as bubble-junk.
-            (bubble_coverage_ratio > 0.40 and skin_ratio < 0.03 and num_faces == 0)
+            (closed_bubble_ratio >= 0.50)
+            or (closed_bubble_ratio >= 0.35 and (num_faces == 0 or face_area_ratio < 0.04))
+            or (closed_bubble_ratio >= 0.25 and skin_ratio < 0.02 and art_color_ratio < 0.18)
+            or (bubble_bw_ratio >= 0.70 and bubble_bh_ratio >= 0.45 and closed_bubble_ratio >= 0.20 and skin_ratio < 0.02)
+            or (bubble_coverage_ratio > 0.40 and skin_ratio < 0.03 and num_faces == 0)
             or (bubble_coverage_ratio > 0.35 and character_presence < 25.0)
             or (bubble_coverage_ratio > 0.55 and visual_detail < 30.0)
         )
@@ -342,6 +372,8 @@ class VisualSemanticScorer:
             and semantic_similarity >= 62.0   # rich non-background content required
             and visual_detail >= 52.0          # high edge / gradient complexity required
             and occupancy_ratio >= 0.45        # panel must be >45% occupied
+            and bubble_coverage_ratio < 0.15   # must NOT be covered by speech bubbles
+            and closed_bubble_ratio < 0.15     # must NOT have speech bubbles
             and not is_empty_box
             and not is_mostly_bubble
             and not is_solid_or_gutter

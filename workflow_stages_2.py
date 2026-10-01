@@ -1535,10 +1535,10 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 char_p = bd.get("character_presence", 0.0)
                                 is_bad = (
                                     bd.get("is_meaningless", False)
-                                    or sc < 52
-                                    or (bubble_cov > 0.30 and char_p < 55.0)
-                                    or bubble_cov > 0.48
-                                    or (char_p < 30.0 and not bd.get("is_establishing_shot", False))
+                                    or sc < 50
+                                    or (bubble_cov > 0.25 and char_p < 50.0)
+                                    or bubble_cov > 0.35
+                                    or (char_p < 25.0 and not bd.get("is_establishing_shot", False))
                                 )
                             except Exception:
                                 sc, char_p, is_bad = 70, 50.0, False
@@ -1588,12 +1588,12 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                             bad_page_idx = int(best_item[0]["page"]) - 1
                             best_composite = -1
                             best_idx = bad_page_idx
-                            for delta in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5]:
+                            for delta in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8, -8, 9, -9, 10, -10]:
                                 candidate = bad_page_idx + delta
                                 if 0 <= candidate < len(image_files):
                                     cand_page = candidate + 1
-                                    # Strict Deduplication: Do NOT pick any page that was displayed in the last 5 shots or already used as a donor elsewhere
-                                    if cand_page in recent_displayed_pages[-5:] or cand_page in global_used_donors:
+                                    # Strict Deduplication: Do NOT pick any page that was displayed in the last 4 shots or already used as a donor elsewhere
+                                    if cand_page in recent_displayed_pages[-4:] or cand_page in global_used_donors:
                                         continue
                                     im_path = os.path.join(images_blur_dir, image_files[candidate])
                                     if not os.path.exists(im_path):
@@ -1603,14 +1603,15 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                         sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
                                         char_p = bd.get("character_presence", 0.0)
                                         bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
+                                        is_est = bd.get("is_establishing_shot", False)
                                         # Stateful Deduplication Penalty: penalize recently used pages
-                                        recent_penalty = 35.0 if cand_page in recent_displayed_pages[-4:] else 0.0
+                                        recent_penalty = 25.0 if cand_page in recent_displayed_pages[-3:] else 0.0
                                         composite = sc * 0.60 + char_p * 0.40 - recent_penalty
-                                        # Adaptive Donor Qualification: char_p >= 30.0 covers shaded/hooded character portraits (sc >= 58)
+                                        # Strict Donor Qualification: reject any bubble-dominant panels
                                         donor_valid = (
                                             not bd.get("is_meaningless", False)
-                                            and bubble_cov < 0.45
-                                            and ((char_p >= 40.0 and sc >= 55) or (char_p >= 30.0 and sc >= 58))
+                                            and bubble_cov < 0.30
+                                            and (char_p >= 35.0 or (is_est and sc >= 60))
                                             and composite > best_composite
                                         )
                                         if donor_valid:
@@ -1618,25 +1619,43 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                             best_idx = candidate
                                     except Exception:
                                         pass
-                            if best_composite >= 50:
+                            if best_composite >= 45:
                                 chosen_page = best_idx + 1
                                 global_used_donors.add(chosen_page)
                                 seg_images = [{"page": chosen_page, "priority": 1.0}]
                                 print(f"  [Stage10] Replaced low-quality/junk/bubble page {bad_page_idx + 1} with character page {chosen_page} (composite={best_composite:.1f})")
                             else:
-                                # Fallback: drop any explicitly meaningless panels from seg_images if better candidates exist
-                                non_meaningless = [c[0] for c in scored_candidates if not c[4] and c[1] >= 40 and int(c[0]["page"]) not in recent_displayed_pages[-5:] and int(c[0]["page"]) not in global_used_donors]
-                                if non_meaningless:
-                                    chosen_fallback = int(non_meaningless[0]["page"])
-                                    global_used_donors.add(chosen_fallback)
-                                    seg_images = [non_meaningless[0]]
+                                # Fallback: search globally for best hero panel in episode
+                                global_best_page = None
+                                global_best_comp = -1
+                                for g_idx in range(len(image_files)):
+                                    g_page = g_idx + 1
+                                    if g_page in recent_displayed_pages[-2:]:
+                                        continue
+                                    g_path = os.path.join(images_blur_dir, image_files[g_idx])
+                                    if not os.path.exists(g_path):
+                                        g_path = os.path.join(images_pdf_dir, image_files[g_idx])
+                                    try:
+                                        g_bgr = safe_cv2_imread(g_path)
+                                        g_sc, g_bd = VisualSemanticScorer.calculate_score(g_bgr)
+                                        if not g_bd.get("is_meaningless", False) and g_bd.get("bubble_coverage_ratio", 0.0) < 0.25:
+                                            g_comp = g_sc * 0.6 + g_bd.get("character_presence", 0.0) * 0.4
+                                            if g_comp > global_best_comp:
+                                                global_best_comp = g_comp
+                                                global_best_page = g_page
+                                    except Exception:
+                                        pass
+                                if global_best_page:
+                                    global_used_donors.add(global_best_page)
+                                    seg_images = [{"page": global_best_page, "priority": 1.0}]
+                                    print(f"  [Stage10] Global fallback replaced page {bad_page_idx + 1} with page {global_best_page} (comp={global_best_comp:.1f})")
                                 elif best_item:
                                     seg_images = [{"page": best_item[0]["page"], "priority": 1.0}]
 
                 # Long-Duration Multi-Image Auto-Donor Injection (v2.1.0):
                 # Two-pass search strategy:
-                #   Pass 1 (quality-first): ±3 pages, sc >= 45, composite >= 45.0
-                #   Pass 2 (wider fallback): ±8 pages, sc >= 40, composite >= 38.0
+                #   Pass 1 (quality-first): ±3 pages, sc >= 48, composite >= 48.0
+                #   Pass 2 (wider fallback): ±8 pages, sc >= 42, composite >= 40.0
                 # Threshold lowered from 4.8s → 4.0s (MIN_SUB_DURATION=2.0s × 2 shots)
                 # to capture clone_andrew TTS segments averaging 3.8–4.2s.
                 # Injected images are tagged _is_donor=True so the pacing guardrail
@@ -1666,14 +1685,15 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                                 sc, bd = VisualSemanticScorer.calculate_score(im_bgr)
                                 char_p = bd.get("character_presence", 0.0)
                                 bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
-                                # "Talking face" panels (clear face + char_p high) are valid donors
-                                # even if bubble_cov > 0.45. Hard cap: bubble > 0.60 is always bad.
-                                has_clear_face = char_p >= 55.0 and not bd.get("is_meaningless", False)
+                                is_est = bd.get("is_establishing_shot", False)
+                                is_meaningless = bd.get("is_meaningless", False)
+                                # Strict Donor qualification:
+                                # Must NOT be meaningless, bubble_cov must be < 0.30, and must have real character presence or true establishing shot
                                 is_bad = (
-                                    bd.get("is_meaningless", False)
+                                    is_meaningless
                                     or sc < sc_floor
-                                    or (bubble_cov > 0.45 and not has_clear_face)
-                                    or bubble_cov > 0.60
+                                    or bubble_cov > 0.30
+                                    or (char_p < 35.0 and not is_est)
                                 )
                                 if not is_bad:
                                     composite = sc * 0.60 + char_p * 0.40
@@ -1686,12 +1706,12 @@ class Stage10_EpisodeVideoRendering(BaseStage):
 
                     # Pass 1: strict quality (original behavior)
                     best_donors = _find_long_dur_donors([1, -1, 2, -2, 3, -3],
-                                                        sc_floor=45, composite_floor=45.0)
+                                                        sc_floor=48, composite_floor=48.0)
 
                     # Pass 2: wider search only if Pass 1 yielded nothing
                     if not best_donors:
                         best_donors = _find_long_dur_donors([4, -4, 5, -5, 6, -6, 7, -7, 8, -8],
-                                                            sc_floor=40, composite_floor=38.0)
+                                                            sc_floor=42, composite_floor=42.0)
                         if best_donors:
                             print(f"  [Stage10] LongDur Pass2 donor Seg{s_idx} "
                                   f"pg{orig_page_idx+1} composite={best_donors[0][1]:.1f}")
@@ -2672,7 +2692,7 @@ class Stage11_FinalVideoAssembly(BaseStage):
         output_dir = os.path.join(download_dir, "output")
         os.makedirs(output_dir, exist_ok=True)
         
-        folder_name = task.artifacts.get("download_folder_name")
+        folder_name = task.artifacts.get("download_folder_name") or os.path.basename(download_dir)
         final_video_name = f"{folder_name}.mp4"
         final_srt_name = f"{folder_name}.srt"
         

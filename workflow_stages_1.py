@@ -3550,7 +3550,8 @@ class Stage2b_IntelligentRepagination(BaseStage):
                             bubble_cov = bd.get("bubble_coverage_ratio", 0.0)
                             char_p = bd.get("character_presence", 0.0)
                             is_meaningless = bd.get("is_meaningless", False)
-                            if is_meaningless or sc < 35 or (bubble_cov > 0.82 and char_p < 20.0):
+                            is_est_shot = bd.get("is_establishing_shot", False)
+                            if is_meaningless or sc < 35 or (bubble_cov > 0.40 and char_p < 25.0 and not is_est_shot) or bubble_cov > 0.55:
                                 skipped_count += 1
                                 continue
                         except Exception:

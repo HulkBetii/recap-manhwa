@@ -265,8 +265,6 @@ def is_text_bubble_dominant(
     h, w = img_bgr.shape[:2]
     if h < 20 or w < 20:
         return False, "too_small"
-    if h > 1400:
-        return False, "too_tall_for_isolated_bubble"
 
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV) if img_bgr.ndim == 3 else None
@@ -276,19 +274,77 @@ def is_text_bubble_dominant(
         val = hsv[:, :, 2]
         art_color_ratio = float(np.mean((sat > 25) & (val > 45)))
     else:
+        sat = np.zeros_like(gray)
         art_color_ratio = 0.0
 
+    # Skin tone detection
+    if img_bgr.ndim == 3:
+        ycrcb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2YCrCb)
+        cr = ycrcb[:, :, 1]
+        cb = ycrcb[:, :, 2]
+        y_chan = ycrcb[:, :, 0]
+        skin_mask = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127) & (y_chan >= 40) & (y_chan <= 245)
+        skin_ratio = float(np.mean(skin_mask))
+    else:
+        skin_ratio = 0.0
+
+    # Morphological speech bubble detection
+    img_area = float(h * w)
+    bubble_pixels = ((gray > 190) & (sat < 40)).astype(np.uint8)
+    kernel_size = max(15, min(w, h) // 25)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    closed = cv2.morphologyEx(bubble_pixels, cv2.MORPH_CLOSE, kernel)
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    max_c_area = max([cv2.contourArea(c) for c in contours], default=0.0)
+    closed_bubble_ratio = float(max_c_area / img_area)
+
+    max_cnt = max(contours, key=cv2.contourArea) if contours else None
+    if max_cnt is not None:
+        bx, by, bw, bh = cv2.boundingRect(max_cnt)
+        bw_ratio = float(bw / max(1, w))
+        bh_ratio = float(bh / max(1, h))
+    else:
+        bw_ratio = bh_ratio = 0.0
+
+    # AI Face detection if available
+    try:
+        from visual_scorer import VisualSemanticScorer
+        detected_faces = VisualSemanticScorer.detect_faces(img_bgr)
+        num_faces = len(detected_faces)
+        face_area = sum(f[2] * f[3] for f in detected_faces) if num_faces > 0 else 0
+        face_area_ratio = float(face_area / img_area)
+    except Exception:
+        detected_faces = []
+        num_faces = 0
+        face_area_ratio = 0.0
+
+    # 1. Massive bubble > 50%
+    if closed_bubble_ratio >= 0.50:
+        return True, f"massive_bubble_{closed_bubble_ratio:.2f}"
+
+    # 2. Dominant bubble >= 35% without significant character faces
+    if closed_bubble_ratio >= 0.35 and (num_faces == 0 or face_area_ratio < 0.04):
+        return True, f"dominant_bubble_{closed_bubble_ratio:.2f}"
+
+    # 3. Moderate bubble >= 25% with minimal artwork and no skin
+    if closed_bubble_ratio >= 0.25 and skin_ratio < 0.02 and art_color_ratio < 0.18:
+        return True, f"bubble_low_art_{closed_bubble_ratio:.2f}"
+
+    # 4. Central bubble bounding box spanning wide area with no skin
+    if bw_ratio >= 0.70 and bh_ratio >= 0.45 and closed_bubble_ratio >= 0.20 and skin_ratio < 0.02:
+        return True, f"central_bubble_box_{bw_ratio:.2f}x{bh_ratio:.2f}"
+
+    # 5. Void / solid dominant checks (legacy fast paths)
     white_ratio = float(np.mean(gray > 205))
     black_ratio = float(np.mean(gray < 35))
     void_ratio = white_ratio + black_ratio
     mid_gray_ratio = float(np.mean((gray >= 35) & (gray <= 205)))
-
     canny = cv2.Canny(gray, 40, 120)
     edge_ratio = float(np.mean(canny > 0))
 
     is_color_source = (hsv is not None) and (float(np.mean(sat > 20)) > 0.02)
     if is_color_source:
-        if (void_ratio >= 0.80 and art_color_ratio < 0.12) or (white_ratio >= 0.85 and art_color_ratio < 0.10):
+        if (void_ratio >= 0.80 and art_color_ratio < 0.12 and skin_ratio < 0.02) or (white_ratio >= 0.85 and art_color_ratio < 0.10):
             return True, "text_bubble_dominant"
     else:
         # Grayscale / Manga source
