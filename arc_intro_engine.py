@@ -672,16 +672,28 @@ class MicroIntroRenderer:
                 "-i", default_sfx,
                 "-filter_complex",
                 f"[1:a]highpass=f=350,adelay={whoosh_delay_ms}|{whoosh_delay_ms},volume=0.35[sfx];"
-                "[0:a][sfx]amix=inputs=2:duration=first:dropout_transition=0[aout]",
+                "[0:a][sfx]amix=inputs=2:duration=first:dropout_transition=0,loudnorm=I=-14:TP=-1.5:LRA=7[aout]",
                 "-map", "[aout]",
                 "-c:a", "libmp3lame", "-b:a", "192k",
+                "-ar", "44100", "-ac", "2",
                 final_audio_path
             ]
             mix_res = subprocess.run(mix_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if mix_res.returncode != 0 or not os.path.exists(final_audio_path) or os.path.getsize(final_audio_path) == 0:
                 shutil.copy2(raw_audio_path, final_audio_path)
         else:
-            shutil.copy2(raw_audio_path, final_audio_path)
+            # Normalize pure voiceover loudness to standard -14 LUFS (matching episode video render)
+            norm_cmd = [
+                ffmpeg_exe, "-y",
+                "-i", raw_audio_path,
+                "-af", "loudnorm=I=-14:TP=-1.5:LRA=7",
+                "-c:a", "libmp3lame", "-b:a", "192k",
+                "-ar", "44100", "-ac", "2",
+                final_audio_path
+            ]
+            norm_res = subprocess.run(norm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if norm_res.returncode != 0 or not os.path.exists(final_audio_path) or os.path.getsize(final_audio_path) == 0:
+                shutil.copy2(raw_audio_path, final_audio_path)
 
         # Step 3: Set up frame timeline for images
         W, H = target_resolution
@@ -805,6 +817,8 @@ class MicroIntroRenderer:
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-b:a", "192k",
+            "-ar", "44100",
+            "-ac", "2",
             "-shortest",
             "-movflags", "+faststart",
             video_path
@@ -897,7 +911,11 @@ class FastIntroPrepender:
             "-f", "concat",
             "-safe", "0",
             "-i", concat_txt,
-            "-c", "copy",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-ar", "44100",
+            "-ac", "2",
             "-movflags", "+faststart",
             temp_out_vid
         ]
