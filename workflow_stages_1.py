@@ -1354,6 +1354,54 @@ class Stage5_GeminiAutomation(BaseStage):
 
         _story_memory_lock = asyncio.Lock()
 
+        # Seam bridge: an episode narrated without the previous episode's ending (first episode of a
+        # parallel chunk) gets its opening bridged onto that ending before it is queued for TTS.
+        import config as app_settings
+        seam_bridge_enabled = bool(task.payload.get("enable_seam_bridge", getattr(app_settings, "ENABLE_SEAM_BRIDGE", True)))
+        narration_ready = {e: asyncio.Event() for e in episodes_to_process}
+        narrated_blind: set = set()
+        finalize_tasks: list = []
+
+        def mark_narration_finished(ep):
+            """Also called for failed episodes, so a successor never waits forever."""
+            if ep in narration_ready:
+                narration_ready[ep].set()
+
+        async def bridge_seam(ep):
+            from metadata_kit import make_text_llm_call
+            from seam_bridge import bridge_episode
+            result = await bridge_episode(
+                download_dir, ep, make_text_llm_call(task.payload.get("ninerouter_api_key")), series_bible, language,
+            )
+            if result.status == "bridged":
+                await context.log(
+                    f"Tập {ep}: Nối mạch — đã bắc cầu mở đầu vào đoạn kết tập {ep - 1}: \"{result.rewritten[0][:80]}\"",
+                    "info", episode=ep,
+                )
+            else:
+                await context.log(
+                    f"Tập {ep}: Nối mạch — giữ nguyên mở đầu ({'; '.join(result.reasons) or result.status}).",
+                    "info" if result.status == "skipped" else "warning", episode=ep,
+                )
+
+        async def finalize_episode(ep, fresh):
+            try:
+                if fresh and ep in narrated_blind and seam_bridge_enabled:
+                    await narration_ready[ep - 1].wait()
+                    await bridge_seam(ep)
+                elif fresh and (ep - 1) in narration_ready:
+                    await context.log(f"Tập {ep}: Nối mạch — viết với ngữ cảnh đầy đủ của tập {ep - 1}.", "info", episode=ep)
+            except Exception as err:
+                await context.log(f"Tập {ep}: Nối mạch lỗi, giữ nguyên mở đầu ({err}).", "warning", episode=ep)
+            finally:
+                if streaming_consumer:
+                    await streaming_consumer.enqueue_episode(ep)
+
+        async def on_narration_ready(ep, fresh=True):
+            """recap.json is final for `ep`: bridge its opening if needed (outside the worker slot), then queue it."""
+            mark_narration_finished(ep)
+            finalize_tasks.append(asyncio.create_task(finalize_episode(ep, fresh)))
+
         # Series Bible: cast fixed before parallel dispatch so every episode uses the same names
         from series_bible import (
             apply_inferred_protagonist, bootstrap_bible, normalize_segments, observe_episode,
@@ -1485,6 +1533,8 @@ class Stage5_GeminiAutomation(BaseStage):
             previous_context = None
             story_prompt_version = "us_apocalypse_v2"
             memory = None
+            if (ep - 1) in narration_ready:
+                narrated_blind.add(ep)  # until the previous ending is found below
             try:
                 from story_memory import StoryMemory
                 memory = StoryMemory.load_validated(
@@ -1498,6 +1548,8 @@ class Stage5_GeminiAutomation(BaseStage):
                 )
                 previous_context = memory.get_previous_context(ep, download_dir=download_dir)
                 if previous_context:
+                    # Read before payload/Bible fields are merged in: only the previous ending counts here.
+                    narrated_blind.discard(ep)
                     name_part = f" | MC: {previous_context.get('protagonist_name')}" if previous_context.get('protagonist_name') else ""
                     gender_part = f" ({previous_context.get('protagonist_gender')})" if previous_context.get('protagonist_gender') and previous_context.get('protagonist_gender') != 'auto' else ""
                     await context.log(f"Tập {ep}: Đã đồng bộ ngữ cảnh từ Tập {ep-1} (Cliffhanger: \"{previous_context.get('closing_cliffhanger', '')[:60]}...\"{name_part}{gender_part})", "info", episode=ep)
@@ -1637,8 +1689,8 @@ class Stage5_GeminiAutomation(BaseStage):
                 except Exception:
                     pass
                 await context.complete_episode(ep)
-                if streaming_consumer:
-                    await streaming_consumer.enqueue_episode(ep)
+                # Cached narration may already be voiced/rendered: never rewrite it.
+                await on_narration_ready(ep, fresh=False)
                 completed_eps_count += 1
                 await context.update_stage_progress(self.name, (completed_eps_count / total_eps) * 100.0)
                 return True
@@ -1761,8 +1813,7 @@ class Stage5_GeminiAutomation(BaseStage):
                                 episode=ep
                             )
                             await context.complete_episode(ep)
-                            if streaming_consumer:
-                                await streaming_consumer.enqueue_episode(ep)
+                            await on_narration_ready(ep)
                             completed_eps_count += 1
                             await context.update_stage_progress(self.name, (completed_eps_count / total_eps) * 100.0)
                             return True
@@ -2352,8 +2403,7 @@ class Stage5_GeminiAutomation(BaseStage):
                     )
                     success = True
                     await context.complete_episode(ep)
-                    if streaming_consumer:
-                        await streaming_consumer.enqueue_episode(ep)
+                    await on_narration_ready(ep)
 
                     # Giữ browser context sống liên tục giữa các tập (Persistent In-Tab Session)
                     # Không đóng Chrome để tránh mất 25-35s khởi động lại
@@ -2549,8 +2599,7 @@ class Stage5_GeminiAutomation(BaseStage):
                                 await context.log(f"Tập {ep}: Tier-2 Fallback Gemini API thành công! Đã tạo recap.json.", "success", episode=ep)
                                 success = True
                                 await context.complete_episode(ep)
-                                if streaming_consumer:
-                                    await streaming_consumer.enqueue_episode(ep)
+                                await on_narration_ready(ep)
                     except Exception as api_exc:
                         await context.log(f"Tập {ep}: Tier-2 Fallback API thất bại: {api_exc}", "error", episode=ep)
 
@@ -2604,6 +2653,8 @@ class Stage5_GeminiAutomation(BaseStage):
                         await process_episode_vlm(ep)
                     except Exception as e:
                         await context.log(f"Lỗi khi chạy tập {ep}: {e}", "error", episode=ep)
+                    finally:
+                        mark_narration_finished(ep)
 
             await asyncio.gather(*[run_api_chunk(c) for c in api_chunks])
         elif num_workers > 1 and len(episodes_to_process) > 1:
@@ -2630,6 +2681,8 @@ class Stage5_GeminiAutomation(BaseStage):
                         await process_episode_vlm(ep, worker=worker)
                     except Exception as e:
                         await context.log(f"[Worker {worker.index+1}] Lỗi khi chạy tập {ep}: {e}", "error")
+                    finally:
+                        mark_narration_finished(ep)
 
             worker_tasks = [run_worker_chunk(worker, chunk) for worker, chunk in zip(pool.workers, chunks)]
             await asyncio.gather(*worker_tasks)
@@ -2642,9 +2695,17 @@ class Stage5_GeminiAutomation(BaseStage):
                     await process_episode_vlm(ep)
                 except Exception as e:
                     await context.log(f"Lỗi không mong muốn trong tiến trình chạy tập {ep}: {e}", "error")
+                finally:
+                    mark_narration_finished(ep)
 
         # Playwright persistent Chrome Profile context handles storage state saving natively
         pass
+
+        # Episodes skipped by a cancel never ran: release every waiter, then let bridging/queueing finish.
+        for ep in narration_ready:
+            mark_narration_finished(ep)
+        if finalize_tasks:
+            await asyncio.gather(*finalize_tasks)
 
         if streaming_consumer:
             await context.log("Stage 5: Đang đợi Streaming Pipeline hoàn tất các tập còn lại trong hàng đợi...", "info")

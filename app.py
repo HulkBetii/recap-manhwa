@@ -3852,6 +3852,7 @@ LAST LINES THE VIEWER JUST HEARD (end of the previous chapter, played right befo
 {tail_lines}
 - Do NOT repeat, paraphrase or re-describe these events. They were already narrated.
 - Line 1 picks up exactly from the situation these lines leave the protagonist in (same place, same threat, same action).
+- If this chapter's first pages are in a different time or place (flashback, memory, cutaway, time skip), narrate them as such, but open with an explicit transition out of that situation so the viewer knows the scene changed.
 - If the last line is only narrator commentary (a countdown, a dramatic remark), continue from the story event right before it.
 """
         # Only the protagonist anchor may be known (Series Bible): never quote an empty cliffhanger.
