@@ -1,4 +1,5 @@
 import os
+import re
 import wave
 import sys
 import subprocess
@@ -47,6 +48,21 @@ if os.path.exists(_venv_scripts) and _venv_scripts not in os.environ.get("PATH",
     os.environ["PATH"] = _venv_scripts + os.pathsep + os.environ.get("PATH", "")
 
 logger = logging.getLogger("TTSProvider")
+
+_DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
+
+
+def _media_duration_seconds(path: str) -> float:
+    """Duration from `ffmpeg -i` (no ffprobe needed). Raises RuntimeError when it cannot be read."""
+    result = subprocess.run(
+        [_ffmpeg_exe or "ffmpeg", "-hide_banner", "-i", path],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    match = _DURATION_RE.search(result.stderr)
+    if not match:
+        raise RuntimeError(f"no duration in ffmpeg output for {path}")
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
 class SensitiveLogFilter(logging.Filter):
@@ -695,9 +711,9 @@ async def generate_tts(
         # 4. Auto-trimming guardrail for custom ref_audio > 20s
         if ref_audio_path and os.path.exists(ref_audio_path):
             try:
-                probe_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", ref_audio_path]
-                probe_res = json.loads(subprocess.check_output(probe_cmd).decode())
-                ref_dur = float(probe_res.get("format", {}).get("duration", 0))
+                # The bundled ffmpeg (imageio) has no ffprobe next to it and is not named "ffmpeg":
+                # read the duration from ffmpeg's own banner and trim with the same binary.
+                ref_dur = _media_duration_seconds(ref_audio_path)
                 if ref_dur > 20.0:
                     logger.warning(f"OmniVoice: Reference audio is {ref_dur:.1f}s (>20s). Auto-trimming to 8s to prevent GPU memory ballooning...")
                     trimmed_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "voices")
@@ -705,7 +721,7 @@ async def generate_tts(
                     safe_name = f"trimmed_{os.path.splitext(os.path.basename(ref_audio_path))[0][:16]}.wav"
                     trimmed_path = os.path.join(trimmed_dir, safe_name)
                     if not os.path.exists(trimmed_path):
-                        trim_cmd = ["ffmpeg", "-y", "-i", ref_audio_path, "-ss", "0.0", "-to", "8.0", "-ar", "24000", "-ac", "1", trimmed_path]
+                        trim_cmd = [_ffmpeg_exe or "ffmpeg", "-y", "-i", ref_audio_path, "-ss", "0.0", "-to", "8.0", "-ar", "24000", "-ac", "1", trimmed_path]
                         subprocess.run(trim_cmd, check=True)
                     ref_audio_path = trimmed_path
             except Exception as e:

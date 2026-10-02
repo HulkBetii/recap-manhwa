@@ -515,9 +515,10 @@ async def get_app_config():
 
 @app.get("/api/version")
 async def get_app_version():
+    import config as app_cfg  # module name `config` is shadowed by local dicts throughout app.py
     return {
-        "app": getattr(config, "APP_NAME", "Recap Comics Automation"),
-        "version": getattr(config, "APP_VERSION", "1.5.0"),
+        "app": getattr(app_cfg, "APP_NAME", "Recap Comics Automation"),
+        "version": getattr(app_cfg, "APP_VERSION", "1.5.0"),
     }
 
 

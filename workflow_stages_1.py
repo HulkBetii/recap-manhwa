@@ -3784,7 +3784,7 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 # Generate content plot
                 try:
                     plt.figure(figsize=(12, 6))
-                    plt.plot(smoothed_scores, label="Smoothed Content Score")
+                    plt.plot(smoothed_energy, label="Smoothed Content Score")
                     for cut in cuts[1:-1]:
                         plt.axvline(x=cut, color='r', linestyle='--', alpha=0.8, label="Cut Line" if cut == cuts[1] else "")
                     plt.title(f"Episode {ep} Repagination Content Profile")

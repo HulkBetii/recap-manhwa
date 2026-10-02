@@ -6,7 +6,7 @@ import re
 import glob
 import hashlib
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional, Sequence, Tuple, Set
+from typing import Dict, Any, List, Optional, Sequence, Tuple, Set, Union
 
 # V5: StoryFactGraph for evidence-first structured fact generation
 try:
