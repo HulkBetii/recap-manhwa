@@ -77,3 +77,9 @@ def test_crawl_forwards_new_options_to_the_workflow(monkeypatch):
     assert captured["protagonist_name"] == "Kang Seongho"
     assert captured["enable_premise_pitch"] is False
     assert captured["playlist_url"] == "https://www.youtube.com/playlist?list=PLabc"
+
+
+def test_remove_text_defaults_to_false():
+    req = CrawlRequest(url="https://example.com/comic/list?title_no=123", from_episode=1, to_episode=1)
+    assert req.remove_text is False
+

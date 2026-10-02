@@ -870,7 +870,7 @@ class CrawlRequest(BaseModel):
     logo_path: Optional[str] = None
     overlay_path: Optional[str] = None
     burn_subtitles: bool = False
-    remove_text: bool = True
+    remove_text: bool = False
     remove_text_conf: float = 0.3
     remove_text_radius: int = 3
     comix_group_id: Optional[str] = None
@@ -4991,7 +4991,7 @@ class VideoRequest(BaseModel):
     voice_id: str = "clone_andrew"
     logo_path: str = None
     overlay_path: str = None
-    remove_text: bool = True
+    remove_text: bool = False
     remove_text_conf: float = 0.3
     remove_text_radius: int = 3
     ref_audio_path: Optional[str] = None
@@ -5399,7 +5399,7 @@ async def run_video_pipeline(
     voice_id: str = "clone_andrew", 
     logo_path: str = None, 
     overlay_path: str = None,
-    remove_text: bool = True,
+    remove_text: bool = False,
     remove_text_conf: float = 0.3,
     remove_text_radius: int = 3,
     ref_audio_path: str = None
@@ -5979,4 +5979,5 @@ app.mount("/", StaticFiles(directory="static"), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=False)
+    port = int(os.getenv("PORT", 8001))
+    uvicorn.run("app:app", host="127.0.0.1", port=port, reload=False)

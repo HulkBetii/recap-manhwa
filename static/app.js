@@ -1036,7 +1036,7 @@ btnCrawl.addEventListener('click', async () => {
                 logo_path: uploadedLogoPath,
                 overlay_path: uploadedOverlayPath,
                 burn_subtitles: document.getElementById('burn-subtitles').checked,
-                remove_text: true,
+                remove_text: false,
                 remove_text_conf: 0.3,
                 remove_text_radius: 3,
                 comix_group_id: document.getElementById('comix-group-id') ? document.getElementById('comix-group-id').value.trim() || null : null,
