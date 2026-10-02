@@ -3026,6 +3026,10 @@ class Stage12_MetadataReports(BaseStage):
                 llm_chapter_options=llm_chapter_options,
                 registry_chapter_names=registry.chapter_names_for_dedup(comic_title),
                 premise_pitch=task.artifacts.get("premise_pitch"),
+                # Navigation links only when the user supplies real URLs (never synthesized).
+                playlist_url=task.payload.get("playlist_url"),
+                previous_part_url=task.payload.get("previous_part_url"),
+                next_part_url=task.payload.get("next_part_url"),
             )
 
             title_engine_audit = metadata["youtube_metadata"]["prepublish_audit"]["claim_audit"].get("title_engine", {})

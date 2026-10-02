@@ -1441,14 +1441,22 @@ def validate_text_surface(
 # ARCHETYPE DETECTION
 # =============================================================================
 
-def detect_archetype(comic_title: str, story_memory: Optional[Dict[str, Any]] = None) -> str:
-    """Detects the manhwa archetype/subgenre for tailored metadata generation."""
+def detect_archetype(
+    comic_title: str,
+    story_memory: Optional[Dict[str, Any]] = None,
+    extra_context: str = "",
+) -> str:
+    """
+    Detects the manhwa archetype/subgenre for tailored metadata generation.
+    `extra_context` carries the Series Bible setting/terms: early episode summaries can miss the
+    genre entirely (Veteran of the Apocalypse ep 1-3 never said "zombie" and was tagged hunter_gate).
+    """
     title_lower = (comic_title or "").lower()
     mem_text = ""
     if story_memory:
         mem_text = str(story_memory).lower()
 
-    combined = f"{title_lower} {mem_text}"
+    combined = f"{title_lower} {mem_text} {(extra_context or '').lower()}"
 
     # Priority 1: Direct comic title & explicit theme matching
     if "world after the fall" in title_lower:
@@ -1482,6 +1490,14 @@ def detect_archetype(comic_title: str, story_memory: Optional[Dict[str, Any]] = 
 # =============================================================================
 # CHARACTER NAME RESOLUTION
 # =============================================================================
+
+def _bible_archetype_context(series_bible: Any) -> str:
+    """Setting + recurring terms read by the LLM from the comic pages; used for genre detection only,
+    never as title evidence."""
+    if series_bible is None:
+        return ""
+    return " ".join([getattr(series_bible, "setting", "") or "", *getattr(series_bible, "terms", [])])
+
 
 def _merge_series_bible(story_memory: Optional[Dict[str, Any]], download_dir: Optional[str]) -> Optional[Dict[str, Any]]:
     """Series Bible names take precedence over heuristically inferred StoryMemory names."""
@@ -3344,7 +3360,7 @@ def generate_prepublish_checklist(
     to_ep: int,
     seo_filenames: Dict[str, str],
     primary_title: str,
-    resolved_playlist: str,
+    playlist_url: Optional[str],
 ) -> List[Dict[str, str]]:
     """
     Generates a high-impact 10-point YouTube Studio pre-publish workflow checklist
@@ -3393,7 +3409,11 @@ def generate_prepublish_checklist(
         },
         {
             "step": "9. Playlist Assignment",
-            "action": f"Add video to '{comic_title} [Full Story Recap]' official Series Playlist ({resolved_playlist}) to trigger YouTube binge-watching recommendations.",
+            "action": (
+                f"Add video to the channel's apocalypse recap playlist ({playlist_url}) to trigger YouTube binge-watching recommendations."
+                if playlist_url else
+                "Add video to a channel playlist of related apocalypse recaps (create it in YouTube Studio if needed) to trigger binge-watching recommendations."
+            ),
             "importance": "CRITICAL",
         },
         {
@@ -3683,10 +3703,22 @@ def plan_chapter_arcs(
         chapters,
         download_dir=download_dir,
         comic_title=comic_title,
-        archetype=detect_archetype(comic_title, merged_memory),
+        archetype=_resolve_archetype(comic_title, merged_memory, download_dir),
         from_ep=from_ep,
         to_ep=to_ep,
     )
+
+
+def _resolve_archetype(
+    comic_title: str,
+    merged_memory: Optional[Dict[str, Any]],
+    download_dir: Optional[str],
+    series_bible: Any = None,
+) -> str:
+    """Single archetype decision shared by Stage 11 previews and the Stage 12 kit."""
+    if series_bible is None and load_bible is not None:
+        series_bible = load_bible(download_dir)
+    return detect_archetype(comic_title, merged_memory, extra_context=_bible_archetype_context(series_bible))
 
 
 def _select_video_titles(
@@ -3771,7 +3803,7 @@ def preview_primary_title(
 ) -> Dict[str, Any]:
     """The title generate_us_apocalypse_metadata will pick for the same inputs (no kit built)."""
     story_memory = _merge_series_bible(story_memory, download_dir)
-    archetype = detect_archetype(comic_title, story_memory)
+    archetype = _resolve_archetype(comic_title, story_memory, download_dir)
     evidence_index = EvidenceIndex(
         comic_title=comic_title, archetype=archetype, story_memory=story_memory,
         download_dir=download_dir, from_ep=from_ep, to_ep=to_ep,
@@ -3815,7 +3847,8 @@ def generate_us_apocalypse_metadata(
     story_memory = _merge_series_bible(story_memory, download_dir)
     char_names = get_character_names(comic_title, story_memory)
     mc_name = char_names["mc"]
-    archetype = detect_archetype(comic_title, story_memory)
+    series_bible = load_bible(download_dir) if load_bible is not None else None
+    archetype = _resolve_archetype(comic_title, story_memory, download_dir, series_bible)
     image_refs = find_character_image_references(download_dir, image_references)
     alt_titles_list = resolve_alternative_titles(comic_title, story_memory, alt_titles)
 
@@ -3831,7 +3864,6 @@ def generate_us_apocalypse_metadata(
     beats = _extract_story_beats(comic_title, archetype, story_memory, download_dir, from_ep, to_ep)
 
     # ── 1. TITLES: templates + LLM drafts through one deterministic gate ──
-    series_bible = load_bible(download_dir) if load_bible is not None else None
     narration_by_episode = load_narration_by_episode(download_dir, from_ep, to_ep)
     title_result = _select_video_titles(
         comic_title, archetype, story_memory, download_dir, from_ep, to_ep,
@@ -3877,16 +3909,16 @@ def generate_us_apocalypse_metadata(
 
     # ── 3. DESCRIPTION — Research-validated tier structure with Series Navigation ──────────
     disaster = beats.get("disaster", "the Apocalypse")
-    
-    # Calculate previous and next arc bounds for Watch Time / Suggested Chaining
-    span = to_ep - from_ep + 1
-    prev_from = max(1, from_ep - span)
-    prev_to = from_ep - 1
-    next_from = to_ep + 1
-    next_to = to_ep + span
 
-    clean_title_slug = re.sub(r"[^a-zA-Z0-9]+", "-", comic_title.lower()).strip("-")
-    resolved_playlist = playlist_url or f"https://www.youtube.com/playlist?list={clean_title_slug}-full-recap"
+    # Only real, user-supplied links. The channel ships one video per story, and the synthesized
+    # "<slug>-full-recap" playlist URL and "Next Arc: Coming Soon" lines pointed nowhere.
+    nav_lines: List[str] = []
+    if playlist_url:
+        nav_lines.append(f"• Full Playlist: {playlist_url}")
+    if previous_part_url:
+        nav_lines.append(f"• ⏪ Previous Part: {previous_part_url}")
+    if next_part_url:
+        nav_lines.append(f"• ⏩ Next Part: {next_part_url}")
 
     # ── Description hook: ưu tiên ep_opening_hook từ story_memory ───────────
     ep_opening_hook = beats.get("ep_opening_hook", "")
@@ -3904,16 +3936,9 @@ def generate_us_apocalypse_metadata(
     desc_lines = [
         desc_hook,
         f"This manhwa recap covers {comic_title} ({ep_range}).",
-        "",
-        "📺 SERIES NAVIGATION (Watch Full Story):",
-        f"• Full Playlist: {resolved_playlist}",
     ]
-    if from_ep > 1:
-        prev_link = previous_part_url or f"[Watch Ep {prev_from}–{prev_to} in Playlist]"
-        desc_lines.append(f"• ⏪ Previous Arc (Eps {prev_from}–{prev_to}): {prev_link}")
-
-    next_link = next_part_url or "[Coming Soon — Subscribe & Ring 🔔]"
-    desc_lines.append(f"• ⏩ Next Arc (Eps {next_from}–{next_to}): {next_link}")
+    if nav_lines:
+        desc_lines.extend(["", "📺 SERIES NAVIGATION (Watch Full Story):", *nav_lines])
 
     desc_lines.extend([
         "",
@@ -4130,7 +4155,7 @@ def generate_us_apocalypse_metadata(
         to_ep=to_ep,
         seo_filenames=seo_filenames,
         primary_title=primary_title,
-        resolved_playlist=resolved_playlist,
+        playlist_url=playlist_url,
     )
 
     # ── 8. PACKAGING CONSISTENCY AUDIT ─────────────────────────────────────
@@ -4369,9 +4394,9 @@ def generate_us_apocalypse_metadata(
         "prepublish_checklist": prepublish_checklist,
         "alternative_titles": alt_titles_list,
         "series_navigation": {
-            "playlist_url": resolved_playlist,
-            "previous_arc": f"Ep {prev_from}–{prev_to}" if from_ep > 1 else None,
-            "next_arc": f"Ep {next_from}–{next_to}",
+            "playlist_url": playlist_url,
+            "previous_part_url": previous_part_url,
+            "next_part_url": next_part_url,
         },
         "compliance_flags": compliance_flags,
         "prepublish_audit": prepublish_audit,
