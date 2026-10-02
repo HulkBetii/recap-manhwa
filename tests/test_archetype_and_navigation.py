@@ -15,6 +15,7 @@ def _veteran_dir(tmp_path):
         "The digital watch hits eight fifty-nine as the countdown to disaster ticks.",
         "A massive asteroid named Eunjambi burns across deep space toward Earth.",
         "Gimbaplover finds a pulsing dimensional gate inside his room.",
+        "The zombie apocalypse hits the city while his room holds the gate shut.",
     ]
     (ep_dir / "recap.json").write_text(
         json.dumps([{"speech": s, "images": [{"page": 1, "priority": 1.0}]} for s in segments]), encoding="utf-8"
@@ -57,6 +58,43 @@ def test_description_has_no_synthesized_navigation(tmp_path):
     assert meta["series_navigation"] == {"playlist_url": None, "previous_part_url": None, "next_part_url": None}
     gate = {c["id"]: c for c in meta["prepublish_audit"]["gate"]["checks"]}
     assert gate["description_placeholders"]["passed"]
+
+
+PITCH_TITLE = "The Zombie Apocalypse HIT But His Room Holds a Gate! | Manhwa Recap"
+PITCH = {
+    "title": PITCH_TITLE,
+    "prepended": True,
+    "text": "The zombie apocalypse hits modern-day Earth, but Gimbaplover discovers that his room holds a pulsing "
+            "dimensional gate. It all begins as the countdown starts.",
+}
+
+
+def test_description_opens_with_title_aligned_keyword_sentence(tmp_path):
+    download_dir = _veteran_dir(tmp_path)
+    meta = generate_youtube_metadata(
+        "Veteran of the Apocalypse", 1, 1, story_memory=EARLY_MEMORY, download_dir=download_dir,
+        llm_title_candidates=["The Zombie Apocalypse HIT But His Room Holds a Gate!"], premise_pitch=PITCH,
+    )
+    assert meta["title"] == PITCH_TITLE  # the pitch only counts for the shipped title
+    first_line = meta["description"].splitlines()[0]
+    assert first_line == ("The zombie apocalypse hits modern-day Earth, but he discovers that his room "
+                          "holds a pulsing dimensional gate.")
+
+
+def test_description_falls_back_to_short_bible_setting_without_pitch(tmp_path):
+    download_dir = _veteran_dir(tmp_path)
+    meta = generate_youtube_metadata("Veteran of the Apocalypse", 1, 1, story_memory=EARLY_MEMORY, download_dir=download_dir)
+    assert meta["description"].splitlines()[0].startswith("An asteroid turns the apocalyptic zombie scenario")
+
+
+def test_niche_hashtag_beats_brand_and_tags_are_capped(tmp_path):
+    download_dir = _veteran_dir(tmp_path)
+    meta = generate_youtube_metadata("Veteran of the Apocalypse", 1, 1, story_memory=EARLY_MEMORY, download_dir=download_dir)
+    hashtags = meta["description"].splitlines()[-1].split()
+    assert hashtags[:2] == ["#veteranoftheapocalypse", "#zombiemanhwa"]
+    assert "#jaehwanmanhwa" not in hashtags  # brand is dropped before a discovery hashtag
+    assert 5 <= len(meta["tags"]) <= 10
+    assert "manhwa english" not in meta["tags"] and "manhwa summary" not in meta["tags"]
 
 
 def test_real_links_are_kept(tmp_path):

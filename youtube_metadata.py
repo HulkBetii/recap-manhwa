@@ -6,7 +6,7 @@ import re
 import glob
 import hashlib
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional, Tuple, Set
+from typing import Dict, Any, List, Optional, Sequence, Tuple, Set
 
 # V5: StoryFactGraph for evidence-first structured fact generation
 try:
@@ -2326,6 +2326,9 @@ def generate_dynamic_titles(
 # TAG ENGINE
 # =============================================================================
 
+MAX_TAGS = 10
+
+
 def build_minimal_tags(
     comic_title: str,
     archetype: str,
@@ -2333,38 +2336,15 @@ def build_minimal_tags(
     to_ep: int = 1,
     alt_titles: Optional[List[str]] = None,
 ) -> List[str]:
-    """Builds a high-value tag stack (10-15 tags, <= 500 chars total).
+    """Builds a focused tag stack (<= 10 tags, <= 500 chars total).
 
-    Includes base identity tags, episodic range tag for discoverability,
-    long-tail genre tags, alternative titles, and 3 archetype-specific tags.
-    Backward-compatible: from_ep/to_ep default to 1 so existing callers
-    with 2 positional args continue to work unchanged.
+    YouTube: tags play a minimal role beyond misspellings and alternative names (SEO doc §1.6:
+    5-10 tags). Kept: series name + recap, the niche, up to 2 alternative titles (how viewers
+    actually search for the comic) and one brand tag. Dropped: generic "manhwa summary" /
+    "manhwa english", the episode-range tag and near-duplicate brand variants.
+    from_ep/to_ep stay in the signature for existing callers.
     """
-    ep_range_str = f"ep {from_ep}" if from_ep == to_ep else f"ep {from_ep} {to_ep}"
     title_lower = comic_title.lower()
-
-    tags = [
-        "manhwa recap",
-        title_lower,
-        f"{title_lower} recap",
-        "manhwa summary",
-        "manhwa english",
-        f"{title_lower} {ep_range_str}",
-    ]
-
-    # Add top alternative titles (e.g. scanlation, romanized or alternative titles)
-    if alt_titles:
-        for at in alt_titles:
-            at_clean = at.strip().lower()
-            if at_clean and at_clean not in tags:
-                tags.append(at_clean)
-
-    # Add Channel Brand Tags for YouTube suggested video clustering
-    brand_tags = CHANNEL_PROFILE.get("brand_tags", ["jaehwan manhwa", "jaehwan", "jaehwan manhwa recap"])
-    for bt in brand_tags:
-        bt_clean = bt.strip().lower()
-        if bt_clean and bt_clean not in tags:
-            tags.append(bt_clean)
 
     archetype_tags = {
         "zombie_apocalypse":     ["zombie manhwa", "apocalypse manhwa", "zombie survival manhwa"],
@@ -2377,7 +2357,15 @@ def build_minimal_tags(
         "murim_apocalypse":      ["murim manhwa", "martial arts manhwa", "cultivation manhwa"],
         "general_apocalypse":    ["apocalypse manhwa", "survival manhwa", "action manhwa"],
     }
-    tags.extend(archetype_tags.get(archetype, ["apocalypse manhwa", "survival manhwa"]))
+    brand_tags = CHANNEL_PROFILE.get("brand_tags", ["jaehwan manhwa"])
+    tags = [
+        title_lower,
+        f"{title_lower} recap",
+        "manhwa recap",
+        *archetype_tags.get(archetype, ["apocalypse manhwa", "survival manhwa"])[:2],
+        *[at.strip().lower() for at in (alt_titles or [])][:2],
+        *(brand_tags[:1]),
+    ]
 
     # Deduplicate + enforce 500-char total limit (YouTube tag box constraint)
     seen: Set[str] = set()
@@ -2392,7 +2380,7 @@ def build_minimal_tags(
             cleaned.append(t_clean)
             total_chars += separator_cost + len(t_clean)
 
-    return cleaned[:15]
+    return cleaned[:MAX_TAGS]
 
 
 # =============================================================================
@@ -3794,6 +3782,31 @@ def preview_primary_title(
     )
 
 
+DESCRIPTION_HOOK_MAX_CHARS = 160  # what YouTube search snippets show before truncating
+
+
+def _description_hook_sentence(sources: Sequence[str], mc_names: Sequence[str]) -> str:
+    """
+    First complete sentence (<= DESCRIPTION_HOOK_MAX_CHARS) from the first usable source.
+    Never cuts mid-sentence; the protagonist's name becomes "he" to keep proper nouns out of
+    the search snippet (existing description policy).
+    """
+    for source in sources:
+        if not source:
+            continue
+        sentence = re.split(r"(?<=[.!?])\s+", source.strip(), maxsplit=1)[0].strip()
+        if not sentence or len(sentence) > DESCRIPTION_HOOK_MAX_CHARS:
+            continue
+        for name in mc_names:
+            sentence = re.sub(
+                rf"\b{re.escape(name)}\b",
+                lambda m: "He" if m.start() == 0 else "he",
+                sentence,
+            )
+        return sentence if sentence.endswith((".", "!", "?")) else sentence + "."
+    return ""
+
+
 def preview_thumbnail_concepts(
     comic_title: str,
     from_ep: int,
@@ -3918,9 +3931,24 @@ def generate_us_apocalypse_metadata(
     if next_part_url:
         nav_lines.append(f"• ⏩ Next Part: {next_part_url}")
 
-    # ── Description hook: ưu tiên ep_opening_hook từ story_memory ───────────
+    # The pitch only counts when it is in the video and was written for the title being shipped.
+    pitch_in_video = bool(
+        premise_pitch and premise_pitch.get("prepended") and premise_pitch.get("text")
+        and premise_pitch.get("title") == primary_title
+    )
+
+    # ── Description hook: the first 1-2 lines must carry the main keyword (SEO doc §1.4) ──
+    # Prefer the premise pitch's first sentence (validated, echoes the title), then the
+    # Series Bible setting, then the legacy episode-opening line.
+    mc_names = [n for n in {beats.get("mc_name", ""), getattr(series_bible, "protagonist_name", "") or ""} if n]
+    keyword_hook = _description_hook_sentence(
+        [premise_pitch["text"] if pitch_in_video else "", getattr(series_bible, "setting", "") or ""],
+        mc_names,
+    )
     ep_opening_hook = beats.get("ep_opening_hook", "")
-    if ep_opening_hook and len(ep_opening_hook) >= 20:
+    if keyword_hook:
+        desc_hook = keyword_hook
+    elif ep_opening_hook and len(ep_opening_hook) >= 20:
         # Trim to ~120 chars max for clean 2-line display in YouTube search snippet
         hook_line = ep_opening_hook[:120].rsplit(" ", 1)[0] if len(ep_opening_hook) > 120 else ep_opening_hook
         # Fix #1: Sanitize — replace mc_name with "He" to avoid leaking Korean proper nouns
@@ -3966,27 +3994,25 @@ def generate_us_apocalypse_metadata(
     ])
 
     clean_tag = re.sub(r"[^a-zA-Z0-9]", "", comic_title.lower())
+    niche_hashtag = {
+        "zombie_apocalypse": "#zombiemanhwa",
+        "tower_anti_regression": "#towermanhwa",
+        "hunter_gate": "#dungeonmanhwa",
+        "bunker_prepper": "#bunkermanhwa",
+        "game_system_reality": "#gamemanhwa",
+        "farming_kingdom": "#farmingmanhwa",
+        "murim_apocalypse": "#murimmanhwa",
+    }.get(archetype)
+    # The first three hashtags appear above the title (SEO doc §1.4): series and niche first,
+    # brand last so the cap of 5 drops it before a discovery hashtag.
     hashtags = [
         f"#{clean_tag}" if clean_tag else "#manhwarecap",
-        "#manhwarecap",
+        *([niche_hashtag] if niche_hashtag else []),
         "#apocalypsemanhwa",
+        "#manhwarecap",
         "#survivalmanhwa",
         "#jaehwanmanhwa",
     ]
-    if archetype == "zombie_apocalypse":
-        hashtags.append("#zombiemanhwa")
-    elif archetype == "tower_anti_regression":
-        hashtags.append("#towermanhwa")
-    elif archetype == "hunter_gate":
-        hashtags.append("#dungeonmanhwa")
-    elif archetype == "bunker_prepper":
-        hashtags.append("#bunkermanhwa")
-    elif archetype == "game_system_reality":
-        hashtags.append("#gamemanhwa")
-    elif archetype == "farming_kingdom":
-        hashtags.append("#farmingmanhwa")
-    elif archetype == "murim_apocalypse":
-        hashtags.append("#murimmanhwa")
 
     seen_ht = set()
     final_hashtags = []
@@ -4205,11 +4231,6 @@ def generate_us_apocalypse_metadata(
     )
     first_episode = min(narration_by_episode) if narration_by_episode else None
     opening_segments = narration_by_episode.get(first_episode, []) if first_episode is not None else []
-    # The pitch only counts when it is in the video and was written for the title being shipped.
-    pitch_in_video = bool(
-        premise_pitch and premise_pitch.get("prepended") and premise_pitch.get("text")
-        and premise_pitch.get("title") == primary_title
-    )
     if pitch_in_video:
         opening_segments = [premise_pitch["text"], *opening_segments]
     gate_report = run_prepublish_gate(
@@ -4283,7 +4304,7 @@ def generate_us_apocalypse_metadata(
         "description_utf8_bytes": desc_bytes,
         "description_bytes_ok": desc_bytes <= 5000,
         "tag_count": len(tags),
-        "tag_count_ok": 5 <= len(tags) <= 15,
+        "tag_count_ok": 5 <= len(tags) <= MAX_TAGS,
         "tag_total_chars": tag_chars,
         "tag_chars_ok": tag_chars <= 500,
         "hashtag_count": len(final_hashtags),
