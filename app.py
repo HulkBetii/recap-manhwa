@@ -184,7 +184,7 @@ if sys.platform == 'win32':
 from fastapi import FastAPI, HTTPException, status, File, UploadFile, Request
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from playwright.async_api import async_playwright
 from PIL import Image
 from security_utils import (
@@ -874,6 +874,31 @@ class CrawlRequest(BaseModel):
     enable_flash_forward_intro: bool = False
     flash_forward_custom_hook: Optional[str] = None
     streaming_pipeline: bool = True
+    # The web UI always sends market_id; without this field every crawl request returned 422.
+    market_id: Optional[str] = None
+    # Locks the Series Bible protagonist (Stage 5) when the comic only shows a handle early on.
+    protagonist_name: Optional[str] = Field(default=None, max_length=80)
+    enable_premise_pitch: bool = True
+    # Description navigation is printed only for real links supplied here (never synthesized).
+    playlist_url: Optional[str] = None
+    previous_part_url: Optional[str] = None
+    next_part_url: Optional[str] = None
+
+    @field_validator("market_id", "protagonist_name", "playlist_url", "previous_part_url", "next_part_url", mode="before")
+    @classmethod
+    def _blank_to_none(cls, value):
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("playlist_url", "previous_part_url", "next_part_url")
+    @classmethod
+    def _must_be_http_url(cls, value):
+        if value is None:
+            return value
+        if len(value) > 300 or not re.match(r"^https?://\S+$", value):
+            raise ValueError("must be an http(s) URL of at most 300 characters")
+        return value
 
 
 def _validated_asset_reference(value: str | None) -> str | None:
@@ -3515,11 +3540,17 @@ async def crawl(payload: CrawlRequest):
         "remove_text_conf": payload.remove_text_conf,
         "remove_text_radius": payload.remove_text_radius,
         "comix_group_id": payload.comix_group_id,
-        "market_id": market_id,
+        "market_id": payload.market_id,
         "enable_flash_forward_intro": payload.enable_flash_forward_intro,
         "flash_forward_custom_hook": payload.flash_forward_custom_hook,
         "streaming_pipeline": payload.streaming_pipeline,
+        "enable_premise_pitch": payload.enable_premise_pitch,
+        "playlist_url": payload.playlist_url,
+        "previous_part_url": payload.previous_part_url,
+        "next_part_url": payload.next_part_url,
     }
+    if payload.protagonist_name:
+        config["protagonist_name"] = payload.protagonist_name
 
     task_id = await workflow_manager.queue_task(
         comic_title,

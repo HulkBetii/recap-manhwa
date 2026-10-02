@@ -197,6 +197,21 @@
                             </div>
                         </div>
 
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="protagonist-name" style="font-size: 0.7rem; color: var(--text-secondary);">Tên nhân vật chính (tuỳ chọn)</label>
+                                <div class="input-wrapper">
+                                    <input type="text" id="protagonist-name" maxlength="80" placeholder="Để trống: tự nhận diện" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box;">
+                                </div>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="playlist-url" style="font-size: 0.7rem; color: var(--text-secondary);">Link playlist thật (tuỳ chọn)</label>
+                                <div class="input-wrapper">
+                                    <input type="url" id="playlist-url" maxlength="300" placeholder="https://www.youtube.com/playlist?list=..." style="padding: 0.4rem 0.6rem; font-size: 0.75rem; width: 100%; box-sizing: border-box;">
+                                </div>
+                            </div>
+                        </div>
+
                         <div style="display: grid; grid-template-columns: 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
                             <div class="form-group" style="margin-bottom: 0;">
                                 <label for="tts-voice-id" style="font-size: 0.7rem; color: var(--text-secondary);">Chế độ giọng đọc (TTS Mode)</label>
@@ -236,6 +251,10 @@
                             <label for="burn-subtitles" style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.72rem; color: var(--text-secondary); cursor: pointer;">
                                 <input type="checkbox" id="burn-subtitles">
                                 <span>Chèn phụ đề vào video (vẫn luôn xuất file SRT)</span>
+                            </label>
+                            <label for="enable-premise-pitch" style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.72rem; color: var(--text-secondary); cursor: pointer;">
+                                <input type="checkbox" id="enable-premise-pitch" checked>
+                                <span>Premise Pitch (intro 30–45s nhắc lời hứa của title)</span>
                             </label>
                         </div>
 

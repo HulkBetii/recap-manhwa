@@ -232,6 +232,7 @@ function renderWorkflowDashboard() {
                         </button>
                     `;
                 });
+            }
             if (w.artifacts && w.artifacts.youtube_upload_kit_url) {
                 cardContent += `
                     <a href="${w.artifacts.youtube_upload_kit_url}" target="_blank" download="youtube_upload_kit.txt" class="btn" style="font-size: 0.7rem; padding: 0.25rem 0.6rem; height: 24px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; color: #fff; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem; font-weight: bold; text-decoration: none; box-shadow: 0 2px 6px rgba(16,185,129,0.3);">
@@ -1040,7 +1041,10 @@ btnCrawl.addEventListener('click', async () => {
                 remove_text_radius: 3,
                 comix_group_id: document.getElementById('comix-group-id') ? document.getElementById('comix-group-id').value.trim() || null : null,
                 market_id: document.getElementById('market-preset') ? document.getElementById('market-preset').value.trim() || null : null,
-                enable_flash_forward_intro: document.getElementById('enable-flash-forward-intro') ? document.getElementById('enable-flash-forward-intro').checked : false
+                enable_flash_forward_intro: document.getElementById('enable-flash-forward-intro') ? document.getElementById('enable-flash-forward-intro').checked : false,
+                enable_premise_pitch: document.getElementById('enable-premise-pitch') ? document.getElementById('enable-premise-pitch').checked : true,
+                protagonist_name: document.getElementById('protagonist-name') ? document.getElementById('protagonist-name').value.trim() || null : null,
+                playlist_url: document.getElementById('playlist-url') ? document.getElementById('playlist-url').value.trim() || null : null
             })
         });
 
