@@ -46,6 +46,9 @@ OBSERVED_MIN_EPISODES = 2
 DRIFT_MIN_RIVAL_MENTIONS = 5
 
 MAX_BOOTSTRAP_CHARACTERS = 12
+SYNOPSIS_MIN_CHARS = 40
+SYNOPSIS_MAX_CHARS = 1200
+SYNOPSIS_NAME_MIN_MENTIONS = 2
 MAX_PROMPT_OBSERVED_NAMES = 10
 
 # Capitalized words that commonly appear mid-sentence but are not character names.
@@ -91,7 +94,7 @@ def _spelling_variant_pattern(name: str) -> re.Pattern:
 
 
 Gender = Literal["male", "female", "unknown"]
-EntrySource = Literal["user", "llm_bootstrap", "inferred", "observed"]
+EntrySource = Literal["user", "synopsis", "llm_bootstrap", "inferred", "observed"]
 
 
 class CharacterEntry(BaseModel):
@@ -124,6 +127,9 @@ class EpisodeNameReport(BaseModel):
 class SeriesBible(BaseModel):
     series_title: str
     setting: str = ""
+    # Official series synopsis (Stage 1): authority for the protagonist's real name, which early
+    # chapters may only show as a game handle or nickname.
+    synopsis: str = ""
     protagonist: Optional[CharacterEntry] = None
     characters: List[CharacterEntry] = Field(default_factory=list)
     terms: List[str] = Field(default_factory=list)
@@ -256,11 +262,86 @@ def apply_inferred_protagonist(bible: SeriesBible, name: str, gender: str = "") 
     return True
 
 
-def build_bootstrap_prompt(comic_title: str) -> str:
+def clean_synopsis(text: Any) -> str:
+    """Normalizes an official series synopsis (page meta description); '' when too short to be one."""
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(cleaned) < SYNOPSIS_MIN_CHARS:
+        return ""
+    return cleaned[:SYNOPSIS_MAX_CHARS]
+
+
+def protagonist_from_synopsis(synopsis: str, comic_title: str = "") -> str:
+    """The protagonist named in an official synopsis, or '' when no name is clearly a person.
+
+    A name qualifies when it is mentioned at least twice ("Seongho … Seongho rushes") or in the
+    possessive ("Goong Nam's family"); a single plain capitalized word ("Hellgates") does not.
+    Words of the series title ("Veteran", "Apocalypse") never qualify.
+    """
+    if not synopsis:
+        return ""
+    title_words = {w.casefold() for w in re.findall(r"[A-Za-z]+", comic_title or "")}
+    best, best_key = "", None
+    for name, count in extract_name_candidates([synopsis]).items():
+        if any(w.casefold() in title_words for w in name.split()):
+            continue
+        possessive = re.search(rf"\b{re.escape(name)}['’]s\b", synopsis) is not None
+        if count < SYNOPSIS_NAME_MIN_MENTIONS and not possessive:
+            continue
+        key = (-count, not possessive, synopsis.find(name))
+        if best_key is None or key < best_key:
+            best, best_key = name, key
+    return _clean_name(best)
+
+
+def memory_name_is_trusted(name: str, bible: Optional[SeriesBible]) -> bool:
+    """A heuristically inferred protagonist name is only trusted if the official synopsis agrees.
+
+    Without a synopsis there is nothing to check against, so the name is accepted as before.
+    """
+    if not name:
+        return False
+    if bible is None or not bible.synopsis:
+        return True
+    return re.search(rf"\b{re.escape(name)}\b", bible.synopsis) is not None
+
+
+def _apply_synopsis_protagonist(bible: SeriesBible, comic_title: str) -> bool:
+    """Makes the synopsis name the protagonist when the current one is missing or absent from the
+    synopsis (e.g. a game handle read off the panels). The replaced name becomes an alias."""
+    if bible.protagonist is not None and bible.protagonist.locked:
+        return False
+    synopsis_name = protagonist_from_synopsis(bible.synopsis, comic_title)
+    current = bible.protagonist_name
+    if not synopsis_name or (current and memory_name_is_trusted(current, bible)):
+        return False
+    aliases = list(bible.protagonist.aliases) if bible.protagonist else []
+    if current and current not in aliases:
+        aliases.insert(0, current)
+    if current:
+        bible.characters = [c for c in bible.characters if name_key(c.name) != name_key(current)]
+    bible.protagonist = CharacterEntry(
+        name=synopsis_name,
+        aliases=[a for a in aliases if name_key(a) != name_key(synopsis_name)],
+        role="protagonist",
+        gender=bible.protagonist.gender if bible.protagonist else "unknown",
+        source="synopsis",
+    )
+    return True
+
+
+def build_bootstrap_prompt(comic_title: str, synopsis: str = "") -> str:
     """Prompt for a one-shot cast extraction from an episode PDF. Output is JSON only."""
+    synopsis_block = ""
+    if synopsis:
+        synopsis_block = f"""
+OFFICIAL SERIES SYNOPSIS (from the publisher; authoritative for real names):
+"{synopsis}"
+- If this synopsis names the protagonist, use that name as protagonist.name, even when the pages only
+  show a nickname, game handle or username for him or her. Put such handles in protagonist.aliases.
+"""
     return f"""You are building a character reference sheet for a narrated recap of the comic "{comic_title}".
 Read the attached comic pages and list the cast.
-
+{synopsis_block}
 Return ONLY a JSON object, no Markdown, with this exact shape:
 {{
   "protagonist": {{"name": "", "aliases": [], "gender": "male|female|unknown"}},
@@ -349,19 +430,27 @@ async def bootstrap_bible(
     protagonist_name: str = "",
     max_episodes: int = 3,
     on_warning: Optional[WarnCallback] = None,
+    synopsis: str = "",
 ) -> Tuple[SeriesBible, bool]:
     """
     Builds the bible before any episode is narrated. Returns (bible, reused_existing).
 
-    Order of authority: existing bible with a protagonist > user identity (locked) >
-    LLM cast extraction from the first episode PDFs. Does not save; the caller persists
-    after reconciling with StoryMemory.
+    Order of authority: user identity (locked) > official synopsis > existing bible whose
+    protagonist the synopsis confirms > LLM cast extraction from the first episode PDFs.
+    Does not save; the caller persists after reconciling with StoryMemory.
     """
+    synopsis = clean_synopsis(synopsis)
     existing = load_bible(download_dir, comic_title)
-    if existing and existing.protagonist_name:
+    if existing is not None and synopsis:
+        existing.synopsis = synopsis
+    if existing and existing.protagonist_name and (
+        existing.protagonist.locked or memory_name_is_trusted(existing.protagonist_name, existing)
+    ):
         return existing, True
 
     bible = existing or new_bible(comic_title)
+    if synopsis:
+        bible.synopsis = synopsis
     apply_user_identity(bible, ip_context, protagonist_name)
 
     async def warn(msg: str, ep: int) -> None:
@@ -375,7 +464,7 @@ async def bootstrap_bible(
         if not pdf_path:
             continue
         try:
-            text = await llm_call(pdf_path, build_bootstrap_prompt(comic_title), ep)
+            text = await llm_call(pdf_path, build_bootstrap_prompt(comic_title, bible.synopsis), ep)
         except Exception as err:
             await warn(f"Series Bible: cast extraction failed for episode {ep}: {err}", ep)
             continue
@@ -386,6 +475,7 @@ async def bootstrap_bible(
         merge_bootstrap(bible, data)
         if bible.protagonist_name and bible.characters:
             break
+    _apply_synopsis_protagonist(bible, comic_title)
     return bible, False
 
 

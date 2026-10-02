@@ -7,7 +7,10 @@ from series_bible import (
     CharacterEntry,
     apply_user_identity,
     bootstrap_bible,
+    clean_synopsis,
     extract_name_candidates,
+    memory_name_is_trusted,
+    protagonist_from_synopsis,
     load_bible,
     merge_bootstrap,
     new_bible,
@@ -205,6 +208,83 @@ def test_bootstrap_reuses_existing_bible_without_llm_calls(tmp_path):
         llm_call=must_not_be_called,
     ))
     assert reused and bible.protagonist_name == "Tae"
+
+
+# --- Official synopsis (Veteran 1-33 render named the hero after a game handle) -----
+
+VETERAN_SYNOPSIS = (
+    "When Seongho logs off Survival Life for the final time, the last thing he expects is for the video game "
+    "to become reality. Having awakened as a hunter with the ability to open dimensional gates, Seongho rushes "
+    "to build a hideout in another realm in order to survive."
+)
+
+
+def _bootstrap(tmp_path, llm_reply, synopsis=VETERAN_SYNOPSIS, **kw):
+    prompts = []
+
+    async def fake_llm(pdf_path, prompt, ep):
+        prompts.append(prompt)
+        return json.dumps(llm_reply)
+
+    bible, reused = asyncio.run(bootstrap_bible(
+        "Veteran of the Apocalypse", str(tmp_path), [1, 2, 3],
+        resolve_pdf=lambda ep: f"ep{ep}.pdf", llm_call=fake_llm, synopsis=synopsis, **kw,
+    ))
+    return bible, reused, prompts
+
+
+def test_synopsis_names_the_protagonist_when_pages_do_not(tmp_path):
+    bible, _, prompts = _bootstrap(tmp_path, {"protagonist": {"name": ""}, "characters": [{"name": "Wontaek Jang"}]})
+    assert bible.protagonist_name == "Seongho"
+    assert bible.protagonist.source == "synopsis"
+    assert "OFFICIAL SERIES SYNOPSIS" in prompts[0] and "Seongho" in prompts[0]
+    assert load_bible(str(tmp_path)) is None  # bootstrap never saves; the caller does
+
+
+def test_synopsis_overrides_a_game_handle_and_keeps_it_as_alias(tmp_path):
+    reply = {"protagonist": {"name": "Survivor1", "gender": "male"},
+             "characters": [{"name": "Survivor1"}, {"name": "Bunny", "role": "party member"}]}
+    bible, _, _ = _bootstrap(tmp_path, reply)
+    assert bible.protagonist_name == "Seongho"
+    assert bible.protagonist.gender == "male"
+    assert "Survivor1" in bible.protagonist.aliases
+    assert [c.name for c in bible.characters] == ["Bunny"]
+
+
+def test_user_supplied_protagonist_is_never_overridden_by_the_synopsis(tmp_path):
+    bible, _, _ = _bootstrap(tmp_path, {"protagonist": {"name": ""}, "characters": []}, protagonist_name="Lee Seongho")
+    assert bible.protagonist_name == "Lee Seongho" and bible.protagonist.locked
+
+
+def test_saved_bible_with_unconfirmed_protagonist_is_rebuilt(tmp_path):
+    stale = new_bible("Veteran of the Apocalypse")
+    stale.protagonist = CharacterEntry(name="Survivor1", source="inferred")
+    save_bible(stale, str(tmp_path))
+    bible, reused, prompts = _bootstrap(tmp_path, {"protagonist": {"name": ""}, "characters": []})
+    assert not reused and prompts
+    assert bible.protagonist_name == "Seongho"
+
+
+def test_memory_guess_is_trusted_only_if_the_synopsis_agrees():
+    bible = new_bible("Veteran of the Apocalypse")
+    assert memory_name_is_trusted("Survivor1", bible)  # no synopsis: nothing to check against
+    bible.synopsis = VETERAN_SYNOPSIS
+    assert not memory_name_is_trusted("Survivor1", bible)
+    assert memory_name_is_trusted("Seongho", bible)
+    assert not memory_name_is_trusted("", bible)
+
+
+def test_synopsis_helpers():
+    assert clean_synopsis("  Too short.  ") == ""
+    assert clean_synopsis("x " * 900).startswith("x x") and len(clean_synopsis("x " * 900)) == 1200
+    assert protagonist_from_synopsis(VETERAN_SYNOPSIS, "Veteran of the Apocalypse") == "Seongho"
+    assert protagonist_from_synopsis("", "X") == ""
+    # Real webtoons synopsis: a one-off capitalized term ("Hellgates") must not beat the possessive name.
+    tyrant = ("As Hellgates open across the globe, humanity falls, bringing with it the death of Goong Nam’s "
+              "family. On the edge of a cliff, he loses hold of his beloved daughter’s hand.")
+    assert protagonist_from_synopsis(tyrant, "The Tyrant of the Apocalypse Returns") == "Goong Nam"
+    # No clear person: leave it empty rather than guess.
+    assert protagonist_from_synopsis("When the Hellgates open, humanity falls and the world burns.", "X") == ""
 
 
 # --- Persistence -------------------------------------------------------------

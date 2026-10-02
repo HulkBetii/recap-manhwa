@@ -459,7 +459,24 @@ class Stage1_ComicParsing(BaseStage):
                 pass
             title_text = title_text.split("|")[0].strip()
             title_text = title_text.split("Chapter")[0].strip()
-            
+
+            # Official synopsis: the Series Bible's authority for the protagonist's real name (Stage 5),
+            # since early chapters may only show a game handle or nickname.
+            try:
+                from series_bible import clean_synopsis
+                # og:description first: plain description often carries site boilerplate ("Read … Now!").
+                meta_texts = []
+                for selector in ("meta[property='og:description']", "meta[name='description']"):
+                    meta_texts += await page.locator(selector).evaluate_all(
+                        "elements => elements.map(el => el.getAttribute('content') || '')"
+                    )
+                synopsis = next((s for s in (clean_synopsis(m) for m in meta_texts) if s), "")
+                if synopsis:
+                    task.artifacts["series_synopsis"] = synopsis
+                    await context.log(f"Đã lấy phần giới thiệu chính thức của truyện ({len(synopsis)} ký tự).", "info")
+            except Exception as synopsis_err:
+                await context.log(f"Không lấy được phần giới thiệu truyện: {synopsis_err}", "warning")
+
             from chapter_resolver import resolve_english_comic_title
             en_title = resolve_english_comic_title(title_text, url=task.comic_url)
             if en_title and en_title != title_text:
@@ -1400,12 +1417,13 @@ class Stage5_GeminiAutomation(BaseStage):
 
         # Series Bible: cast fixed before parallel dispatch so every episode uses the same names
         from series_bible import (
-            apply_inferred_protagonist, bootstrap_bible, normalize_segments, observe_episode,
-            render_prompt_block, save_bible,
+            apply_inferred_protagonist, bootstrap_bible, memory_name_is_trusted, normalize_segments,
+            observe_episode, render_prompt_block, save_bible,
         )
         BIBLE_BOOTSTRAP_MAX_EPISODES = 3
         series_bible = None
         _bible_lock = asyncio.Lock()
+        untrusted_name_warned: list = []
 
         def resolve_episode_pdf(ep):
             pdf_dir = os.path.join(download_dir, f"episode_{ep}", "pdf")
@@ -1436,6 +1454,7 @@ class Stage5_GeminiAutomation(BaseStage):
                 protagonist_name=task.payload.get("protagonist_name", ""),
                 max_episodes=BIBLE_BOOTSTRAP_MAX_EPISODES,
                 on_warning=warn,
+                synopsis=task.artifacts.get("series_synopsis", ""),
             )
             if reused:
                 await context.log(
@@ -1454,7 +1473,7 @@ class Stage5_GeminiAutomation(BaseStage):
                 prompt_version="us_apocalypse_v2",
             )
             memory = StoryMemory.load_validated(download_dir, comic_title=comic_title, language=language, **memory_kwargs)
-            if not bible.protagonist_name and memory.protagonist_name:
+            if not bible.protagonist_name and memory_name_is_trusted(memory.protagonist_name, bible):
                 apply_inferred_protagonist(bible, memory.protagonist_name, memory.protagonist_gender)
             if bible.protagonist_name and memory.protagonist_name != bible.protagonist_name:
                 memory.set_protagonist_name(bible.protagonist_name)
@@ -1463,7 +1482,12 @@ class Stage5_GeminiAutomation(BaseStage):
                 memory.save_with_fingerprint(download_dir, **memory_kwargs)
 
             save_bible(bible, download_dir)
-            mc_txt = bible.protagonist_name or "chưa xác định"
+            if bible.protagonist_name:
+                source = " (từ phần giới thiệu chính thức)" if bible.protagonist.source == "synopsis" else ""
+                mc_txt = f"{bible.protagonist_name}{source}"
+            else:
+                # Warn before narrating: once 33 episodes are voiced, a wrong name costs a full re-render.
+                mc_txt = "chưa xác định — hãy điền 'Tên nhân vật chính' trên UI rồi chạy lại để tránh lệch tên"
             await context.log(
                 f"Series Bible: nhân vật chính = {mc_txt}; {len(bible.characters)} nhân vật khác "
                 f"({', '.join(c.name for c in bible.characters[:6])}).",
@@ -1577,16 +1601,31 @@ class Stage5_GeminiAutomation(BaseStage):
                 confirmed_mc_name = series_bible.protagonist_name
                 confirmed_gender = series_bible.protagonist_gender
 
-            # Priority 3: Existing memory / glossary
+            # User / Bible names are authoritative: they replace whatever StoryMemory carried along.
+            authoritative_name = bool(confirmed_mc_name)
+
+            # Priority 3: Existing memory / glossary, only when the official synopsis does not contradict it
+            # (a frequency guess from one episode once locked a game handle in as the protagonist).
             if not confirmed_mc_name and memory and memory.protagonist_name:
-                confirmed_mc_name = memory.protagonist_name
-                confirmed_gender = memory.protagonist_gender
+                if memory_name_is_trusted(memory.protagonist_name, series_bible):
+                    confirmed_mc_name = memory.protagonist_name
+                    confirmed_gender = memory.protagonist_gender
+                else:
+                    if previous_context and previous_context.get("protagonist_name") == memory.protagonist_name:
+                        previous_context.pop("protagonist_name", None)
+                    if not untrusted_name_warned:
+                        untrusted_name_warned.append(memory.protagonist_name)
+                        await context.log(
+                            f"Series Bible: bỏ tên nhân vật chính đoán từ narration ('{memory.protagonist_name}') vì không có "
+                            "trong phần giới thiệu chính thức. Hãy điền 'Tên nhân vật chính' trên UI.",
+                            "warning", episode=ep,
+                        )
 
             # Assign to previous_context & memory
             if confirmed_mc_name:
                 if previous_context is None:
                     previous_context = {}
-                if not previous_context.get("protagonist_name"):
+                if authoritative_name or not previous_context.get("protagonist_name"):
                     previous_context["protagonist_name"] = confirmed_mc_name
                 if confirmed_gender != "auto" and not previous_context.get("protagonist_gender"):
                     previous_context["protagonist_gender"] = confirmed_gender
