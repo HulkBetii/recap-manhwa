@@ -237,6 +237,23 @@ def test_recurring_name_is_promoted_after_two_episodes():
     assert "Mingu" in [c.name for c in bible.characters]
 
 
+def test_plural_mentions_count_toward_the_singular_name():
+    bible = _zombie_bible()
+    per_ep = OBSERVED_MIN_MENTIONS // 2 + 1
+    first = observe_episode(bible, 3, [_seg("The horde follows Cobolt. " + " ".join(["Tae kills the Cobolts."] * per_ep))])
+    assert "Cobolts" not in bible.observed_names and bible.observed_names["Cobolt"].mentions == per_ep + 1
+    assert first.top_unknown_name == "Cobolt"
+    # Later episodes that only use the plural still feed the same entry.
+    second = observe_episode(bible, 4, [_seg(" ".join(["Tae burns the Cobolts."] * per_ep))])
+    assert second.promoted_names == ["Cobolt"]
+
+
+def test_plural_of_known_name_is_not_unknown_and_lone_plurals_stay():
+    bible = _zombie_bible()
+    report = observe_episode(bible, 1, [_seg(" ".join(["Tae calls the Jinwoos and James."] * 6))])
+    assert report.top_unknown_name == "James"  # no "Jame" seen: real names ending in s are untouched
+
+
 def test_protagonist_drift_is_flagged():
     bible = _zombie_bible()
     seg = [_seg(" ".join(["Everyone stares at Haneul."] * 6))]

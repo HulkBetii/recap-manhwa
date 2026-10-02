@@ -535,11 +535,24 @@ def _scan_names(bible: SeriesBible, texts: List[str]) -> Tuple[int, Counter]:
         name_key(_strip_title_words(t)) for t in bible.terms if _strip_title_words(t)
     }
     blocked = {name_key(n) for n in bible.placeholder_blocklist}
+    candidates = _fold_plurals(extract_name_candidates(texts), known | {name_key(n) for n in bible.observed_names})
     unknown_counts = Counter({
-        name: n for name, n in extract_name_candidates(texts).items()
+        name: n for name, n in candidates.items()
         if name_key(name) not in known and name_key(name) not in blocked
     })
     return mc_mentions, unknown_counts
+
+
+def _fold_plurals(counts: Counter, seen_keys: set[str]) -> Counter:
+    """'Cobolts' counts toward 'Cobolt' when the singular is seen too (this episode, the bible or earlier
+    observations), so one creature/faction name is not split across two half-counted entries."""
+    singular_keys = seen_keys | {name_key(n) for n in counts}
+    folded: Counter = Counter()
+    for name, n in counts.items():
+        if name.endswith("s") and not name.endswith("ss") and name_key(name[:-1]) in singular_keys:
+            name = name[:-1]
+        folded[name] += n
+    return folded
 
 
 def observe_episode(
