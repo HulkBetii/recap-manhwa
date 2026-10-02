@@ -12,11 +12,10 @@ Supports:
 import os
 import re
 import json
-import time
 import base64
 import asyncio
 import logging
-from typing import Optional, List, Dict, Any, Tuple, Union
+from typing import Optional, List, Any, Tuple, Union
 import httpx
 
 logger = logging.getLogger("GeminiApiEngine")
@@ -357,7 +356,7 @@ class GeminiApiEngine:
             resp.raise_for_status()
             try:
                 data = resp.json()
-            except Exception as json_err:
+            except Exception:
                 raise ValueError(f"Không thể giải mã JSON từ Gemini Native API (HTTP {resp.status_code}): {resp.text[:300]}")
 
             # Parse Gemini native response format
@@ -467,7 +466,7 @@ class GeminiApiEngine:
 
             try:
                 data = resp.json()
-            except Exception as json_err:
+            except Exception:
                 raise ValueError(f"Không thể giải mã phản hồi JSON từ 9router (HTTP {resp.status_code}): {resp.text[:300]}")
 
             choices = data.get("choices", [])

@@ -1,7 +1,7 @@
 import os
 import json
 import asyncio
-from typing import Optional, Tuple, Dict, List, Any
+from typing import Optional
 import re
 import time
 import logging
@@ -9,11 +9,10 @@ import config
 import subprocess
 import shutil
 import math
-import random
 import cv2
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
-from workflow_base import BaseStage, StageState, WorkflowContext, check_episode_completed
+from PIL import Image, ImageDraw, ImageEnhance
+from workflow_base import BaseStage, WorkflowContext
 from recap_schema import load_recap_dicts
 from artifact_cache import (
     EpisodeStageCache,
@@ -507,7 +506,7 @@ def parse_srt_file(srt_path):
         return []
 
 def draw_subtitles_on_frame(image, text, font_size=42):
-    from PIL import ImageDraw, ImageFont, Image
+    from PIL import ImageFont, Image
     if not text:
         return
         
@@ -934,7 +933,6 @@ def detect_vertical_bubble_edges(img_rgb: np.ndarray, white_thresh: int = 215, m
     return top_bubble_bottom_y, bottom_bubble_top_y
 
 
-import math
 
 def ease_in_out_sine(t: float) -> float:
     return 0.5 * (1 - math.cos(t * math.pi))
@@ -1341,8 +1339,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
         subtitles_enabled = bool(task.payload.get("burn_subtitles", False))
 
         def _render_episode_video_sync_impl(images_blur_dir, image_files, segments, timings, output_video_path, ffmpeg_exe, working_encoder, audio_path, logo_path, overlay_path, subtitles_enabled_flag, srt_filename, fps=30, stderr_file=None, stderr_log_path=None, min_panel_duration=3.0, hard_floor_duration=2.0, **kwargs):
-            from PIL import Image, ImageFilter, ImageEnhance, ImageDraw
-            import subprocess
+            from PIL import Image
             import numpy as np
             import cv2
             import math
@@ -2731,7 +2728,6 @@ class Stage11_FinalVideoAssembly(BaseStage):
         total_episodes = to_ep - from_ep + 1
         episodes_processed = list(range(from_ep, to_ep + 1))
 
-        import config
         # Premise Pitch: title-aligned cold open. Takes precedence over the template flash-forward.
         pitch_prepended = False
         if task.payload.get("enable_premise_pitch", getattr(config, "ENABLE_PREMISE_PITCH", True)):

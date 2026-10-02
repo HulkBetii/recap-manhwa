@@ -1,25 +1,22 @@
 import os
 import json
 import asyncio
-import base64
 import urllib.parse
 import sys
 import shutil
 import re
-import random
 import time
-import traceback
 from pathlib import Path
-from workflow_base import BaseStage, StageState, WorkflowContext, check_episode_completed
+from workflow_base import BaseStage, WorkflowContext
 import cv2
 import numpy as np
 try:
     import matplotlib
     matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
+    import matplotlib.pyplot as plt  # noqa: F401  (headless backend set before pyplot loads)
 except Exception:
     pass
-from tools.text_remover.comic_text_remover import get_easyocr_reader, ocr_lock
+from tools.text_remover.comic_text_remover import ocr_lock
 from recap_schema import validate_recap_file
 from artifact_cache import EpisodeStageCache, source_hash, stage_fingerprint, validate_pdf_file
 from chapter_resolver import (
@@ -674,7 +671,7 @@ class Stage2_AsyncImageCrawling(BaseStage):
                 await context.start_episode(ep)
                 
                 if is_magapoke:
-                    from magapoke_crawler import crawl_magapoke_episode_images, parse_magapoke_url
+                    from magapoke_crawler import crawl_magapoke_episode_images
                     ep_url = url
                     magapoke_episodes = task.artifacts.get("magapoke_episodes", [])
                     user_ep_id = task.artifacts.get("magapoke_episode_id")
@@ -1190,11 +1187,7 @@ class Stage5_GeminiAutomation(BaseStage):
     def weight(self) -> float: return 0.15
 
     async def execute(self, context: WorkflowContext) -> bool:
-        from app import get_browser_context, NavigationManager, textbox_selectors, send_selectors, response_selectors, generate_gemini_prompt, generate_intro_prompt, extract_json_from_text, parse_gemini_recap_text, clean_gemini_response
-        from playwright.async_api import async_playwright
-        import uuid
-        import base64
-        import random
+        from app import NavigationManager, textbox_selectors, send_selectors, response_selectors, generate_gemini_prompt, extract_json_from_text, parse_gemini_recap_text, clean_gemini_response
         
         task = context.task
         from_ep = task.from_episode
@@ -1215,7 +1208,7 @@ class Stage5_GeminiAutomation(BaseStage):
         completed_eps_count = 0
 
         async def get_local_context():
-            from app import check_and_rotate_profiles_until_ready, NavigationManager
+            from app import check_and_rotate_profiles_until_ready
             target_vlm_model = task.payload.get("vlm_model", "3.8 Flash")
             br, shared_ctx = await check_and_rotate_profiles_until_ready(context, force_check=False, target_model=target_vlm_model)
             ctx_id = f"ctx_{int(time.time() * 1000) % 10000}"
@@ -2879,7 +2872,6 @@ class Stage2b_IntelligentRepagination(BaseStage):
     async def execute(self, context: WorkflowContext) -> bool:
         import os
         import json
-        import shutil
         import asyncio
         import cv2
         import numpy as np
@@ -3427,7 +3419,6 @@ class Stage2b_IntelligentRepagination(BaseStage):
                 
                 from moderation_utils import (
                     is_blank_or_solid_page,
-                    is_gutter_or_filler_slice,
                     is_junk_or_title_page,
                     is_text_bubble_dominant,
                 )

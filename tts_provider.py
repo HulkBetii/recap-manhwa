@@ -169,7 +169,7 @@ def get_whisper_model():
             compute_type = "float16" if device == "cuda" else "int8"
             logger.info(f"Initializing faster-whisper model ('base') on device='{device}' ({compute_type})...")
             _whisper_model = ("faster_whisper", WhisperModel("base", device=device, compute_type=compute_type))
-        except Exception as e:
+        except Exception:
             if whisper is None:
                 raise RuntimeError("Không tìm thấy faster-whisper hoặc openai-whisper.")
             logger.info(f"Initializing Whisper model ('base') on device='{config.DEVICE}'...")

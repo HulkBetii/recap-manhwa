@@ -5,7 +5,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 
 # Import core workflow elements
 from workflow_base import (
@@ -15,9 +15,8 @@ from workflow_base import (
     WorkflowTask,
     CancellationToken,
     EventBus,
-    JSONWorkflowRepository,
-    WorkflowContext,
-    BaseStage
+    JSONWorkflowRepository,  # noqa: F401  re-exported: app.py imports it from here
+    WorkflowContext
 )
 
 from process_control import ProcessIdentity, identity_for_process, popen_command, process_matches, terminate_process_tree

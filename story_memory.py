@@ -5,7 +5,7 @@ import os
 import re
 import time
 import hashlib
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 PREVIOUS_TAIL_SEGMENTS = 3
 

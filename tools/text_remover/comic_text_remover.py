@@ -7,11 +7,9 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 import argparse
 import time
 import logging
-import json
 import csv
 import numpy as np
 import cv2
-from PIL import Image
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)

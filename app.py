@@ -257,10 +257,7 @@ async def protect_local_api(request: Request, call_next):
 from workflow import (
     JSONWorkflowRepository,
     EventBus,
-    WorkflowManager,
-    WorkflowTask,
-    WorkflowState,
-    StageState
+    WorkflowManager
 )
 
 textbox_selectors = [
@@ -1042,7 +1039,7 @@ async def get_browser_context(p, headless=False, start_maximized=False, temp_suf
                             permissions=["clipboard-read", "clipboard-write"],
                             **launch_args
                         )
-                    except Exception as inner_e:
+                    except Exception:
                         # Fallback if channel="chrome" fails
                         context = await p.chromium.launch_persistent_context(
                             user_data_dir=user_data_dir,
@@ -1331,7 +1328,6 @@ class ChromeProfilePoolManager:
 
 async def get_shared_browser_context(headless=False, start_maximized=False, temp_suffix="", custom_profile_path=None):
     global _shared_playwright, _shared_context, _shared_browser, _shared_headless, _shared_context_lock, _shared_profile_path
-    from playwright.async_api import async_playwright
     
     if _shared_context_lock is None:
         _shared_context_lock = asyncio.Lock()
@@ -2507,7 +2503,6 @@ async def process_single_image(
     import cv2
     import numpy as np
     import torch
-    from PIL import Image
 
     async with sem:
         if sse_logger:
@@ -2665,8 +2660,6 @@ async def sanitize_episode_images(
     global dino_processor, dino_model, sam_processor, sam_model
 
     import os
-    import cv2
-    import numpy as np
     import torch
     from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
     from transformers import SamModel, SamProcessor
@@ -3039,7 +3032,6 @@ def stitch_images_vertically(ep_dir: str, output_path: str, image_quality: int =
             except Exception:
                 pass
 
-import json
 import os
 
 
@@ -5159,9 +5151,8 @@ async def render_camera_clip(
     output_path: str,
     encoder: str
 ) -> bool:
-    from PIL import Image, ImageFile, ImageFilter, ImageEnhance
+    from PIL import ImageFile, ImageFilter, ImageEnhance
     import uuid
-    import subprocess
     
     # Allow loading of truncated/broken images
     ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -5423,7 +5414,6 @@ async def run_video_pipeline(
     overlay_path = str(resolve_upload_path(overlay_path, must_exist=True)) if overlay_path else None
     ref_audio_path = str(resolve_upload_path(ref_audio_path, must_exist=True)) if ref_audio_path else None
 
-    import httpx
     async with crawler_lock:
         crawler_running = True
         await sse_logger.log(f"Bắt đầu quy trình tạo video cho thư mục '{comic_folder}'...", "system", "active", "Đang tạo video...")
@@ -5617,7 +5607,7 @@ async def run_video_pipeline(
 
             # Remove text in-place from original images in ep_dir and rebuild stitched.jpg if requested
             if remove_text:
-                from tools.text_remover.comic_text_remover import get_easyocr_reader, process_image
+                pass
                 # Omitted page text removal pass per user request to preserve original text and speed up rendering
 
             # 6. Render individual panning/zooming keyframe clips concurrently

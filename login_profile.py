@@ -1,6 +1,5 @@
 import asyncio
 import os
-import sys
 import json
 import argparse
 from playwright.async_api import async_playwright

@@ -5,7 +5,7 @@ Houses channel identity, subscribe links, target niche, persona, and competitor 
 for automated YouTube SEO metadata and script generation.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 CHANNEL_PROFILE: Dict[str, Any] = {
     "channel_name": "Jaehwan Manhwa",
