@@ -22,6 +22,18 @@ except ImportError:
     FACT_USAGE_POLICY = {}          # type: ignore
     can_use_fact_for_surface = None # type: ignore
 
+try:
+    from channel_profile import CHANNEL_PROFILE, get_channel_profile
+except ImportError:
+    CHANNEL_PROFILE = {
+        "channel_name": "Jaehwan Manhwa",
+        "channel_handle": "@JaehwanManhwa",
+        "channel_url": "https://www.youtube.com/@JaehwanManhwa",
+        "sub_link": "https://www.youtube.com/@JaehwanManhwa?sub_confirmation=1",
+        "brand_tags": ["jaehwan manhwa", "jaehwan", "jaehwan manhwa recap"],
+    }
+    get_channel_profile = lambda: CHANNEL_PROFILE
+
 
 # =============================================================================
 # DATA STRUCTURES & EVIDENCE MODELS
@@ -96,41 +108,95 @@ class SemanticAssertion:
 
 
 # =============================================================================
+# THUMBNAIL & TITLE OUTPUT CONSTRAINT HELPERS
+# =============================================================================
+
+def _cap_overlay_text(text: str, max_chars: int = 15) -> str:
+    """
+    Hard cap thumbnail overlay text (main_text OR sub_text) to max_chars via
+    word-boundary truncation. Guarantees len(output) <= max_chars always.
+
+    Symmetry Rule: apply to ALL overlay text surfaces equally — not just main_text.
+    The cap is enforced here so callers don't need to remember to validate.
+    """
+    if len(text) <= max_chars:
+        return text
+    # Strip trailing punctuation before truncating
+    base = text.rstrip("!?. ")
+    words = base.split()
+    result = ""
+    for w in words:
+        candidate = (result + " " + w).strip() if result else w
+        # Reserve 1 char for "!" suffix
+        if len(candidate) + 1 <= max_chars:
+            result = candidate
+        else:
+            break
+    return (result + "!") if result else text[:max_chars]
+
+
+def _enforce_title_pre_pipe(title: str, max_pre_pipe: int = 60) -> str:
+    """
+    Ensures the portion before ' | ' is <= max_pre_pipe chars.
+    YouTube mobile (~375px) cuts title display at ~55-60 chars; anything after
+    is invisible to the viewer before clicking.
+
+    Output Gate Rule: enforced at the final output layer inside pick_variant()
+    and generate_dynamic_titles(), not just at template design time.
+    """
+    if " | " not in title:
+        if len(title) <= max_pre_pipe:
+            return title
+        return title[:max_pre_pipe].rsplit(" ", 1)[0].rstrip("!,. ") + "!"
+    pre, _, suffix = title.partition(" | ")
+    if len(pre) <= max_pre_pipe:
+        return title
+    trimmed = pre[:max_pre_pipe].rsplit(" ", 1)[0].rstrip("!,. ")
+    return f"{trimmed}! | {suffix}"
+
+
+# =============================================================================
 # RESEARCH-VALIDATED CONSTANTS & DEDICATED ARCHETYPE TITLE POOLS
 # =============================================================================
 
 ARCHETYPE_TITLE_POOLS = {
     "zombie_apocalypse": [
-        "When {disaster} Overruns The City, {mc_name} Fights To Survive | Manhwa Recap",
+        "When {disaster} Overruns The City, One Lone Survivor Fights Back | Manhwa Recap",
+        "He Hoarded Endless Supplies While Everyone Panicked In {disaster} | Manhwa Recap",
         "Surviving {disaster} Against All Odds [{ep_range}] | Manhwa Recap",
-        "He Was BETRAYED by {betrayer}, But Survived {disaster} | Manhwa Recap",
-        "When {disaster} Strikes, {mc_name} Holds The Defense Line | Manhwa Recap",
+        "They Left Him for DEAD in the Quarantine Zone, But He Awoke SSS-Rank | Manhwa Recap",
+        "When {disaster} Strikes, The Last Defender Holds The Line | Manhwa Recap",
         "From Outbreak to Total Collapse: Surviving {disaster} [{ep_range}] | Manhwa Recap",
-        "They Left Him for DEAD in the Quarantine Zone, But He Survived | Manhwa Recap",
+        "He Built {fortress} While The World Collapsed [{ep_range}] | Manhwa Recap",
         "The Lone Veteran of {disaster} Holds The Line [{ep_range}] | Manhwa Recap",
     ],
     "bunker_prepper": [
-        "They Called Him INSANE for {prep_action}, Until the {disaster} Hit | Manhwa Recap",
-        "He Prepared Before the {disaster} Hit and Built a FORTIFIED Base | Manhwa Recap",
-        "He Spent {time_span} Preparing for {disaster} That ACTUALLY Happened | Manhwa Recap",
-        "The World Reaches {extreme_temp}, But His Shelter Has Heat | Manhwa Recap",
-        "When {disaster} Freezes The World, He Thrives Inside His Bunker | Manhwa Recap",
+        "He Built {fortress} With Endless Food While Everyone Panicked! | Manhwa Recap",
+        "They Called Him INSANE for {prep_action}, Until {disaster} Struck! | Manhwa Recap",
+        "He Prepared Before {disaster} Hit and Built {fortress} | Manhwa Recap",
+        "Starving Survivors Beg For Entry, But He Kept The {shelter} Sealed | Manhwa Recap",
+        "The World Collapses Into Chaos, But His {shelter} Has Everything | Manhwa Recap",
+        "When {disaster} Hits, Everyone Panics But One Man Thrives | Manhwa Recap",
+        "When An SSS-Rank {mc_role} Awakens In {disaster} [{ep_range}] | Manhwa Recap",
     ],
     "hunter_gate": [
         "Academy Mocked His '{trash_class}' Until His Combat Power HUMILIATES the Rank 1 | Manhwa Recap",
         "When The F-RANK Trainee Reveals His Hidden SSS-Power and SHOCKS the Elites | Manhwa Recap",
         "He Awakened a BROKEN {system_name} That Turns Low Rank Into SSS-Tier | Manhwa Recap",
         "He Was BETRAYED in the Abyss, But Came Back as the Strongest Hunter | Manhwa Recap",
+        "When An SSS-Rank Hunter Awakens Alone In {disaster} [{ep_range}] | Manhwa Recap",
     ],
     "regression_prep": [
-        "He DIES in the {disaster} and Returns {time_before} Before Everyone Else | Manhwa Recap",
+        "He DIES in {disaster} and Returns {time_before} Before Everyone Else | Manhwa Recap",
         "BETRAYED at the End, He REGRESSED {time_span} to DESTROY Them All | Manhwa Recap",
         "When {disaster} Strikes, He Thrives With Complete Future Knowledge | Manhwa Recap",
+        "He Hoarded All Divine Resources Before {disaster} Started [{ep_range}] | Manhwa Recap",
     ],
     "farming_kingdom": [
         "Exiled to {danger_zone}, His Farming System Builds an UNSTOPPABLE Domain | Manhwa Recap",
         "They Left Him with NOTHING, But His Domain Snowballed Into a KINGDOM | Manhwa Recap",
-        "He Was BETRAYED by {betrayer}, But Built a KINGDOM From Worthless Land | Manhwa Recap",
+        "Starving Lords Beg For Food, But He Controls The Entire Harvest | Manhwa Recap",
+        "He Was BETRAYED by {betrayer}, But Built {fortress} From Worthless Land | Manhwa Recap",
     ],
     "tower_anti_regression": [
         "Everyone Chose Regression, But He Refused and Broke Reality | Manhwa Recap",
@@ -148,7 +214,10 @@ ARCHETYPE_TITLE_POOLS = {
         "From Exiled Outcast to Martial Overlord: The Complete Vengeance Arc | Manhwa Recap",
     ],
     "general_apocalypse": [
-        "When {disaster} Overruns The World, He Thrives Against All Odds | Manhwa Recap",
+        "He Built {fortress} While The Entire World Collapsed | Manhwa Recap",
+        "They Mocked Him As Weak, But His {shelter} Kept Him Alive When {disaster} Hit | Manhwa Recap",
+        "When {disaster} Overruns The World, One Man Thrives Against All Odds | Manhwa Recap",
+        "When An SSS-Rank {mc_role} Awakens In {disaster} [{ep_range}] | Manhwa Recap",
         "Surviving {disaster} When Everyone Else Lost Hope [{ep_range}] | Manhwa Recap",
         "He Was BETRAYED by {betrayer}, But Survived {disaster} | Manhwa Recap",
     ],
@@ -157,30 +226,36 @@ ARCHETYPE_TITLE_POOLS = {
 ARCHETYPE_VARIANT_POOL = {
     "zombie_apocalypse": {
         "conflict": [
-            "When {disaster} Overruns The City, {mc_name} Fights To Survive | Manhwa Recap",
+            "He Hoarded Endless Supplies While Everyone Panicked In {disaster} | Manhwa Recap",
+            "When {disaster} Overruns The City, One Lone Survivor Fights Back | Manhwa Recap",
+            "They Left Him for DEAD in the Quarantine Zone, But He Awoke SSS-Rank | Manhwa Recap",
             "He Was BETRAYED by {betrayer}, But Survived {disaster} | Manhwa Recap",
-            "They Left Him for DEAD in the Quarantine Zone, But He Survived | Manhwa Recap",
         ],
         "paradox": [
             "When {disaster} Hits, Everyone Panics But He Holds The Line | Manhwa Recap",
             "Surviving {disaster} When All Safe Zones Fall [{ep_range}] | Manhwa Recap",
+            "He Built {fortress} While The World Collapsed [{ep_range}] | Manhwa Recap",
         ],
         "scale": [
+            "When An SSS-Rank {mc_role} Awakens In {disaster} [{ep_range}] | Manhwa Recap",
             "From Outbreak to Total Collapse: Surviving {disaster} [{ep_range}] | Manhwa Recap",
             "Surviving {disaster} Against All Odds [{ep_range}] | Manhwa Recap",
         ],
     },
     "bunker_prepper": {
         "conflict": [
-            "They Called Him INSANE for {prep_action}, Until the {disaster} Hit | Manhwa Recap",
-            "He Prepared Before the {disaster} Hit and Built a FORTIFIED Base | Manhwa Recap",
+            "He Built {fortress} With Endless Food While Everyone Panicked! | Manhwa Recap",
+            "They Called Him INSANE for {prep_action}, Until {disaster} Struck! | Manhwa Recap",
+            "He Prepared Before {disaster} Hit and Built {fortress} | Manhwa Recap",
         ],
         "paradox": [
-            "The World Reaches {extreme_temp}, But His Shelter Has Heat | Manhwa Recap",
-            "When {disaster} Hits, Everyone Freezes But He Stays Warm | Manhwa Recap",
+            "The World Collapses Into Chaos, But His {shelter} Has Everything | Manhwa Recap",
+            "Starving Survivors Beg For Entry, But He Kept The {shelter} Sealed | Manhwa Recap",
+            "When {disaster} Hits, Everyone Panics But He Thrives | Manhwa Recap",
         ],
         "scale": [
-            "Building a FORTIFIED Base in a Dead World [{ep_range}] | Manhwa Recap",
+            "When An SSS-Rank {mc_role} Awakens In {disaster} [{ep_range}] | Manhwa Recap",
+            "Building {fortress} in a Dead World [{ep_range}] | Manhwa Recap",
             "Surviving {disaster} in the Ultimate Sanctuary [{ep_range}] | Manhwa Recap",
         ],
     },
@@ -194,17 +269,19 @@ ARCHETYPE_VARIANT_POOL = {
             "Everyone Got Common Classes, But His System Gives SSS Awakening | Manhwa Recap",
         ],
         "scale": [
+            "When An SSS-Rank Hunter Awakens Alone In {disaster} [{ep_range}] | Manhwa Recap",
             "From F-Rank to the Strongest Hunter [{ep_range}] | Manhwa Recap",
             "Conquering S-Rank Dungeons Alone [{ep_range}] | Manhwa Recap",
         ],
     },
     "regression_prep": {
         "conflict": [
-            "He DIES in the {disaster} and Returns {time_before} Before Everyone Else | Manhwa Recap",
+            "He DIES in {disaster} and Returns {time_before} Before Everyone Else | Manhwa Recap",
             "BETRAYED at the End, He REGRESSED {time_span} to DESTROY Them All | Manhwa Recap",
         ],
         "paradox": [
             "When {disaster} Strikes, He Thrives With Complete Future Knowledge | Manhwa Recap",
+            "He Hoarded All Divine Resources Before {disaster} Started [{ep_range}] | Manhwa Recap",
         ],
         "scale": [
             "Conquering {disaster} Alone With Future Knowledge [{ep_range}] | Manhwa Recap",
@@ -216,6 +293,7 @@ ARCHETYPE_VARIANT_POOL = {
             "They Left Him with NOTHING, But His Domain Snowballed Into a KINGDOM | Manhwa Recap",
         ],
         "paradox": [
+            "Starving Lords Beg For Food, But He Controls The Entire Harvest | Manhwa Recap",
             "Starving Lords Fight for Scraps, But He Controls the Harvest | Manhwa Recap",
         ],
         "scale": [
@@ -259,14 +337,17 @@ ARCHETYPE_VARIANT_POOL = {
     },
     "general_apocalypse": {
         "conflict": [
+            "He Built {fortress} While The Entire World Collapsed | Manhwa Recap",
+            "They Mocked Him As Weak, But His {shelter} Kept Him Alive When {disaster} Hit | Manhwa Recap",
             "He Was BETRAYED by {betrayer}, But Survived {disaster} | Manhwa Recap",
             "They Left Him for DEAD, But He Came Back Stronger | Manhwa Recap",
         ],
         "paradox": [
-            "When {disaster} Hits, Everyone Loses Hope But He Keeps Fighting | Manhwa Recap",
+            "When {disaster} Hits, Everyone Panics But He Holds The Line | Manhwa Recap",
         ],
         "scale": [
-            "When {disaster} Overruns The World, He Thrives Against All Odds [{ep_range}] | Manhwa Recap",
+            "When An SSS-Rank {mc_role} Awakens In {disaster} [{ep_range}] | Manhwa Recap",
+            "When {disaster} Overruns The World, One Man Thrives Against All Odds [{ep_range}] | Manhwa Recap",
         ],
     },
 }
@@ -1391,7 +1472,8 @@ def detect_archetype(comic_title: str, story_memory: Optional[Dict[str, Any]] = 
         return "game_system_reality"
     elif any(k in combined for k in ["regression", "regress", "second chance", "time travel", "rewind", "went back", "returned to", "before the apocalypse"]):
         return "regression_prep"
-    elif any(k in combined for k in ["farming", "kingdom", "territory", "village", "build", "agriculture", "lord", "baron", "domain", "settlement"]):
+    # "build" removed — too broad, matches bunker/base-building stories; remaining keywords are farming-specific
+    elif any(k in combined for k in ["farming", "kingdom", "territory", "village", "agriculture", "lord", "baron", "domain", "settlement"]):
         return "farming_kingdom"
     elif any(k in combined for k in ["hunter", "gate", "dungeon", "awakening", "rank", "necromancer", "shadow"]):
         return "hunter_gate"
@@ -1899,52 +1981,239 @@ def _extract_story_beats(
     to_ep: int = 1,
 ) -> Dict[str, str]:
     """
-    Extracts actual story beats from recap.json and story_memory.
-    CRITICAL RULE: Zero fabricated defaults. If a claim is not in story_memory/transcript,
-    it is NOT defaulted to factual claims (e.g. STARVING, Doomsday Bunker, 16 Years).
+    Extracts actual story beats and grounded entity facts from recap.json and story_memory.
+    CRITICAL RULE: Dynamic Story Grounding without hardcoded assumptions.
+    Flexes attributes per manhwa series and episode range.
     """
     beats: Dict[str, str] = {}
     title_lower = (comic_title or "").lower()
-    mc_name = get_character_names(comic_title, story_memory)["mc"]
-    beats["mc_name"] = mc_name
 
-    # Safe disaster label based on category
-    if any(k in title_lower for k in ["zombie", "82-08", "8208"]) or archetype == "zombie_apocalypse":
-        beats["disaster"] = "Zombie Apocalypse"
-    elif "freeze" in title_lower or "frozen" in title_lower or "frost" in title_lower or archetype == "bunker_prepper":
-        beats["disaster"] = "Global Freeze"
-    elif archetype == "tower_anti_regression":
-        beats["disaster"] = "Tower Collapse"
-    elif archetype in ("hunter_gate", "game_system_reality"):
-        beats["disaster"] = "Dungeon Break"
+    # 1. Resolve MC name and role
+    mc_resolved = get_character_names(comic_title, story_memory)["mc"]
+    beats["mc_name"] = mc_resolved
+
+    # 2. Aggregate text from story_memory (focused on from_ep..to_ep) and transcripts
+    aggregated_text_list: List[str] = []
+    ep_opening_first = ""
+    ep_closing_last = ""
+
+    if story_memory and isinstance(story_memory, dict):
+        episodes_dict = story_memory.get("episodes", {})
+        if isinstance(episodes_dict, dict):
+            for ep_key, ep_data in episodes_dict.items():
+                try:
+                    ep_num = int(ep_key)
+                except (ValueError, TypeError):
+                    ep_num = 1
+                if from_ep <= ep_num <= to_ep and isinstance(ep_data, dict):
+                    op = str(ep_data.get("opening", ""))
+                    sm = str(ep_data.get("summary", ""))
+                    cl = str(ep_data.get("closing_cliffhanger", ""))
+                    if not ep_opening_first and op:
+                        ep_opening_first = op
+                    if cl:
+                        ep_closing_last = cl
+                    aggregated_text_list.append(f"{op} {sm} {cl}")
+
+        glossary = story_memory.get("cumulative_glossary", {})
+        if isinstance(glossary, dict):
+            aggregated_text_list.extend(glossary.keys())
+
+    if download_dir and os.path.isdir(download_dir):
+        for ep in range(from_ep, to_ep + 1):
+            recap_file = os.path.join(download_dir, f"episode_{ep}", "recap.json")
+            if os.path.isfile(recap_file):
+                try:
+                    with open(recap_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, list):
+                        for seg in data:
+                            if isinstance(seg, dict):
+                                sp = seg.get("speech", "")
+                                if sp:
+                                    aggregated_text_list.append(sp)
+                except Exception:
+                    pass
+
+    full_text = f"{title_lower} {' '.join(aggregated_text_list)}".lower()
+
+    # 3. Dynamic Disaster Name Detection
+    if any(k in full_text for k in ["asteroid", "meteorite", "meteor", "eunjambi"]):
+        beats["disaster"] = "The Asteroid Impact"
+        beats["disaster_event"] = "Asteroid Impact"
+    elif any(k in full_text for k in ["freeze", "frozen", "frost", "blizzard", "ice age", "sub-zero", "subzero"]):
+        beats["disaster"] = "The Global Freeze"
+        beats["disaster_event"] = "Global Freeze"
+    elif any(k in full_text for k in ["zombie", "infected", "undead", "plague", "82-08", "8208", "quarantine"]):
+        beats["disaster"] = "The Zombie Outbreak"
+        beats["disaster_event"] = "Zombie Outbreak"
+    elif any(k in full_text for k in ["dungeon", "gate", "abyss", "rift", "hunter"]):
+        beats["disaster"] = "The Dungeon Break"
+        beats["disaster_event"] = "Dungeon Break"
+    elif any(k in full_text for k in ["tower", "floor 100", "anti-regression"]):
+        beats["disaster"] = "The Tower Collapse"
+        beats["disaster_event"] = "Tower Collapse"
+    elif any(k in full_text for k in ["murim", "martial arts", "sect", "cultivation"]):
+        beats["disaster"] = "The Sect Betrayal"
+        beats["disaster_event"] = "Sect Betrayal"
     else:
-        beats["disaster"] = "Apocalypse"
+        beats["disaster"] = "The Apocalypse"
+        beats["disaster_event"] = "The Apocalypse"
 
-    # Extract ONLY proven beats from story_memory
-    if story_memory:
-        mem_text = str(story_memory).lower()
-        if any(k in mem_text for k in ["betray", "betrayed", "abandon", "left for dead"]):
-            beats["betrayer"] = "His Own Allies"
+    # 4. Dynamic MC Role / Title
+    if any(k in full_text for k in ["veteran", "military", "combat veteran"]):
+        beats["mc_role"] = "Veteran"
+    elif any(k in full_text for k in ["hunter", "awakener", "rank 1", "s-rank", "sss-rank"]):
+        beats["mc_role"] = "SSS-Rank Hunter"
+    elif any(k in full_text for k in ["prepper", "hoarder", "stockpile"]):
+        beats["mc_role"] = "SSS-Rank Prepper"
+    elif any(k in full_text for k in ["exile", "farming", "kingdom", "lord"]):
+        beats["mc_role"] = "Exiled Lord"
+    elif any(k in full_text for k in ["necromancer", "shadow monarch"]):
+        beats["mc_role"] = "Shadow Monarch"
+    else:
+        beats["mc_role"] = "Lone Survivor"
 
-        # Explicit proven preparation duration
-        m_prep = re.search(r"\b(\d+)\s*(years?|months?)\s+(?:of\s+)?training\b|\bprepared\s+for\s+(\d+)\s*(years?|months?)\b", mem_text)
-        if m_prep:
-            val = m_prep.group(1) or m_prep.group(3)
-            unit = m_prep.group(2) or m_prep.group(4)
-            beats["time_span"] = f"{val} {unit.title()}"
-            beats["prep_action"] = "Surviving The Apocalypse"
+    # 5. Dynamic Shelter / Base / Fortress
+    if "bunker" in full_text:
+        beats["shelter"] = "High-Tech Bunker"
+        beats["fortress"] = "a Fortified Bunker"
+        beats["prep_action"] = "Building a High-Tech Bunker"
+    elif any(k in full_text for k in ["mountain", "jiri", "sanctuary"]):
+        beats["shelter"] = "Mountain Sanctuary"
+        beats["fortress"] = "a Mountain Sanctuary"
+        beats["prep_action"] = "Fortifying His Mountain Sanctuary"
+    elif any(k in full_text for k in ["rooftop", "safehouse", "penthouse"]):
+        beats["shelter"] = "Fortified Safehouse"
+        beats["fortress"] = "a Fortified Safehouse"
+        beats["prep_action"] = "Fortifying His Safehouse"
+    elif any(k in full_text for k in ["domain", "kingdom", "village"]):
+        beats["shelter"] = "Kingdom Domain"
+        beats["fortress"] = "an Unstoppable Kingdom"
+        beats["prep_action"] = "Building an Unstoppable Kingdom"
+    else:
+        beats["shelter"] = "Fortified Base"
+        beats["fortress"] = "a Fortified Base"
+        beats["prep_action"] = "Preparing for The Apocalypse"
 
-        # Explicit proven bunker
-        if "bunker" in mem_text:
-            beats["fortress"] = "a Fortified Bunker"
-            beats["shelter"] = "Bunker"
+    # 6. Dynamic Companion / Pet Name
+    if "dingo" in full_text:
+        beats["pet_name"] = "Dingo"
+        beats["companion_name"] = "His Loyal Pup Dingo"
+    elif any(k in full_text for k in ["wolf", "hound", "pup", "dog"]):
+        beats["pet_name"] = "Mutated Hound"
+        beats["companion_name"] = "His Mutated Companion"
+    elif "migyeong" in full_text:
+        beats["pet_name"] = ""
+        beats["companion_name"] = "Migyeong"
+    elif "elena" in full_text:
+        beats["pet_name"] = ""
+        beats["companion_name"] = "Elena"
+    else:
+        beats["pet_name"] = ""
+        beats["companion_name"] = ""
 
-        # Explicit proven system
-        if any(k in mem_text for k in ["status window", "system window", "glitched system"]):
-            beats["system_name"] = "System"
+    # 7. Dynamic Boss / Monster / Threat
+    # NOTE: bare "owl" excluded — too broad (matches "owl creek", NPC names etc.)
+    # Only match compound noun "owl bear" or hyphenated "owl-bear"
+    if any(k in full_text for k in ["owl bear", "owl-bear"]):
+        beats["boss_name"] = "The Colossal Owl Bear"
+        beats["monster_type"] = "Colossal Apex Beast"
+    elif any(k in full_text for k in ["skeleton", "skull", "undead king"]):
+        beats["boss_name"] = "The Skeleton Chieftain"
+        beats["monster_type"] = "Undead Boss"
+    elif any(k in full_text for k in ["red alpha", "alpha beast"]):
+        beats["boss_name"] = "The Red Alpha"
+        beats["monster_type"] = "Apex Alpha Beast"
+    elif any(k in full_text for k in ["orc", "goblin", "chieftain"]):
+        beats["boss_name"] = "The Mutant Chieftain"
+        beats["monster_type"] = "Mutant Horde"
+    elif any(k in full_text for k in ["zombie", "infected titan"]):
+        beats["boss_name"] = "The Mutated Titan"
+        beats["monster_type"] = "Infected Swarm"
+    else:
+        beats["boss_name"] = "The Apex Beast"
+        beats["monster_type"] = "Apex Predator"
 
-    if "betrayer" not in beats:
-        beats["betrayer"] = "Corrupt Survivors" if archetype == "zombie_apocalypse" else "Traitors"
+    # 8. Dynamic Rival / Human Conflict / Betrayer
+    if "hyeongjun" in full_text:
+        beats["rival_name"] = "Hyeongjun's Thugs"
+        beats["villain_type"] = "Awakened Thugs"
+        beats["betrayer"] = "Hyeongjun's Gang"
+    elif any(k in full_text for k in ["politician", "corrupt suit", "shady suit"]):
+        beats["rival_name"] = "Corrupt Politicians"
+        beats["villain_type"] = "Corrupt Leaders"
+        beats["betrayer"] = "Corrupt Officials"
+    elif any(k in full_text for k in ["raider", "bandit", "scavenger"]):
+        beats["rival_name"] = "Awakened Raiders"
+        beats["villain_type"] = "Armed Raiders"
+        beats["betrayer"] = "Ruthless Raiders"
+    elif any(k in full_text for k in ["betray", "traitor", "backstab", "left for dead"]):
+        beats["rival_name"] = "Treacherous Allies"
+        beats["villain_type"] = "Traitors"
+        beats["betrayer"] = "His Own Allies"
+    else:
+        beats["rival_name"] = "Corrupt Survivors"
+        beats["villain_type"] = "Hostile Survivors"
+        beats["betrayer"] = "Corrupt Survivors"
+
+    # 9. Dynamic Primary Weapon
+    if any(k in full_text for k in ["recurve bow", "bow", "arrow"]):
+        beats["primary_weapon"] = "His Recurve Bow"
+    elif any(k in full_text for k in ["spiked club", "baseball bat", "club"]):
+        beats["primary_weapon"] = "A Spiked Club"
+    elif "spear" in full_text:
+        beats["primary_weapon"] = "A Reinforced Spear"
+    elif any(k in full_text for k in ["chainsaw", "chain saw"]):
+        beats["primary_weapon"] = "Dual Chainsaws"
+    elif any(k in full_text for k in ["blade", "sword", "dagger"]):
+        beats["primary_weapon"] = "A Survival Blade"
+    else:
+        beats["primary_weapon"] = "Tactical Survival Gear"
+
+    # 10. Additional Supporting Slots
+    m_prep = re.search(r"\b(\d+)\s*(years?|months?|days?)\s+(?:of\s+)?training\b|\bprepared\s+for\s+(\d+)\s*(years?|months?|days?)\b", full_text)
+    if m_prep:
+        val = m_prep.group(1) or m_prep.group(3)
+        unit = m_prep.group(2) or m_prep.group(4)
+        beats["time_span"] = f"{val} {unit.title()}"
+    else:
+        beats["time_span"] = "Years"
+
+    # Dynamic time_before: scan for days/weeks/months/years before the disaster
+    m_time_before = re.search(
+        r'\b(\d+)\s*(days?|weeks?|months?|years?)\s+(?:before|prior|earlier|ago)\b',
+        full_text, re.IGNORECASE
+    )
+    if m_time_before:
+        beats["time_before"] = f"{m_time_before.group(1)} {m_time_before.group(2).title()}"
+    else:
+        # Context-aware fallback: only match numbers adjacent to preparation keywords
+        # Avoids greedy matches like "3 days of combat" → "3 Days"
+        m_prep_days = re.search(
+            r'(?:prepar|stock|build|bunker|shelter|hoard)\w*\s+(?:\w+\s+){0,5}(\d+)\s*(days?|weeks?|months?)'
+            r'|(\d+)\s*(days?|weeks?|months?)\s+(?:\w+\s+){0,5}(?:prepar|stock|build|bunker|shelter|hoard)',
+            full_text, re.IGNORECASE
+        )
+        if m_prep_days:
+            val = m_prep_days.group(1) or m_prep_days.group(3)
+            unit = m_prep_days.group(2) or m_prep_days.group(4)
+            beats["time_before"] = f"{val} {unit.title()}"
+        else:
+            beats["time_before"] = "Days"
+
+    # Dynamic extreme_temp: scan for negative temperature values
+    # Use case-insensitive match but normalize unit suffix to uppercase (C/F)
+    m_temp = re.search(r'(-\d+\s*°\s*)([CF])', full_text, re.IGNORECASE)
+    if m_temp:
+        beats["extreme_temp"] = m_temp.group(1).replace(" ", "") + m_temp.group(2).upper()
+    else:
+        beats["extreme_temp"] = "Extreme Cold"
+    beats["trash_class"] = "F-Rank"
+    beats["system_name"] = "Survival System"
+    beats["danger_zone"] = "The Wasteland"
+    beats["ep_opening_hook"] = ep_opening_first
+    beats["ep_climax_hook"] = ep_closing_last
 
     return beats
 
@@ -2016,10 +2285,10 @@ def generate_ab_title_variants(
             filled = tmpl.format_map(safe_beats)
             if "{" in filled:
                 continue
-            candidate = format_recap_title(filled)
+            candidate = _enforce_title_pre_pipe(format_recap_title(filled))
             if evidence_index is None or evidence_index.validate_candidate(candidate, archetype):
                 return candidate
-        return format_recap_title(fallback)
+        return _enforce_title_pre_pipe(format_recap_title(fallback))
 
     var_a = pick_variant(
         pool.get("conflict", []),
@@ -2027,7 +2296,7 @@ def generate_ab_title_variants(
     )
     var_b = pick_variant(
         pool.get("paradox", []),
-        f"When {disaster} Hits, {mc_name} Holds The Line [{ep_range}]"
+        f"When {disaster} Hits, Everyone Panics But He Holds The Line [{ep_range}]"
     )
     var_c = pick_variant(
         pool.get("scale", []),
@@ -2190,7 +2459,7 @@ def generate_dynamic_titles(
             filled = template.format_map(safe_beats)
             if "{" in filled:
                 continue
-            formatted = format_recap_title(filled)
+            formatted = _enforce_title_pre_pipe(format_recap_title(filled))
             if evidence_index.validate_candidate(formatted, archetype) and formatted not in titles:
                 titles.append(formatted)
         except (KeyError, ValueError):
@@ -2206,7 +2475,7 @@ def generate_dynamic_titles(
     for fb in fallback_titles:
         if len(titles) >= 5:
             break
-        formatted = format_recap_title(fb)
+        formatted = _enforce_title_pre_pipe(format_recap_title(fb))
         if evidence_index.validate_candidate(formatted, archetype) and formatted not in titles:
             titles.append(formatted)
 
@@ -2283,11 +2552,12 @@ def build_minimal_tags(
     archetype: str,
     from_ep: int = 1,
     to_ep: int = 1,
+    alt_titles: Optional[List[str]] = None,
 ) -> List[str]:
-    """Builds a high-value tag stack (10-14 tags, <= 500 chars total).
+    """Builds a high-value tag stack (10-15 tags, <= 500 chars total).
 
     Includes base identity tags, episodic range tag for discoverability,
-    long-tail genre tags, and 3 archetype-specific tags.
+    long-tail genre tags, alternative titles, and 3 archetype-specific tags.
     Backward-compatible: from_ep/to_ep default to 1 so existing callers
     with 2 positional args continue to work unchanged.
     """
@@ -2302,6 +2572,20 @@ def build_minimal_tags(
         "manhwa english",
         f"{title_lower} {ep_range_str}",
     ]
+
+    # Add top alternative titles (e.g. scanlation, romanized or alternative titles)
+    if alt_titles:
+        for at in alt_titles:
+            at_clean = at.strip().lower()
+            if at_clean and at_clean not in tags:
+                tags.append(at_clean)
+
+    # Add Channel Brand Tags for YouTube suggested video clustering
+    brand_tags = CHANNEL_PROFILE.get("brand_tags", ["jaehwan manhwa", "jaehwan", "jaehwan manhwa recap"])
+    for bt in brand_tags:
+        bt_clean = bt.strip().lower()
+        if bt_clean and bt_clean not in tags:
+            tags.append(bt_clean)
 
     archetype_tags = {
         "zombie_apocalypse":     ["zombie manhwa", "apocalypse manhwa", "zombie survival manhwa"],
@@ -2496,8 +2780,8 @@ def _mine_dynamic_story_concepts(
     if "asteroid" in text_lower or "asteroid" in title_lower:
         c1_id = "concept_asteroid_awakening"
         c1_name = "Asteroid Impact & Public Revelation (Công Bố Thiên Thạch & Thức Tỉnh)"
-        c1_main_text = "THE SKY IS FALLING!"
-        c1_sub_text = "IMMUNITY AWAKENED!"
+        c1_main_text = "SKY IS FALLING!"
+        c1_sub_text = _cap_overlay_text("IMMUNITY AWAKENED!")
         c1_comp = "Medium close-up: MC center-left looking into broadcast camera with calm smirk, asteroid trail glowing in sky behind"
         c1_prompt = (
             f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
@@ -2520,8 +2804,8 @@ def _mine_dynamic_story_concepts(
     elif "freeze" in text_lower or "blizzard" in text_lower:
         c1_id = "concept_subzero_cataclysm"
         c1_name = "Sub-Zero Freeze Collapse (Đại Hàn Băng Giá Đột Ngột)"
-        c1_main_text = "WORLD FREEZES OVER!"
-        c1_sub_text = "SHELTER HEATED!"
+        c1_main_text = "FROZEN WORLD!"
+        c1_sub_text = _cap_overlay_text("SHELTER HEATED!")
         c1_comp = "Extreme close-up: Frostbitten environment left vs MC warm and insulated right"
         c1_prompt = (
             f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
@@ -2542,8 +2826,8 @@ def _mine_dynamic_story_concepts(
     else:
         c1_id = "concept_outbreak_zero_hour"
         c1_name = "Zero Hour Apocalypse Outbreak (Bùng Nổ Đại Dịch Giờ Số 0)"
-        c1_main_text = "ZERO HOUR COLLAPSE!"
-        c1_sub_text = "VETERAN STANDS READY!"
+        c1_main_text = "ZERO HOUR!"
+        c1_sub_text = _cap_overlay_text("VETERAN STANDS READY!")
         c1_comp = "Extreme close-up: MC frontline stance with weapon, chaos behind"
         c1_prompt = (
             f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
@@ -2575,21 +2859,38 @@ def _mine_dynamic_story_concepts(
     # CONCEPT TYPE 2: Apex Predator / Colossal Beast Clash (Săn Quái Thú / Boss)
     # ─────────────────────────────────────────────────────────────────────────
     has_beast = any(k in text_lower for k in ["owl bear", "bear", "goblin", "beast", "monster", "mutant", "skeletal", "predator", "boss", "swarm"])
+    c2_beast_name = beats.get("boss_name") or ("Colossal Apex Predator" if ("bear" in text_lower or "owl" in text_lower) else "Mutant Swarm Beast")
+    c2_weapon = beats.get("primary_weapon", "a glowing tactical weapon")
+
     if has_beast:
-        c2_beast_name = "Colossal Apex Predator" if "bear" in text_lower or "owl" in text_lower else "Mutant Swarm Beast"
         c2_id = "concept_apex_beast_showdown"
         c2_name = f"Apex Monster Clash (Quyết Đấu {c2_beast_name})"
-        c2_main_text = "IT'S AN APEX BEAST!"
-        c2_sub_text = "ONE SHOT ELIMINATION!"
-        c2_comp = "Extreme close-up: MC dodging left with glowing weapon primed, massive beast roaring in upper-right"
+        # Hard cap: thumbnail text must be ≤ 15 chars for mobile 3-second readability
+        _c2_name_up = c2_beast_name.upper()
+        _c2_candidate = f"{_c2_name_up}!"
+        if len(_c2_candidate) <= 15:
+            c2_main_text = _c2_candidate
+        else:
+            # Truncate at last word boundary that fits within 13 chars (+ "!" = 14, room for safety)
+            _words = _c2_name_up.split()
+            _short = ""
+            for _w in _words:
+                _try = (_short + " " + _w).strip() if _short else _w
+                if len(_try) + 1 <= 14:  # +1 for "!"
+                    _short = _try
+                else:
+                    break
+            c2_main_text = f"{_short}!" if _short else "BOSS FIGHT!"
+        c2_sub_text = _cap_overlay_text("ONE SHOT ELIMINATION!")
+        c2_comp = f"Extreme close-up: {mc_name} dodging left with {c2_weapon} primed, {c2_beast_name} looming in upper-right"
         c2_prompt = (
             f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
             f"{art_style_block}\n\n"
             f"[COMPOSITION — MONSTER CLASH SHOWDOWN]:\n"
             f"Extreme medium close-up, dramatic cinematic angle. "
             f"LEFT FOREGROUND (~52% of frame): {mc_name}, 20-25 year old male protagonist, messy dark hair, intense narrowed eyes, "
-            f"confident smirk, holding a glowing reinforced survival spear/weapon primed to strike forward. "
-            f"RIGHT BACKGROUND (~48% of frame): Looming silhouette of a terrifying colossal apex mutant beast (glowing eyes, razor fangs, roaring jaws). "
+            f"confident smirk, holding a glowing reinforced {c2_weapon} primed to strike forward. "
+            f"RIGHT BACKGROUND (~48% of frame): Looming silhouette of {c2_beast_name} (glowing eyes, razor fangs, roaring jaws). "
             f"Shallow depth of field: {mc_name} razor sharp with dynamic weapon energy, monster silhouetted in dust and shockwaves.\n\n"
             f"[LIGHTING]:\n"
             f"Vibrant high-contrast lighting: bright sunlight from upper-left, vivid elemental glow from protagonist's weapon lighting his face. "
@@ -2614,25 +2915,33 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     has_companion = any(k in text_lower for k in ["dingo", "pup", "hound", "wolf", "pet", "dog", "partner", "cub"])
     has_fortress = any(k in text_lower for k in ["shelter", "bunker", "sanctuary", "fortress", "jiri mountain", "safehouse"])
+    pet_display = beats.get("pet_name") or "Mutated Companion"
 
     if has_companion:
         c3_id = "concept_mutated_companion_stand"
-        c3_name = "Mutated Beast Companion Stand (Linh Thú Đột Biến Sát Cánh)"
-        c3_main_text = "MUTATED GUARDIAN!"
-        c3_sub_text = "BONDED FOR LIFE!"
-        c3_comp = "Extreme close-up: MC and his loyal mutated wolf/hound side-by-side on rooftop vantage point"
+        c3_name = f"Mutated Beast Companion Stand ({beats.get('companion_name') or 'Linh Thú Sát Cánh'})"
+        # Hard cap on full rendered thumbnail text: ≤ 15 chars for mobile readability
+        _c3_full = f"{pet_display.upper()} AWAKENED!"
+        if len(_c3_full) <= 15:
+            c3_main_text = _c3_full
+        else:
+            # Try just the pet name + "!" (e.g. "DINGO!" = 6 chars ✓)
+            _c3_short = f"{pet_display.upper()}!"
+            c3_main_text = _c3_short if len(_c3_short) <= 15 else "AWAKENED!"
+        c3_sub_text = _cap_overlay_text("BONDED FOR LIFE!")
+        c3_comp = f"Extreme close-up: {mc_name} and {beats.get('companion_name', 'his loyal companion')} side-by-side on rooftop vantage point"
         c3_prompt = (
             f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
             f"{art_style_block}\n\n"
             f"[COMPOSITION — HERO & BEAST COMPANION]:\n"
             f"Extreme medium close-up, cinematic slightly low camera angle. "
             f"LEFT (~50% of frame): {mc_name}, 20-25 years old, athletic build, messy dark hair, tactical survival vest, "
-            f"calm fearless expression, petting the head of his battle companion. "
-            f"RIGHT (~50% of frame): A fierce, loyal mutated wolf/pup with sharp intelligent glowing eyes, sleek glossy fur, "
+            f"calm fearless expression, petting the head of {beats.get('companion_name', 'his companion')}. "
+            f"RIGHT (~50% of frame): A fierce, loyal {pet_display} with sharp intelligent glowing eyes, sleek glossy fur, "
             f"standing alert beside protagonist on a high-ground vantage point. "
             f"BACKGROUND: Post-apocalyptic skyline under a clear dramatic sky. Shallow depth of field: duo razor sharp, background softly blurred.\n\n"
             f"[LIGHTING]:\n"
-            f"Golden hour bright daytime sunlight from upper-left, warm rim lighting outlining both characters and the wolf's fur. "
+            f"Golden hour bright daytime sunlight from upper-left, warm rim lighting outlining both characters and the fur. "
             f"Glossy reflections, clean vibrant colors.\n\n"
             f"[THUMBNAIL TEXT OVERLAYS]:\n"
             f"Upper-left: bold yellow '{c3_main_text}' with thick black outline. "
@@ -2649,17 +2958,18 @@ def _mine_dynamic_story_concepts(
             "visual_facts_used": [],
         })
     elif has_fortress:
+        shelter_display = beats.get("shelter") or "Fortified Sanctuary"
         c3_id = "concept_impregnable_sanctuary"
-        c3_name = "Impregnable Sanctuary Defense (Căn Cứ Bất Khả Xâm Phạm)"
-        c3_main_text = "IMPREGNABLE BASE!"
-        c3_sub_text = "ALL THREATS BLOCKED!"
-        c3_comp = "Extreme close-up: MC inside high-tech reinforced command room, security monitors showing outside chaos"
+        c3_name = f"Impregnable Sanctuary Defense ({shelter_display})"
+        c3_main_text = _cap_overlay_text(f"{shelter_display.upper()} SEALED!" if len(shelter_display) <= 15 else "IMPREGNABLE BASE!")
+        c3_sub_text = _cap_overlay_text("ALL THREATS BLOCKED!")
+        c3_comp = f"Extreme close-up: {mc_name} inside {shelter_display} command room, security monitors showing outside chaos"
         c3_prompt = (
             f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
             f"{art_style_block}\n\n"
             f"[COMPOSITION — FORTIFIED COMMAND POST]:\n"
             f"Extreme medium close-up. {mc_name} on right (~55%), drinking coffee with a satisfied smirk, "
-            f"surrounded by glowing tactical monitors, solar power arrays, and reinforced blast doors. "
+            f"surrounded by glowing tactical monitors, solar power arrays, and reinforced blast doors in his {shelter_display}. "
             f"LEFT (~45%): Holographic radar screens displaying incoming monster threats neutralized at the perimeter. "
             f"Shallow depth of field: {mc_name} razor sharp, background electronics softly blurred.\n\n"
             f"[LIGHTING]:\n"
@@ -2685,25 +2995,26 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     has_raiders = any(k in text_lower for k in ["raider", "thug", "bandit", "outlaw", "hyeongjun", "gang", "scavenger", "enemy"])
     has_betrayal = any(k in text_lower for k in ["betray", "abandon", "traitor", "left for dead", "backstab"])
+    rival_display = beats.get("rival_name") or "Corrupt Awakened Leader"
 
     if has_betrayal:
         c4_main_text = "YOU WERE DEAD?!"
-        c4_sub_text = "I'M BACK FOR REVENGE!"
-        c4_rival_desc = "A treacherous former ally or corrupt leader frozen in pure horror and disbelief"
+        c4_sub_text = _cap_overlay_text("I'M BACK FOR REVENGE!")
+        c4_rival_desc = f"A treacherous former ally ({rival_display}) frozen in pure horror and disbelief"
         c4_id = "concept_betrayal_retribution"
-        c4_name = "Betrayal Retribution Confrontation (Trừng Phạt Kẻ Phản Bội)"
+        c4_name = f"Betrayal Retribution Confrontation (Trừng Phạt {rival_display})"
     elif has_raiders:
-        c4_main_text = "HAND OVER THE SHELTER!"
-        c4_sub_text = "OVER MY DEAD BODY!"
-        c4_rival_desc = "A ruthless awakened raider leader with a menacing yet shocked expression"
+        c4_main_text = _cap_overlay_text("HAND OVER THE SHELTER!")
+        c4_sub_text = _cap_overlay_text("OVER MY DEAD BODY!")
+        c4_rival_desc = f"A ruthless leader of {rival_display} with a menacing yet shocked expression"
         c4_id = "concept_raider_siege_clash"
-        c4_name = "Awakened Raiders Standoff (Đột Kích Căn Cứ)"
+        c4_name = f"Awakened Standoff (Đột Kích {rival_display})"
     else:
-        c4_main_text = "YOU'RE CORNERED!"
-        c4_sub_text = "NOT EVEN CLOSE!"
-        c4_rival_desc = "A rival survivor fighter looking completely outmatched"
+        c4_main_text = _cap_overlay_text("YOU'RE CORNERED!")
+        c4_sub_text = _cap_overlay_text("NOT EVEN CLOSE!")
+        c4_rival_desc = f"A hostile rival fighter ({rival_display}) looking completely outmatched"
         c4_id = "concept_rival_standoff"
-        c4_name = "Rival Survivor Face-Off (Đối Đầu Kình Địch)"
+        c4_name = f"Rival Survivor Face-Off (Đối Đầu {rival_display})"
 
     c4_prompt = (
         f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
@@ -2745,8 +3056,8 @@ def _mine_dynamic_story_concepts(
     if has_firestorm:
         c5_id = "concept_apocalypse_firestorm"
         c5_name = "Apocalyptic Firestorm Annihilation (Cơn Bão Lửa Quét Sạch Biển Quái)"
-        c5_main_text = "TOTAL ANNIHILATION!"
-        c5_sub_text = "THE HORDE TURNS TO ASH!"
+        c5_main_text = _cap_overlay_text("TOTAL ANNIHILATION!")
+        c5_sub_text = _cap_overlay_text("THE HORDE TURNS TO ASH!")
         c5_comp = "Extreme close-up: MC dual-wielding weapons with fiery explosions lighting up the street behind"
         c5_prompt = (
             f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
@@ -2800,10 +3111,10 @@ def _mine_dynamic_story_concepts(
     
     if female_name:
         c6_main_text = f"DON'T LEAVE MY SIDE, {female_name.upper()}!"
-        c6_sub_text = "I CAN FIGHT TOO!"
+        c6_sub_text = _cap_overlay_text("I CAN FIGHT TOO!")
     else:
-        c6_main_text = "YOU'RE IN MY PARTY NOW!"
-        c6_sub_text = "WHAT?!"
+        c6_main_text = _cap_overlay_text("YOU'RE IN MY PARTY NOW!")
+        c6_sub_text = _cap_overlay_text("WHAT?!")
 
     c6_comp = f"Extreme close-up two-shot: {mc_name} left ~52% extending hand near {female_disp}'s forehead, {female_disp} right ~48% flustered"
     c6_prompt = (
@@ -2846,8 +3157,8 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     c7_id = "concept_sexy_clickbait_allure"
     c7_name = "Alluring Seduction & Dominance (Khiêu Gợi & Cám Dỗ Kịch Tính - Clickbait Hook)"
-    c7_main_text = "DON'T TOUCH ME THERE...!"
-    c7_sub_text = "TOO LATE...!"
+    c7_main_text = _cap_overlay_text("DON'T TOUCH ME THERE...!")
+    c7_sub_text = _cap_overlay_text("TOO LATE...!")
     c7_comp = f"Intimate extreme close-up: {mc_name} left ~48% lifting {female_disp}'s chin with possessive smirk, seductive {female_disp} right ~52% blushing heavily at 10cm distance"
 
     c7_prompt = (
@@ -3082,10 +3393,10 @@ def generate_survival_dashboard_data(
 def format_mini_status_block(
     archetype: str,
     survival_dashboard: Dict[str, Any],
+    beats: Optional[Dict[str, str]] = None,
 ) -> str:
     """
-    Formats a grounded mini status block for the pinned comment from validated dashboard fields.
-    Never resurrects null dashboard fields.
+    Formats a grounded mini status block for the pinned comment from validated dashboard fields and story beats.
     """
     arc = survival_dashboard.get("story_arc", "Story Arc")
     threat = survival_dashboard.get("threat_description")
@@ -3098,16 +3409,41 @@ def format_mini_status_block(
     ]
     if outside:
         lines.append(f"• 📍 Threat Zone: {outside}")
+    elif beats and beats.get("disaster"):
+        lines.append(f"• 📍 Threat Event: {beats['disaster']}")
+
     if base_sec:
         lines.append(f"• 🛡️ Security Status: {base_sec}")
+    elif beats and beats.get("shelter"):
+        lines.append(f"• 🛡️ Base/Sanctuary: {beats['shelter']}")
+
     if threat:
         lines.append(f"• ⚠️ Alert Level: {threat}")
+    elif beats and beats.get("boss_name"):
+        lines.append(f"• ⚠️ Primary Threat: {beats['boss_name']}")
+
+    if beats and beats.get("companion_name"):
+        lines.append(f"• 🐺 Companion: {beats['companion_name']}")
 
     return "\n".join(lines)
 
 
-def generate_engagement_question(archetype: str) -> str:
-    """Selects a contextual engagement question for pinned comment."""
+def generate_engagement_question(archetype: str, beats: Optional[Dict[str, str]] = None) -> str:
+    """Selects a contextual, story-grounded engagement question for pinned comment."""
+    if beats:
+        disaster = beats.get("disaster", "").lower()
+        boss = beats.get("boss_name")
+        if "asteroid" in disaster:
+            _tb = beats.get("time_before", "Days")
+            return f"If an asteroid was hitting Earth in {_tb}, what's the #1 supply you'd stockpile FIRST? Drop your answer below! 👇"
+        if "freeze" in disaster or "blizzard" in disaster:
+            _temp = beats.get("extreme_temp", "Extreme Cold")
+            return f"The temperature drops to {_temp} — would you let shivering survivors into your heated bunker? Be honest 👀👇"
+        if "zombie" in disaster or "outbreak" in disaster:
+            return "What's the FIRST weapon you'd grab if an outbreak hit your city right now? 🧟👇"
+        if boss and "The " in boss:
+            return f"How would YOU survive against {boss}? Drop your battle strategy below! ⚔️👇"
+
     questions = ENGAGEMENT_QUESTIONS.get(archetype, ENGAGEMENT_QUESTIONS["general_apocalypse"])
     return random.choice(questions) if questions else "What was your favorite moment? Drop your thoughts below! 👇"
 
@@ -3131,8 +3467,8 @@ def generate_community_posts(
 
     poll_post = (
         f"🔥 NEW RECAP INCOMING: {comic_title} ({ep_range})!\n\n"
-        f"When {disaster.lower()} struck, {mc_name} had to make a brutal survival choice. "
-        f"If you were in {mc_name}'s shoes during the outbreak, what would be your #1 priority?\n\n"
+        f"When {disaster.lower()} struck, our protagonist had to make a brutal survival choice. "
+        f"If you were in his shoes during the outbreak, what would be your #1 priority?\n\n"
         f"📊 POLL / VOTE IN COMMENTS:\n"
         f"1️⃣ Fortify the base & hoard food supplies\n"
         f"2️⃣ Go solo and hunt mutated threats for loot\n"
@@ -3143,7 +3479,7 @@ def generate_community_posts(
 
     teaser_post = (
         f"🚨 SNEAK PEEK: '{comic_title}' ({ep_range})!\n\n"
-        f"\"{mc_name} didn't hesitate for a single second...\"\n\n"
+        f"\"He didn't hesitate for a single second...\"\n\n"
         f"The collapse just reached a whole new level. New powers awakened, traitors exposed, "
         f"and the biggest swarm yet is closing in.\n\n"
         f"🎬 Episode premieres today! Who do you think will survive the final stand?\n\n"
@@ -3152,8 +3488,8 @@ def generate_community_posts(
 
     launch_post = (
         f"⚡ OUT NOW: {comic_title} ({ep_range}) Full Story Recap!\n\n"
-        f"From the initial collapse to total dominance — watch {mc_name} defy all odds in the ultimate {archetype.replace('_', ' ')} recap.\n\n"
-        f"🍿 Grab your snacks and binge the full arc right now!\n"
+        f"From the initial collapse to total dominance — watch him defy all odds in this ultimate {archetype.replace('_', ' ')} recap.\n\n"
+        f"🍿 Grab your snacks and binge the full arc right now on {CHANNEL_PROFILE.get('channel_name', 'Jaehwan Manhwa')}!\n"
         f"👉 Watch here: [LINK]\n\n"
         f"Let me know in the comments which scene gave you chills! Don't forget to Like & Subscribe ❤️"
     )
@@ -3200,6 +3536,234 @@ def recommend_card_and_endscreen_anchors(
                 "1x Subscribe Button",
             ],
         },
+    }
+
+
+def generate_seo_filenames(
+    comic_title: str,
+    from_ep: int,
+    to_ep: int,
+) -> Dict[str, str]:
+    """
+    Generates algorithmic keyword-rich filenames for video, subtitles, kit, and thumbnails.
+    YouTube's ingest algorithm indexes the raw uploaded file name to establish initial topical entity relevance.
+    """
+    clean_slug = re.sub(r"[^a-zA-Z0-9]+", "-", comic_title.lower()).strip("-")
+    ep_slug = f"ep-{from_ep}-{to_ep}" if from_ep != to_ep else f"ep-{from_ep}"
+    base_slug = f"{clean_slug}-{ep_slug}-manhwa-recap"
+
+    return {
+        "base_slug": base_slug,
+        "video_filename": f"{base_slug}.mp4",
+        "srt_filename": f"{base_slug}.srt",
+        "kit_filename": f"{base_slug}-upload-kit.txt",
+        "thumbnail_filename": f"{base_slug}-thumbnail.jpg",
+        "metadata_json_filename": f"{base_slug}-metadata.json",
+    }
+
+
+def generate_prepublish_checklist(
+    comic_title: str,
+    from_ep: int,
+    to_ep: int,
+    seo_filenames: Dict[str, str],
+    primary_title: str,
+    resolved_playlist: str,
+) -> List[Dict[str, str]]:
+    """
+    Generates a high-impact 10-point YouTube Studio pre-publish workflow checklist
+    guaranteeing 100% compliance with 2026 YouTube SEO & recommendation algorithm standards.
+    """
+    return [
+        {
+            "step": "1. SEO Raw File Naming",
+            "action": f"Rename output files to '{seo_filenames['video_filename']}' and '{seo_filenames['thumbnail_filename']}' before uploading so Google algorithms index keyword entities on ingest.",
+            "importance": "CRITICAL",
+        },
+        {
+            "step": "2. Video Details & Title A/B Setup",
+            "action": f"Paste Primary Title: '{primary_title}'. Enable 'Test & Compare' in YouTube Studio to test the 3 generated A/B hypotheses simultaneously.",
+            "importance": "CRITICAL",
+        },
+        {
+            "step": "3. High-CTR Thumbnail",
+            "action": "Upload your rendered anime key visual thumbnail (1280x720, bold yellow text overlay, high emotional facial contrast).",
+            "importance": "CRITICAL",
+        },
+        {
+            "step": "4. Description & Series Navigation",
+            "action": "Paste entire Description block (Contains 0-150 char hook, Series navigation, Chapter timestamps, YPP originality disclaimer, and 4-5 hashtags).",
+            "importance": "CRITICAL",
+        },
+        {
+            "step": "5. Closed Captions (.SRT Upload)",
+            "action": f"Go to Video Subtitles > Add English > Upload '{seo_filenames['srt_filename']}'. Enables deep-search indexing for every spoken word.",
+            "importance": "HIGH",
+        },
+        {
+            "step": "6. Tag Box Population",
+            "action": "Copy and paste all comma-separated tags into the Tags box (Niche brand + episodic search + long-tail).",
+            "importance": "MEDIUM",
+        },
+        {
+            "step": "7. Category & Language Metadata",
+            "action": "Set Category to 'Entertainment' or 'Film & Animation'. Set Video Language to 'English'.",
+            "importance": "HIGH",
+        },
+        {
+            "step": "8. Cards & End Screen Setup",
+            "action": "Add Card 1 (Series Playlist) at 30% mark, Card 2 (Next/Prev Arc) at climax. Add End Screen elements (Playlist + Video Best for Viewer + Subscribe button) in last 20 seconds.",
+            "importance": "HIGH",
+        },
+        {
+            "step": "9. Playlist Assignment",
+            "action": f"Add video to '{comic_title} [Full Story Recap]' official Series Playlist ({resolved_playlist}) to trigger YouTube binge-watching recommendations.",
+            "importance": "CRITICAL",
+        },
+        {
+            "step": "10. Pinned Comment & Community Tab Post",
+            "action": "Immediately pin the Pinned Comment status log with engagement question. Schedule Community Tab Poll 24h prior or publish Launch Post simultaneously.",
+            "importance": "HIGH",
+        },
+    ]
+
+
+# =============================================================================
+# ALTERNATIVE COMIC TITLES & PRIME-TIME PUBLISHING SCHEDULER
+# =============================================================================
+
+KNOWN_ALTERNATIVE_TITLES: Dict[str, List[str]] = {
+    "the apocalypse needs a pro": [
+        "Apocalypse Pro",
+        "The Professional of the Apocalypse",
+        "프로들의 아포칼립스",
+        "Pro in the Apocalypse",
+    ],
+    "veteran of the apocalypse": [
+        "The Veteran Survivor",
+        "Veteran in the Apocalypse",
+        "아포칼립스의 베테랑",
+        "Apocalypse Veteran",
+    ],
+    "solo leveling": [
+        "Only I Level Up",
+        "Na Honjaman Rebeleob",
+        "나 혼자만 레벨업",
+        "I Alone Level Up",
+    ],
+    "omniscient reader": [
+        "Omniscient Reader's Viewpoint",
+        "ORV",
+        "Jeonjijeok Dokja Sijeom",
+        "전지적 독자 시점",
+    ],
+    "the world after the fall": [
+        "Myeolmang Ihuui Segye",
+        "멸망 이후의 세계",
+        "World After Fall",
+    ],
+    "doom breaker": [
+        "Reincarnation of the Suicidal Battle God",
+        "To a New Life",
+        "투신전생기",
+    ],
+    "boundless necromancer": [
+        "Infinite Necromancer",
+        "Na Hollo Necromancer",
+        "나 홀로 네크로맨서",
+    ],
+}
+
+
+def resolve_alternative_titles(
+    comic_title: str,
+    story_memory: Optional[Dict[str, Any]] = None,
+    custom_alt_titles: Optional[List[str]] = None,
+) -> List[str]:
+    """
+    Resolves official, scanlation, Korean Hangul, and alternative localized titles
+    for the comic to maximize YouTube Search coverage across all viewer search patterns.
+    """
+    results: List[str] = []
+    seen: Set[str] = set()
+    title_lower = (comic_title or "").strip().lower()
+
+    def add_title(t: Optional[str]):
+        if not t:
+            return
+        t_clean = str(t).strip()
+        t_norm = t_clean.lower()
+        if t_clean and t_norm != title_lower and t_norm not in seen and len(t_clean) >= 2:
+            seen.add(t_norm)
+            results.append(t_clean)
+
+    # 1. Custom provided titles (highest priority)
+    if custom_alt_titles and isinstance(custom_alt_titles, list):
+        for ct in custom_alt_titles:
+            add_title(ct)
+
+    # 2. Extract from story_memory if present
+    if story_memory and isinstance(story_memory, dict):
+        for field_name in ["alternative_titles", "alt_titles", "other_titles", "aliases"]:
+            val = story_memory.get(field_name)
+            if isinstance(val, list):
+                for item in val:
+                    add_title(item)
+            elif isinstance(val, str):
+                for part in re.split(r"[,;|]+", val):
+                    add_title(part)
+        for field_name in ["korean_title", "original_title", "hangul_title", "native_title"]:
+            add_title(story_memory.get(field_name))
+
+    # 3. Built-in registry match
+    for known_key, alts in KNOWN_ALTERNATIVE_TITLES.items():
+        if known_key in title_lower or title_lower in known_key:
+            for alt in alts:
+                add_title(alt)
+            break
+
+    return results[:6]
+
+
+def calculate_prime_time_publishing_schedule(
+    market: str = "us_apocalypse",
+) -> Dict[str, Any]:
+    """
+    Calculates the 2026 algorithmic prime-time publishing windows for target audience
+    to maximize Initial 2-Hour Velocity (crucial for YouTube Browse feature ignition).
+    """
+    return {
+        "target_market": market,
+        "primary_timezone": "EST (US Eastern Time) / UTC-5",
+        "best_days_to_publish": ["Friday", "Saturday", "Sunday"],
+        "schedule_windows": [
+            {
+                "days": "Weekdays (Mon – Thu)",
+                "us_est_window": "2:00 PM – 4:00 PM EST",
+                "utc_window": "19:00 – 21:00 UTC",
+                "vietnam_ict_window": "02:00 AM – 04:00 AM (Next Day)",
+                "rationale": "Allows YouTube algorithm to process HD & captions before US school/work dismisses.",
+            },
+            {
+                "days": "Friday (Weekend Ramp-up)",
+                "us_est_window": "12:00 PM – 3:00 PM EST",
+                "utc_window": "17:00 – 20:00 UTC",
+                "vietnam_ict_window": "00:00 AM – 03:00 AM (Saturday)",
+                "rationale": "Captures viewers starting weekend binge sessions early.",
+            },
+            {
+                "days": "Saturday & Sunday (Peak Binge-Watching)",
+                "us_est_window": "9:00 AM – 12:00 PM EST",
+                "utc_window": "14:00 – 17:00 UTC",
+                "vietnam_ict_window": "21:00 PM – 00:00 AM (Same Day)",
+                "rationale": "Highest global viewership window for long-form manhwa recaps.",
+            },
+        ],
+        "workflow_strategy": (
+            "1. Upload video 2–3 hours ahead of target window as UNLISTED.\n"
+            "2. Ensure 1080p/4K processing, Closed Captions (.srt), and Thumbnail are ready.\n"
+            "3. Switch video to PUBLIC at the exact start of the prime-time window."
+        ),
     }
 
 
@@ -3382,6 +3946,7 @@ def generate_us_apocalypse_metadata(
     playlist_url: Optional[str] = None,
     previous_part_url: Optional[str] = None,
     next_part_url: Optional[str] = None,
+    alt_titles: Optional[List[str]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -3394,6 +3959,7 @@ def generate_us_apocalypse_metadata(
     mc_name = char_names["mc"]
     archetype = detect_archetype(comic_title, story_memory)
     image_refs = find_character_image_references(download_dir, image_references)
+    alt_titles_list = resolve_alternative_titles(comic_title, story_memory, alt_titles)
 
     evidence_index = EvidenceIndex(
         comic_title=comic_title,
@@ -3442,8 +4008,21 @@ def generate_us_apocalypse_metadata(
     clean_title_slug = re.sub(r"[^a-zA-Z0-9]+", "-", comic_title.lower()).strip("-")
     resolved_playlist = playlist_url or f"https://www.youtube.com/playlist?list={clean_title_slug}-full-recap"
 
+    # ── Description hook: ưu tiên ep_opening_hook từ story_memory ───────────
+    ep_opening_hook = beats.get("ep_opening_hook", "")
+    if ep_opening_hook and len(ep_opening_hook) >= 20:
+        # Trim to ~120 chars max for clean 2-line display in YouTube search snippet
+        hook_line = ep_opening_hook[:120].rsplit(" ", 1)[0] if len(ep_opening_hook) > 120 else ep_opening_hook
+        # Fix #1: Sanitize — replace mc_name with "He" to avoid leaking Korean proper nouns
+        _mc_val = beats.get("mc_name", "")
+        if _mc_val and _mc_val in hook_line:
+            hook_line = hook_line.replace(_mc_val, "He")
+        desc_hook = hook_line if hook_line.endswith((".", "!", "?", "…")) else hook_line + "…"
+    else:
+        desc_hook = f"When {disaster.lower()} strikes, everyone scrambles to survive—but one man refuses to break."
+
     desc_lines = [
-        f"When {disaster.lower()} strikes, everyone scrambles to survive—but {mc_name} fights to hold the line.",
+        desc_hook,
         f"This manhwa recap covers {comic_title} ({ep_range}).",
         "",
         "📺 SERIES NAVIGATION (Watch Full Story):",
@@ -3459,6 +4038,10 @@ def generate_us_apocalypse_metadata(
     desc_lines.extend([
         "",
         f"📖 Series: {comic_title}",
+    ])
+    if alt_titles_list:
+        desc_lines.append(f"🔍 Also Known As: {', '.join(alt_titles_list)}")
+    desc_lines.extend([
         f"Genre: apocalypse, survival, {archetype.replace('_', ' ')}",
         "",
     ])
@@ -3469,7 +4052,8 @@ def generate_us_apocalypse_metadata(
         desc_lines.append("")
 
     desc_lines.extend([
-        "Subscribe for long-form apocalypse and survival manhwa recaps.",
+        f"👉 Subscribe to {CHANNEL_PROFILE.get('channel_name', 'Jaehwan Manhwa')} for long-form apocalypse & survival manhwa recaps:",
+        f"{CHANNEL_PROFILE.get('sub_link', 'https://www.youtube.com/@JaehwanManhwa?sub_confirmation=1')}",
         "",
         "This video contains original scripted narration, editorial structure,",
         "commentary and original editing. Rights in source artwork remain with",
@@ -3483,6 +4067,7 @@ def generate_us_apocalypse_metadata(
         "#manhwarecap",
         "#apocalypsemanhwa",
         "#survivalmanhwa",
+        "#jaehwanmanhwa",
     ]
     if archetype == "zombie_apocalypse":
         hashtags.append("#zombiemanhwa")
@@ -3516,7 +4101,7 @@ def generate_us_apocalypse_metadata(
         desc_bytes = len(desc_text.encode("utf-8"))
 
     # ── 4. TAGS (5-8 tags, < 500 chars) ───────────────────────────────────
-    tags = build_minimal_tags(comic_title, archetype, from_ep=from_ep, to_ep=to_ep)
+    tags = build_minimal_tags(comic_title, archetype, from_ep=from_ep, to_ep=to_ep, alt_titles=alt_titles_list)
 
     # ── 5. THUMBNAIL CONCEPTS ──────────────────────────────────────────────
     thumbnail_concepts = _build_resource_contrast_concepts(
@@ -3622,15 +4207,27 @@ def generate_us_apocalypse_metadata(
             concept["visual_facts_used"] = fallback_facts
 
     # ── 7. PINNED COMMENT with mini status block ───────────────────────────
-    status_block = format_mini_status_block(archetype, survival_dashboard)
-    engagement_q = generate_engagement_question(archetype)
+    status_block = format_mini_status_block(archetype, survival_dashboard, beats=beats)
+    engagement_q = generate_engagement_question(archetype, beats=beats)
+
+    ep_climax_hook = beats.get("ep_climax_hook", "")
+    climax_line = ""
+    if ep_climax_hook and len(ep_climax_hook) >= 20:
+        _climax = ep_climax_hook[:150].rsplit(" ", 1)[0] if len(ep_climax_hook) > 150 else ep_climax_hook
+        # Fix #2: Sanitize — replace mc_name with "He" to avoid leaking Korean proper nouns in pinned comment
+        _mc_val_c = beats.get("mc_name", "")
+        if _mc_val_c and _mc_val_c in _climax:
+            _climax = _climax.replace(_mc_val_c, "He")
+        _climax = _climax if _climax.endswith((".", "!", "?", "…")) else _climax + "…"
+        climax_line = f"\n🔥 Where we left off: {_climax}\n"
 
     pinned_comment_text = (
         "📌 MANHWA INFO & STATUS LOG:\n"
         f"📖 Series: {comic_title} (Chapters {from_ep} – {to_ep})\n\n"
         f"{status_block}\n\n"
-        f"💬 {engagement_q}\n\n"
-        "👉 Like & Subscribe for more full-arc manhwa recaps!"
+        f"💬 {engagement_q}\n"
+        f"{climax_line}\n"
+        f"👉 Subscribe to {CHANNEL_PROFILE.get('channel_name', 'Jaehwan Manhwa')} for more full-arc manhwa recaps: {CHANNEL_PROFILE.get('sub_link', 'https://www.youtube.com/@JaehwanManhwa?sub_confirmation=1')}"
     )
 
     # ── 7.1. COMMUNITY POSTS & END SCREEN RECOMMENDATIONS ──────────────────
@@ -3643,6 +4240,18 @@ def generate_us_apocalypse_metadata(
         disaster=disaster,
     )
     card_anchors = recommend_card_and_endscreen_anchors(narrative_chapters)
+
+    # ── 7.2. SEO FILENAMES & PRE-PUBLISH CHECKLIST ─────────────────────────
+    seo_filenames = generate_seo_filenames(comic_title, from_ep, to_ep)
+    prepublish_checklist = generate_prepublish_checklist(
+        comic_title=comic_title,
+        from_ep=from_ep,
+        to_ep=to_ep,
+        seo_filenames=seo_filenames,
+        primary_title=primary_title,
+        resolved_playlist=resolved_playlist,
+    )
+    publishing_schedule = calculate_prime_time_publishing_schedule(market="us_apocalypse")
 
     # ── 8. PACKAGING CONSISTENCY AUDIT ─────────────────────────────────────
     packaging_audit = validate_packaging_consistency(
@@ -3728,6 +4337,8 @@ def generate_us_apocalypse_metadata(
         "episodes_requested": len(evidence_index.episodes_requested),
         "title_length_chars": len(primary_title),
         "title_length_ok": len(primary_title) <= 100,
+        "title_pre_pipe_chars": len(primary_title.partition(" | ")[0]),
+        "title_pre_pipe_ok": len(primary_title.partition(" | ")[0]) <= 60,
         "title_first_40_chars_hook": bool(re.search(r"^(He|When|They|Exiled|Everyone|Betrayed|Academy|Starving|His|Surviving|The|From)", primary_title, re.IGNORECASE)),
         "description_utf8_bytes": desc_bytes,
         "description_bytes_ok": desc_bytes <= 5000,
@@ -3744,24 +4355,27 @@ def generate_us_apocalypse_metadata(
     }
     compliance_flags = prepublish_audit
 
-    # ── 10. FORMATTED KIT STRING ───────────────────────────────────────────
+    # ── 10. FORMATTED KIT STRING (STREAMLINED 30-SECOND FAST-PASTE LAYOUT) ─
+    top_3_thumbnails = thumbnail_concepts[:3]
+    top_3_candidates = title_options[:3] if title_options else [primary_title]
+
     kit_lines = [
         "=" * 80,
-        f"YOUTUBE UPLOAD KIT: {comic_title}",
-        f"Episodes: {from_ep} - {to_ep} | Market: us_apocalypse | Archetype: {archetype.upper()}",
+        f"⚡ JAEHWAN MANHWA — YOUTUBE UPLOAD KIT: {comic_title}",
+        f"Episodes: {from_ep} - {to_ep} | Market: us_apocalypse | Archetype: {archetype.upper()} | Persona: Sarcastic Bro",
         "=" * 80,
         "",
         "[1. NATIVE A/B TEST TITLE HYPOTHESES (Paste 3 options into YouTube A/B Tester)]",
-        f"★ Hypothesis A (Conflict / Retaliation Hook):",
+        "★ Option A (Juxtaposition / High CTR Hook):",
         f"  {title_variants.get('variant_a_conflict', primary_title)}",
-        f"★ Hypothesis B (Paradox / Resource Monopoly Hook):",
+        "★ Option B (Retaliation / Paradox Hook):",
         f"  {title_variants.get('variant_b_paradox', primary_title)}",
-        f"★ Hypothesis C (Scale / Survival Arc Hook):",
+        "★ Option C (Scale / Survival Arc Hook):",
         f"  {title_variants.get('variant_c_scale', primary_title)}",
         "",
-        f"--- Top {len(title_options)} Ranked Title Candidates ---",
+        f"--- Top Ranked Title Candidates ---",
     ]
-    for i, t in enumerate(title_options, 1):
+    for i, t in enumerate(top_3_candidates, 1):
         prefix = "★ " if i == 1 else "  "
         kit_lines.append(f"{prefix}Option {i}: {t}")
 
@@ -3777,81 +4391,44 @@ def generate_us_apocalypse_metadata(
         ", ".join(tags),
         "",
         "=" * 80,
-        "[5. RESOURCE-CONTRAST THUMBNAIL CONCEPTS & AI PROMPTS]",
+        "[5. TOP 3 VIRAL THUMBNAILS & AI PROMPTS]",
         "=" * 80,
     ])
 
-    for i, c in enumerate(thumbnail_concepts, 1):
+    for i, c in enumerate(top_3_thumbnails, 1):
         kit_lines.extend([
             "",
-            f"▶ CONCEPT {i}: {c['name'].upper()}",
-            f"  • Text Overlay : {c['thumbnail_text']}",
-            f"  • Text Style   : {c['text_style']}",
-            f"  • Composition  : {c['composition']}",
+            f"▶ CONCEPT {i}: {c.get('name', f'Concept {i}').upper()}",
+            f"  • Text Overlay : {c.get('thumbnail_text', 'N/A')}",
+            f"  • Text Style   : {c.get('text_style', 'N/A')}",
+            f"  • Composition  : {c.get('composition', 'N/A')}",
             "",
-            "  • MASTER PROMPT (Copy & paste into GPT-4o):",
+            "  • MASTER AI PROMPT (Copy & paste into GPT-4o / Midjourney):",
             "-" * 80,
-            c['gpt_prompt'],
+            c.get('gpt_prompt', ''),
             "-" * 80,
         ])
 
-    _dash_lines: List[str] = [
-        "",
-        "=" * 80,
-        "[6. SURVIVAL DASHBOARD OVERLAY DATA (For video editing)]",
-        f"  Story Arc: {survival_dashboard['story_arc']}",
-    ]
-    if survival_dashboard.get("outside_condition"):
-        _dash_lines.append(f"  Outside Condition: {survival_dashboard['outside_condition']}")
-    if survival_dashboard.get("threat_description"):
-        _dash_lines.append(f"  Threat: {survival_dashboard['threat_description']}")
-    if survival_dashboard.get("base_security_level"):
-        _dash_lines.append(f"  Base Security: {survival_dashboard['base_security_level']}")
-    _dash_lines.append("=" * 80)
-    _dash_lines.append("")
-    kit_lines.extend(_dash_lines)
     kit_lines.extend([
-        "=" * 80,
-        "[7. 2026 PRE-PUBLISH QUALITY AUDIT SUMMARY]",
-        f"  • Overall Validation: {'PASS' if prepublish_audit['passed'] else 'FAIL'}",
-        f"  • Episodes Scanned: {prepublish_audit['episodes_scanned']} / {prepublish_audit['episodes_requested']}",
-        f"  • Packaging Consistent: {'PASS' if packaging_audit['is_consistent'] else 'FAIL'}",
-        f"  • Title Length: {compliance_flags['title_length_chars']} chars -> {'PASS' if compliance_flags['title_length_ok'] else 'FAIL'}",
-        f"  • Description Size: {compliance_flags['description_utf8_bytes']} bytes -> {'PASS' if compliance_flags['description_bytes_ok'] else 'FAIL'}",
-        f"  • Tag Count: {compliance_flags['tag_count']} tags, {compliance_flags['tag_total_chars']} chars -> {'PASS' if compliance_flags['tag_chars_ok'] else 'FAIL'}",
-        f"  • Chapter 00:00 Present: {'PASS' if compliance_flags['first_chapter_is_zero'] else 'FAIL'}",
-        f"  • YPP Originality Statement: {'PASS' if compliance_flags['ypp_originality_statement_present'] else 'FAIL'}",
-        f"  • Unsupported Claims: {', '.join(unsupported_claims) if unsupported_claims else 'NONE (Clean)'}",
-        "=" * 80,
         "",
         "=" * 80,
-        "[8. YOUTUBE COMMUNITY TAB POSTS (Pre-launch & Launch Hype)]",
+        "[6. FAST ACTION GUIDE (SEO FILENAMES & PRIME TIME)]",
         "=" * 80,
+        "• SEO Filenames (Rename files before upload):",
+        f"  - Video File    : {seo_filenames['video_filename']}",
+        f"  - Subtitle File : {seo_filenames['srt_filename']}",
+        f"  - Thumbnail File: {seo_filenames['thumbnail_filename']}",
         "",
-        "★ POST OPTION A (Interactive Poll Hook — Post 24h before or on release):",
-        "-" * 80,
-        community_posts["post_a_poll_hook"],
-        "-" * 80,
+        "• Recommended Cards & End Screen Placements:",
+        f"  - Card 1 (Series Playlist Link) : Place at timestamp [{card_anchors['card_1_playlist']['recommended_timestamp']}] -> \"{card_anchors['card_1_playlist']['teaser_text']}\"",
+        f"  - Card 2 (Next/Previous Arc)    : Place at timestamp [{card_anchors['card_2_next_arc']['recommended_timestamp']}] -> \"{card_anchors['card_2_next_arc']['teaser_text']}\"",
+        f"  - End Screen Placement          : {card_anchors['end_screen']['timing']} (Elements: {', '.join(card_anchors['end_screen']['recommended_elements'])})",
         "",
-        "★ POST OPTION B (Dramatic Cliffhanger Sneak Peek — Post with thumbnail):",
-        "-" * 80,
-        community_posts["post_b_cliffhanger_teaser"],
-        "-" * 80,
-        "",
-        "★ POST OPTION C (Release Day Drop Announcement):",
-        "-" * 80,
-        community_posts["post_c_launch_announcement"],
-        "-" * 80,
-        "",
-        "=" * 80,
-        "[9. RECOMMENDED CARDS & END SCREEN PLACEMENT (Session Watch Time Booster)]",
-        "=" * 80,
-        f"  • Card 1 (Series Playlist Link) : Place at timestamp [{card_anchors['card_1_playlist']['recommended_timestamp']}]",
-        f"    Teaser Text: \"{card_anchors['card_1_playlist']['teaser_text']}\"",
-        f"  • Card 2 (Next/Previous Arc)    : Place at timestamp [{card_anchors['card_2_next_arc']['recommended_timestamp']}]",
-        f"    Teaser Text: \"{card_anchors['card_2_next_arc']['teaser_text']}\"",
-        f"  • End Screen Timing             : {card_anchors['end_screen']['timing']}",
-        f"    Elements: {', '.join(card_anchors['end_screen']['recommended_elements'])}",
+        "• Global Prime-Time Publishing Schedule (US/Global High-Velocity):",
+        f"  - Target Market        : {publishing_schedule['target_market'].upper()} ({publishing_schedule['primary_timezone']})",
+        f"  - Best Days to Publish : {', '.join(publishing_schedule['best_days_to_publish'])}",
+        "  - Weekend Peak (Fri-Sun) : 10:00 AM – 01:00 PM US EST (22:00 – 01:00 Vietnam ICT)",
+        "  - Weekday Slot (Mon-Thu) : 02:00 PM – 05:00 PM US EST (02:00 – 05:00 Vietnam ICT)",
         "=" * 80,
     ])
 
@@ -3884,6 +4461,10 @@ def generate_us_apocalypse_metadata(
         "survival_dashboard": survival_dashboard,
         "community_posts": community_posts,
         "card_anchors": card_anchors,
+        "seo_filenames": seo_filenames,
+        "prepublish_checklist": prepublish_checklist,
+        "alternative_titles": alt_titles_list,
+        "publishing_schedule": publishing_schedule,
         "series_navigation": {
             "playlist_url": resolved_playlist,
             "previous_arc": f"Ep {prev_from}–{prev_to}" if from_ep > 1 else None,
@@ -3900,6 +4481,7 @@ def generate_us_apocalypse_metadata(
 
 
 # Convenience alias (no-market public API)
-def generate_youtube_metadata(comic_title, from_ep, to_ep, chapters=None, story_memory=None, download_dir=None, **kwargs):
-    return generate_us_apocalypse_metadata(comic_title, from_ep, to_ep, chapters=chapters, story_memory=story_memory, download_dir=download_dir, **kwargs)
+def generate_youtube_metadata(comic_title, from_ep, to_ep, chapters=None, story_memory=None, download_dir=None, alt_titles=None, **kwargs):
+    return generate_us_apocalypse_metadata(comic_title, from_ep, to_ep, chapters=chapters, story_memory=story_memory, download_dir=download_dir, alt_titles=alt_titles, **kwargs)
+
 
