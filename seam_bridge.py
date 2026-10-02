@@ -35,8 +35,6 @@ LENGTH_TOLERANCE = 0.4           # rewritten line length within +-40% of the ori
 MAX_LINE_WORDS = 20              # Stage 5 splits narration into segments of <= 20 words
 MIN_GROUNDED_RATIO = 0.6
 GROUNDING_PREFIX = 5             # "charging" ~ "charge": same stem, as in title grounding
-OPENER_SUFFIXES = ("ing", "ed", "ly")
-OPENER_MIN_LENGTH = 6
 SEAM_FILE = "seam.json"
 RECAP_FILE = "recap.json"
 RECAP_LOOKBACK_RE = re.compile(
@@ -107,24 +105,15 @@ def _grounded_ratio(tokens: set[str], source: set[str]) -> float:
     return sum(1 for t in tokens if t in source or t[:GROUNDING_PREFIX] in stems) / len(tokens)
 
 
-def _looks_like_sentence_opener(token: str) -> bool:
-    """'Facing', 'Trapped', 'Suddenly' open sentences in bridges; short ones ('Ming') may be names."""
-    return len(token) >= OPENER_MIN_LENGTH and token.lower().endswith(OPENER_SUFFIXES)
-
-
 def _invented_names(text: str, corpus: str, bible: Any) -> List[str]:
-    """Proper names in `text` that appear nowhere in the two episodes and are unknown to the bible."""
-    from premise_pitch import SENTENCE_START_COMMON, SENTENCE_START_RE
+    """Mid-sentence proper names in `text` that appear nowhere in the two episodes and are unknown to the bible.
+
+    Sentence-initial capitals are not checked: bridges open with "Facing…", "Far from…", "Away from…" far more
+    often than with a new name, and an invented opener is still caught by the grounding-ratio rule.
+    """
     from series_bible import extract_name_candidates, name_key
-    from title_engine import WORD_RE
 
     candidates = set(extract_name_candidates([text]))
-    lowercase_words = {w.lower() for w in WORD_RE.findall(corpus)} | {w for w in WORD_RE.findall(text) if w.islower()}
-    candidates |= {
-        tok for tok in SENTENCE_START_RE.findall(text)
-        if tok.lower() not in SENTENCE_START_COMMON and tok.lower() not in lowercase_words
-        and not _looks_like_sentence_opener(tok)
-    }
     known = bible.known_names() if bible is not None else set()
     return sorted(
         n for n in candidates

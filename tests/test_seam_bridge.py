@@ -90,9 +90,10 @@ def test_grounded_bridge_passes():
     assert check.passed, check.reasons
 
 
-def test_participle_sentence_opener_is_not_a_name():
-    # Real trial rejection: "Facing ..." was read as an invented name.
-    lines = ["Facing the pulsing dimensional gate, Gimbaplover stops and stares inside.", GOOD[1]]
+@pytest.mark.parametrize("opener", ["Facing", "Far from", "Away from"])
+def test_sentence_openers_are_not_names(opener):
+    # Real rejections: "Facing …" (Veteran 1-3 trial), "Far from …" / "Away from …" (Veteran 1-33 render).
+    lines = [f"{opener} the pulsing dimensional gate, Gimbaplover stops and stares inside.", GOOD[1]]
     check = validate_bridge(lines, ORIGINAL, TAIL, CORPUS, _bible())
     assert check.passed, check.reasons
 
