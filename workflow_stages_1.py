@@ -2586,10 +2586,18 @@ class Stage5_GeminiAutomation(BaseStage):
         use_api_primary = has_api_access and (vlm_engine_pref in ("9router_api", "api", "gemini_api", "auto", ""))
 
         if use_api_primary:
-            await context.log(f"Stage 5: Kích hoạt Primary 9Router Gemini API Engine (Độ song song: {concurrency})...", "info")
-            sem = asyncio.Semaphore(concurrency)
-            async def run_api_ep(ep):
-                async with sem:
+            # Contiguous chunks, each narrated in order: every episode except a chunk's first one is
+            # written knowing how the previous episode ended (StoryMemory), at the same parallelism.
+            from seam_bridge import partition_contiguous
+            api_chunks = partition_contiguous(episodes_to_process, concurrency)
+            await context.log(
+                f"Stage 5: Kích hoạt Primary 9Router Gemini API Engine (Độ song song: {len(api_chunks)} luồng, "
+                f"mỗi luồng chạy tuần tự: {', '.join(f'{c[0]}-{c[-1]}' for c in api_chunks)})...",
+                "info",
+            )
+
+            async def run_api_chunk(chunk_eps):
+                for ep in chunk_eps:
                     if context.cancel_token.is_cancelled():
                         return
                     try:
@@ -2597,8 +2605,7 @@ class Stage5_GeminiAutomation(BaseStage):
                     except Exception as e:
                         await context.log(f"Lỗi khi chạy tập {ep}: {e}", "error", episode=ep)
 
-            api_tasks = [run_api_ep(ep) for ep in episodes_to_process]
-            await asyncio.gather(*api_tasks)
+            await asyncio.gather(*[run_api_chunk(c) for c in api_chunks])
         elif num_workers > 1 and len(episodes_to_process) > 1:
             await context.log(f"Stage 5: Kích hoạt xử lý song song với {num_workers} Chrome Profiles...", "info")
             try:
@@ -2611,8 +2618,9 @@ class Stage5_GeminiAutomation(BaseStage):
 
             # Arc-based partitioning: splits episodes into continuous sequential chunks
             # Each worker runs its slice sequentially, preserving 100% story memory continuity
-            k, m = divmod(len(episodes_to_process), num_workers)
-            chunks = [episodes_to_process[i*k + min(i, m):(i+1)*k + min(i+1, m)] for i in range(num_workers)]
+            from seam_bridge import partition_contiguous
+            # One chunk per live worker so no episode is left without a worker.
+            chunks = partition_contiguous(episodes_to_process, min(num_workers, len(pool.workers)))
 
             async def run_worker_chunk(worker, chunk_eps):
                 for ep in chunk_eps:
@@ -2623,11 +2631,7 @@ class Stage5_GeminiAutomation(BaseStage):
                     except Exception as e:
                         await context.log(f"[Worker {worker.index+1}] Lỗi khi chạy tập {ep}: {e}", "error")
 
-            worker_tasks = [
-                run_worker_chunk(pool.workers[i], chunks[i])
-                for i in range(min(num_workers, len(pool.workers)))
-                if chunks[i]
-            ]
+            worker_tasks = [run_worker_chunk(worker, chunk) for worker, chunk in zip(pool.workers, chunks)]
             await asyncio.gather(*worker_tasks)
         else:
             await context.log(f"Stage 5: Bắt đầu xử lý tuần tự từng chap bằng {vlm_provider.capitalize()}.", "info")

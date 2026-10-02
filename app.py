@@ -3843,6 +3843,26 @@ NEVER spend more than 1 segment on pure environment/background before anchoring 
 
         formatted_context = "\n".join(context_blocks)
 
+        previous_tail = [str(t).strip() for t in (previous_context.get("previous_tail") or []) if str(t).strip()]
+        tail_block = ""
+        if previous_tail:
+            tail_lines = "\n".join(f'  "{t}"' for t in previous_tail)
+            tail_block = f"""
+LAST LINES THE VIEWER JUST HEARD (end of the previous chapter, played right before your line 1):
+{tail_lines}
+- Do NOT repeat, paraphrase or re-describe these events. They were already narrated.
+- Line 1 picks up exactly from the situation these lines leave the protagonist in (same place, same threat, same action).
+- If the last line is only narrator commentary (a countdown, a dramatic remark), continue from the story event right before it.
+"""
+        # Only the protagonist anchor may be known (Series Bible): never quote an empty cliffhanger.
+        if prev_cliffhanger:
+            line_one_rule = (
+                "- Your very first narration line of this episode MUST directly address, resolve, or seamlessly "
+                f'react to the previous chapter\'s ending cliffhanger ("{prev_cliffhanger}").'
+            )
+        else:
+            line_one_rule = "- Start with the ongoing action on the first story page; no recap of earlier chapters."
+
         intro_rule = f"""
 EPISODE CONTINUATION & BINGE-WATCHING NARRATIVE CONTINUITY (ROLLING STORY MEMORY):
 
@@ -3851,9 +3871,9 @@ Zero recap or filler: Do NOT say 'In the last chapter', 'Previously', 'Ở tập
 
 PREVIOUS CHAPTER CONTEXT (ROLLING STORY MEMORY):
 {formatted_context}
-
+{tail_block}
 BINGE TRANSITION RULE FOR LINE 1:
-- Your very first narration line of this episode MUST directly address, resolve, or seamlessly react to the previous chapter's ending cliffhanger ("{prev_cliffhanger}").
+{line_one_rule}
 - Maintain uninterrupted narrative velocity so that when all episodes are watched together in one long video, the audience experiences one smooth, cohesive movie without disconnect or repetition.
 """
 

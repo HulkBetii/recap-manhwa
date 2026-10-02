@@ -7,6 +7,8 @@ import time
 import hashlib
 from typing import Any, Dict, List, Optional
 
+PREVIOUS_TAIL_SEGMENTS = 3
+
 
 class StoryMemory:
     """
@@ -435,16 +437,25 @@ class StoryMemory:
             else getattr(recap_data[0], "speech", "")
         )
 
+        # The last lines viewers hear before the next episode starts (continuity / anti-repetition).
+        tail = [
+            (s.get("speech", "") if isinstance(s, dict) else getattr(s, "speech", "")).strip()
+            for s in recap_data[-PREVIOUS_TAIL_SEGMENTS:]
+        ]
+        tail = [t for t in tail if t]
+
         canonical = self.protagonist_name
         if canonical and canonical.lower() != "paran":
             opening = self.normalize_protagonist_entities(opening, canonical)
             cliffhanger = self.normalize_protagonist_entities(cliffhanger, canonical)
             summary = self.normalize_protagonist_entities(summary, canonical)
+            tail = [self.normalize_protagonist_entities(t, canonical) for t in tail]
 
         self.episodes[str(ep)] = {
             "episode": ep,
             "opening": opening.strip(),
             "closing_cliffhanger": cliffhanger,
+            "tail": tail,
             "summary": summary,
             "segment_count": len(recap_data),
             "timestamp": time.time(),
@@ -495,6 +506,8 @@ class StoryMemory:
         return {
             "previous_episode": prev_ep,
             "closing_cliffhanger": prev_data.get("closing_cliffhanger", ""),
+            # Entries saved before `tail` existed only know the final line.
+            "previous_tail": prev_data.get("tail") or [t for t in [prev_data.get("closing_cliffhanger", "")] if t],
             "summary": prev_data.get("summary", ""),
             "macro_context": macro_ctx,
             "active_plot_threads": prev_data.get("closing_cliffhanger", ""),
