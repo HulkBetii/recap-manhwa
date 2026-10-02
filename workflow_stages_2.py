@@ -12,7 +12,7 @@ import math
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance
-from workflow_base import BaseStage, WorkflowContext
+from workflow_base import BaseStage, StageState, WorkflowContext
 from recap_schema import load_recap_dicts
 from artifact_cache import (
     EpisodeStageCache,
@@ -59,6 +59,15 @@ def is_ffmpeg_pipe_closed_error(error: BaseException) -> bool:
 
 def can_recover_ffmpeg_pipe_output(error: BaseException, output_path: str) -> bool:
     return is_ffmpeg_pipe_closed_error(error) and validate_mp4_file(output_path)
+
+
+def count_rendered_episodes(download_dir: str, from_ep: int, to_ep: int, video_filename: str = "video.mp4") -> tuple:
+    """(completed, failed) episodes in the range, judged by a valid rendered episode video on disk."""
+    completed = sum(
+        1 for ep in range(from_ep, to_ep + 1)
+        if validate_mp4_file(os.path.join(download_dir, f"episode_{ep}", video_filename))
+    )
+    return completed, (to_ep - from_ep + 1) - completed
 
 class Stage7_NarrationAggregation(BaseStage):
     @property
@@ -3101,11 +3110,21 @@ class Stage12_MetadataReports(BaseStage):
             json.dump(metadata, mf, ensure_ascii=False, indent=2)
         os.replace(metadata_temp_path, metadata_path)
 
+        # Counted from the rendered files: episode_progress misses stages the streaming pipeline runs
+        # per episode, which reported 0 completed episodes for a fully rendered 33-episode video.
+        completed, failed = count_rendered_episodes(
+            download_dir, task.from_episode or 1, task.to_episode or 1, task.payload.get("video_filename", "video.mp4"),
+        )
+        # Writing this report is Stage 12's last step, so it is reported as done, not "running".
+        stages_snapshot = [
+            {**s, "status": StageState.SUCCESS, "progress": 100.0} if s.get("name") == self.name else s
+            for s in task.stages
+        ]
         report = {
             "task_id": task.id,
-            "stages": task.stages,
-            "completed_episodes_count": task.completed_count,
-            "failed_episodes_count": task.failed_count,
+            "stages": stages_snapshot,
+            "completed_episodes_count": completed,
+            "failed_episodes_count": failed,
             "error_message": task.error_message,
             "compliance_audit": compliance_audit
         }

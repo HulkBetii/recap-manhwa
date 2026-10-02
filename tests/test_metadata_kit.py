@@ -106,3 +106,17 @@ def test_episode_range_and_title_fallbacks(tmp_path):
 
     with pytest.raises(ValueError):
         metadata_kit.episode_range(str(tmp_path))
+
+
+def test_processing_report_counts_rendered_episode_videos(tmp_path):
+    """The report said 0 completed episodes for a fully rendered video (streaming stages bypass episode_progress)."""
+    from workflow_stages_2 import count_rendered_episodes
+
+    for ep in (1, 2):
+        d = tmp_path / f"episode_{ep}"
+        d.mkdir()
+        (d / "video.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64 + b"moov" + b"\x00" * 64)
+    (tmp_path / "episode_3").mkdir()
+    (tmp_path / "episode_3" / "video.mp4").write_bytes(b"")  # failed render
+    assert count_rendered_episodes(str(tmp_path), 1, 3) == (2, 1)
+    assert count_rendered_episodes(str(tmp_path), 1, 3, "final.mp4") == (0, 3)
