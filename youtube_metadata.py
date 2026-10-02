@@ -4,7 +4,7 @@ import json
 import os
 import re
 import glob
-import random
+import hashlib
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Tuple, Set
 
@@ -3186,48 +3186,44 @@ def format_mini_status_block(
     archetype: str,
     survival_dashboard: Dict[str, Any],
     beats: Optional[Dict[str, str]] = None,
+    series_bible: Any = None,
 ) -> str:
     """
-    Formats a grounded mini status block for the pinned comment from validated dashboard fields and story beats.
+    Pinned-comment status block built only from verifiable facts.
+
+    The former "SURVIVAL LOG" printed keyword-guessed beats ("Mountain Sanctuary", "His Mutated
+    Companion") and archetype boilerplate labels that merely required any fact of the same type —
+    the Veteran of the Apocalypse trial kit listed a base and a companion the story never had.
+    `archetype`, `survival_dashboard` and `beats` are kept for call compatibility; the dashboard
+    stays in metadata.json as reference data.
     """
-    arc = survival_dashboard.get("story_arc", "Story Arc")
-    threat = survival_dashboard.get("threat_description")
-    outside = survival_dashboard.get("outside_condition")
-    base_sec = survival_dashboard.get("base_security_level")
-
     lines = [
-        "📊 SURVIVAL LOG:",
-        f"• 📖 Story Arc: {arc}",
+        "📊 STORY LOG:",
+        f"• 📖 Story Arc: {survival_dashboard.get('story_arc', 'Story Arc')}",
     ]
-    if outside:
-        lines.append(f"• 📍 Threat Zone: {outside}")
-    elif beats and beats.get("disaster"):
-        lines.append(f"• 📍 Threat Event: {beats['disaster']}")
-
-    if base_sec:
-        lines.append(f"• 🛡️ Security Status: {base_sec}")
-    elif beats and beats.get("shelter"):
-        lines.append(f"• 🛡️ Base/Sanctuary: {beats['shelter']}")
-
-    if threat:
-        lines.append(f"• ⚠️ Alert Level: {threat}")
-    elif beats and beats.get("boss_name"):
-        lines.append(f"• ⚠️ Primary Threat: {beats['boss_name']}")
-
-    if beats and beats.get("companion_name"):
-        lines.append(f"• 🐺 Companion: {beats['companion_name']}")
-
+    setting = (getattr(series_bible, "setting", "") or "").strip()
+    if setting:
+        lines.append(f"• 🌍 Premise: {setting}")
     return "\n".join(lines)
 
 
-def generate_engagement_question(archetype: str, beats: Optional[Dict[str, str]] = None) -> str:
-    """Selects a contextual, story-grounded engagement question for pinned comment."""
+def generate_engagement_question(
+    archetype: str,
+    beats: Optional[Dict[str, str]] = None,
+    seed: str = "",
+) -> str:
+    """
+    Selects a contextual engagement question for the pinned comment.
+    Deterministic for a given `seed` (the comic title) so re-running Stage 12 yields the same kit.
+    """
     if beats:
         disaster = beats.get("disaster", "").lower()
         boss = beats.get("boss_name")
         if "asteroid" in disaster:
-            _tb = beats.get("time_before", "Days")
-            return f"If an asteroid was hitting Earth in {_tb}, what's the #1 supply you'd stockpile FIRST? Drop your answer below! 👇"
+            # time_before falls back to a bare unit ("Days") when the story gives no number.
+            _tb = beats.get("time_before", "")
+            when = f" in {_tb}" if re.search(r"\d", _tb or "") else ""
+            return f"If an asteroid was about to hit Earth{when}, what's the #1 supply you'd stockpile FIRST? Drop your answer below! 👇"
         if "freeze" in disaster or "blizzard" in disaster:
             _temp = beats.get("extreme_temp", "Extreme Cold")
             return f"The temperature drops to {_temp} — would you let shivering survivors into your heated bunker? Be honest 👀👇"
@@ -3237,7 +3233,10 @@ def generate_engagement_question(archetype: str, beats: Optional[Dict[str, str]]
             return f"How would YOU survive against {boss}? Drop your battle strategy below! ⚔️👇"
 
     questions = ENGAGEMENT_QUESTIONS.get(archetype, ENGAGEMENT_QUESTIONS["general_apocalypse"])
-    return random.choice(questions) if questions else "What was your favorite moment? Drop your thoughts below! 👇"
+    if not questions:
+        return "What was your favorite moment? Drop your thoughts below! 👇"
+    digest = hashlib.sha256(f"{seed}|{archetype}".encode("utf-8")).hexdigest()
+    return questions[int(digest, 16) % len(questions)]
 
 
 def generate_community_posts(
@@ -4113,8 +4112,8 @@ def generate_us_apocalypse_metadata(
             concept["visual_facts_used"] = fallback_facts
 
     # ── 7. PINNED COMMENT with mini status block ───────────────────────────
-    status_block = format_mini_status_block(archetype, survival_dashboard, beats=beats)
-    engagement_q = generate_engagement_question(archetype, beats=beats)
+    status_block = format_mini_status_block(archetype, survival_dashboard, beats=beats, series_bible=series_bible)
+    engagement_q = generate_engagement_question(archetype, beats=beats, seed=comic_title)
 
     ep_climax_hook = beats.get("ep_climax_hook", "")
     climax_line = ""
