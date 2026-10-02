@@ -50,6 +50,7 @@ if os.path.exists(_venv_scripts) and _venv_scripts not in os.environ.get("PATH",
 logger = logging.getLogger("TTSProvider")
 
 _DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
+EDGE_VOICE_NAME_RE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-[A-Za-z]+Neural$")
 
 
 def _media_duration_seconds(path: str) -> float:
@@ -629,11 +630,14 @@ async def generate_tts(
         logger.warning("VOICEVOX failed or engine not running. Falling back to EdgeTTS (ja-JP-NanamiNeural)...")
         return await generate_edge_tts(text, output_audio_path, output_srt_path, voice_name="ja-JP-NanamiNeural", rate=rate, pitch=pitch)
 
-    # 2. Direct EdgeTTS Mode
-    if v_id == "edge-tts" or v_id.startswith("edge-tts_"):
+    # 2. Direct EdgeTTS Mode. Bare voice names ("ko-KR-InJoonNeural", the KR/JA config defaults) are
+    # EdgeTTS voices too: OmniVoice rejects them as unsupported "instruct" text.
+    if v_id == "edge-tts" or v_id.startswith("edge-tts_") or EDGE_VOICE_NAME_RE.match(v_id):
         edge_voice = "en-US-ChristopherNeural"
         if v_id.startswith("edge-tts_"):
             edge_voice = v_id.split("_", 1)[1]
+        elif EDGE_VOICE_NAME_RE.match(v_id):
+            edge_voice = v_id
         if edge_voice == "ko-KR-InJoonNeural" and rate == "+0%" and pitch == "+0Hz":
             rate = "+12%"
             pitch = "-2Hz"
