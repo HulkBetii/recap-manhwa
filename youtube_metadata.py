@@ -4048,7 +4048,8 @@ def generate_us_apocalypse_metadata(
     if narrative_chapters:
         desc_lines.append("⏱️ Chapters:")
         for ch in narrative_chapters:
-            desc_lines.append(f"{ch['timestamp']} — {ch['title']}")
+            # Plain hyphen only: YouTube ignores description chapters when the separator is an em dash.
+            desc_lines.append(f"{ch['timestamp']} - {ch['title']}")
         desc_lines.append("")
 
     desc_lines.extend([
