@@ -3004,108 +3004,19 @@ class Stage12_MetadataReports(BaseStage):
         }
 
         try:
-            from youtube_metadata import generate_youtube_metadata, plan_chapter_arcs
-            from title_engine import (
-                DEFAULT_REGISTRY_PATH, TitleRegistry, build_hook_sheet, generate_llm_hooks, load_narration_by_episode,
-            )
-            from chapter_engine import build_arc_inputs, generate_llm_chapter_options
-            from series_bible import load_bible
-            chapters = task.artifacts.get("chapters")
-            story_memory = None
-            story_mem_path = os.path.join(download_dir, "story_memory.json")
-            if os.path.exists(story_mem_path):
-                try:
-                    with open(story_mem_path, "r", encoding="utf-8") as smf:
-                        story_memory = json.load(smf)
-                except Exception:
-                    pass
-
-            comic_title = task.comic_title or "Comic"
-            from_ep, to_ep = task.from_episode or 1, task.to_episode or 1
-            language = task.payload.get("language", "en")
-            registry = TitleRegistry.load(task.payload.get("title_registry_path") or DEFAULT_REGISTRY_PATH)
-            series_bible = load_bible(download_dir)
-            llm_call = self._text_llm_call(task)
-            hook_sheet = build_hook_sheet(
-                comic_title, download_dir, from_ep, to_ep,
-                story_memory=story_memory, bible=series_bible, language=language,
-            )
-            # Reuse Stage 11's drafts: the premise pitch was written for the title they produce.
-            llm_hooks = task.artifacts.get("llm_title_hooks")
-            if llm_hooks is None:
-                llm_hooks = await generate_llm_hooks(hook_sheet, llm_call)
-            if hook_sheet.has_story and not llm_hooks:
-                await context.log("Title Engine: LLM không trả về title, dùng template dự phòng (vẫn qua bộ kiểm tra).", "warning")
-
-            arcs = build_arc_inputs(
-                plan_chapter_arcs(chapters, comic_title, story_memory, download_dir, from_ep, to_ep),
-                load_narration_by_episode(download_dir, from_ep, to_ep),
-                story_memory,
-            )
-            llm_chapter_options = await generate_llm_chapter_options(arcs, hook_sheet.character_names, llm_call)
-            if arcs and not llm_chapter_options:
-                await context.log("Chapter Engine: LLM không trả về tên chapter, dùng tên Stage 11 / 'Part N' (vẫn qua bộ kiểm tra).", "warning")
-
-            # Overlay text must complement the shipped title: reuse the pitch's title or preview it.
-            from youtube_metadata import preview_primary_title, preview_thumbnail_concepts
-            from thumbnail_text import generate_llm_overlay_options
-            overlay_title = (task.artifacts.get("premise_pitch") or {}).get("title")
-            if not overlay_title:
-                overlay_title = preview_primary_title(
-                    comic_title, from_ep, to_ep, story_memory, download_dir,
-                    llm_title_candidates=llm_hooks,
-                    registry_titles=registry.titles_for_dedup(comic_title),
-                    language=language,
-                )["primary_title"]
-            top_concepts = preview_thumbnail_concepts(comic_title, from_ep, to_ep, story_memory, download_dir)
-            llm_overlay_options = await generate_llm_overlay_options(hook_sheet, overlay_title, top_concepts, llm_call)
-
-            metadata["youtube_metadata"] = generate_youtube_metadata(
-                comic_title,
-                from_ep,
-                to_ep,
-                chapters=chapters,
-                story_memory=story_memory,
+            from metadata_kit import generate_youtube_kit
+            metadata["youtube_metadata"] = await generate_youtube_kit(
                 download_dir=download_dir,
-                llm_title_candidates=llm_hooks,
-                registry_titles=registry.titles_for_dedup(comic_title),
-                language=language,
-                llm_chapter_options=llm_chapter_options,
-                registry_chapter_names=registry.chapter_names_for_dedup(comic_title),
-                premise_pitch=task.artifacts.get("premise_pitch"),
-                llm_overlay_options=llm_overlay_options,
-                # Navigation links only when the user supplies real URLs (never synthesized).
-                playlist_url=task.payload.get("playlist_url"),
-                previous_part_url=task.payload.get("previous_part_url"),
-                next_part_url=task.payload.get("next_part_url"),
+                comic_title=task.comic_title or "Comic",
+                from_ep=task.from_episode or 1,
+                to_ep=task.to_episode or 1,
+                chapters=task.artifacts.get("chapters"),
+                payload=task.payload,
+                artifacts=task.artifacts,
+                llm_call=self._text_llm_call(task),
+                log=context.log,
             )
-
-            title_engine_audit = metadata["youtube_metadata"]["prepublish_audit"]["claim_audit"].get("title_engine", {})
-            rejected = sum(1 for c in title_engine_audit.get("checks", []) if not c.get("passed"))
-            await context.log(
-                f"Title Engine: {title_engine_audit.get('status')} — {len(llm_hooks)} title từ LLM, "
-                f"loại {rejected} title không đạt kiểm tra.",
-                "info" if title_engine_audit.get("status") == "validated" else "warning",
-            )
-            # Only grounded titles enter the registry; no narration means nothing was verified.
-            if hook_sheet.has_story and title_engine_audit.get("status") == "validated":
-                shipped_chapters = [
-                    ch["theme"] for ch in metadata["youtube_metadata"].get("narrative_chapters", [])
-                    if ch.get("naming_source") != "fallback"
-                ]
-                registry.record_kit_title(
-                    metadata["youtube_metadata"]["title"], comic_title, from_ep, to_ep, chapters=shipped_chapters,
-                )
-                registry.save()
-
-            gate = metadata["youtube_metadata"]["prepublish_audit"].get("gate", {})
-            blocking = [c["id"] for c in gate.get("checks", []) if not c["passed"] and c["severity"] == "fail"]
-            review = [c["id"] for c in gate.get("checks", []) if not c["passed"] and c["severity"] == "warn"]
-            await context.log(
-                f"Pre-publish gate: {gate.get('status')} — chặn: {', '.join(blocking) or 'không'}; "
-                f"cần xem lại: {', '.join(review) or 'không'}.",
-                {"PASS": "success", "WARN": "warning"}.get(gate.get("status"), "error"),
-            )
+            metadata["premise_pitch"] = task.artifacts.get("premise_pitch")
         except Exception as e:
             logger.warning(f"Failed to generate YouTube metadata: {e}")
             await context.log(f"Không tạo được YouTube metadata: {e}", "error")
