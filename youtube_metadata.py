@@ -27,6 +27,8 @@ try:
 except ImportError:
     load_bible = None  # type: ignore
 
+from title_engine import TITLE_SUFFIX as ENGINE_TITLE_SUFFIX, TitleValidator, build_hook_sheet, select_titles
+
 try:
     from channel_profile import CHANNEL_PROFILE, get_channel_profile
 except ImportError:
@@ -138,26 +140,6 @@ def _cap_overlay_text(text: str, max_chars: int = 15) -> str:
         else:
             break
     return (result + "!") if result else text[:max_chars]
-
-
-def _enforce_title_pre_pipe(title: str, max_pre_pipe: int = 60) -> str:
-    """
-    Ensures the portion before ' | ' is <= max_pre_pipe chars.
-    YouTube mobile (~375px) cuts title display at ~55-60 chars; anything after
-    is invisible to the viewer before clicking.
-
-    Output Gate Rule: enforced at the final output layer inside pick_variant()
-    and generate_dynamic_titles(), not just at template design time.
-    """
-    if " | " not in title:
-        if len(title) <= max_pre_pipe:
-            return title
-        return title[:max_pre_pipe].rsplit(" ", 1)[0].rstrip("!,. ") + "!"
-    pre, _, suffix = title.partition(" | ")
-    if len(pre) <= max_pre_pipe:
-        return title
-    trimmed = pre[:max_pre_pipe].rsplit(" ", 1)[0].rstrip("!,. ")
-    return f"{trimmed}! | {suffix}"
 
 
 # =============================================================================
@@ -1939,7 +1921,7 @@ def build_narrative_story_chapters(
 
 TITLE_TARGET_MAX = 95
 TITLE_HARD_MAX = 100
-TITLE_SUFFIX = " | Manhwa Recap"
+TITLE_SUFFIX = ENGINE_TITLE_SUFFIX
 
 
 def format_recap_title(base_title: str, suffix: str = TITLE_SUFFIX) -> str:
@@ -2287,10 +2269,11 @@ def generate_ab_title_variants(
             filled = tmpl.format_map(safe_beats)
             if "{" in filled:
                 continue
-            candidate = _enforce_title_pre_pipe(format_recap_title(filled))
+            # No truncation here: TitleValidator rejects over-long hooks instead of cutting them mid-phrase.
+            candidate = format_recap_title(filled)
             if evidence_index is None or evidence_index.validate_candidate(candidate, archetype):
                 return candidate
-        return _enforce_title_pre_pipe(format_recap_title(fallback))
+        return format_recap_title(fallback)
 
     var_a = pick_variant(
         pool.get("conflict", []),
@@ -2461,7 +2444,7 @@ def generate_dynamic_titles(
             filled = template.format_map(safe_beats)
             if "{" in filled:
                 continue
-            formatted = _enforce_title_pre_pipe(format_recap_title(filled))
+            formatted = format_recap_title(filled)
             if evidence_index.validate_candidate(formatted, archetype) and formatted not in titles:
                 titles.append(formatted)
         except (KeyError, ValueError):
@@ -2477,7 +2460,7 @@ def generate_dynamic_titles(
     for fb in fallback_titles:
         if len(titles) >= 5:
             break
-        formatted = _enforce_title_pre_pipe(format_recap_title(fb))
+        formatted = format_recap_title(fb)
         if evidence_index.validate_candidate(formatted, archetype) and formatted not in titles:
             titles.append(formatted)
 
@@ -3949,6 +3932,9 @@ def generate_us_apocalypse_metadata(
     previous_part_url: Optional[str] = None,
     next_part_url: Optional[str] = None,
     alt_titles: Optional[List[str]] = None,
+    llm_title_candidates: Optional[List[str]] = None,
+    registry_titles: Optional[List[str]] = None,
+    language: str = "en",
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -3980,6 +3966,38 @@ def generate_us_apocalypse_metadata(
         comic_title, archetype, story_memory, download_dir, from_ep, to_ep
     )
     primary_title = title_options[0] if title_options else format_recap_title(f"{comic_title} [{ep_range}]")
+
+    # ── 1b. TITLE ENGINE: LLM drafts + templates through one deterministic gate ──
+    hook_sheet = build_hook_sheet(
+        comic_title, download_dir, from_ep, to_ep,
+        story_memory=story_memory,
+        bible=load_bible(download_dir) if load_bible is not None else None,
+        language=language,
+    )
+    title_validator = TitleValidator(
+        hook_sheet,
+        registry_titles=registry_titles or [],
+        alt_titles=alt_titles_list,
+        evidence_check=lambda t: evidence_index.validate_candidate(t, archetype),
+    )
+    title_selection = select_titles(
+        llm_hooks=llm_title_candidates or [],
+        template_hooks=list(title_options) + list(title_variants.values()),
+        validator=title_validator,
+    )
+    if title_selection.status == "validated":
+        title_options = title_selection.titles
+        title_variants = title_selection.variants
+        primary_title = title_options[0]
+        final_candidates = {f"option_{i + 1}": t for i, t in enumerate(title_options)}
+        final_candidates.update(title_variants)
+        claim_audit["title_validation"] = evidence_index.validate_all_candidates(final_candidates, archetype)
+    claim_audit["title_engine"] = {
+        "status": title_selection.status,
+        "llm_candidates": len(llm_title_candidates or []),
+        "registry_titles_checked": len(registry_titles or []),
+        "checks": [c.model_dump() for c in title_selection.checks],
+    }
 
     # ── 2. NARRATIVE CHAPTERS (Timestamps) ─────────────────────────────────
     chapter_warnings: List[str] = []

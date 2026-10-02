@@ -2802,6 +2802,21 @@ class Stage12_MetadataReports(BaseStage):
     @property
     def weight(self) -> float: return 0.03
 
+    @staticmethod
+    def _title_llm_call(task):
+        """Text-only Gemini call for title drafting, resolved the same way as Stage 5's 9Router engine."""
+        async def call(prompt: str):
+            from app import load_config
+            from gemini_api_engine import get_gemini_api_engine
+            cfg = load_config()
+            engine = get_gemini_api_engine(
+                base_url=(cfg.get("ninerouter_url") or "").strip() or "http://localhost:20128/v1",
+                api_key=task.payload.get("ninerouter_api_key") or None,
+            )
+            text, _model = await engine.generate_content(prompt=prompt, temperature=0.9, max_output_tokens=2048, timeout=90)
+            return text
+        return call
+
     async def execute(self, context: WorkflowContext) -> bool:
         task = context.task
         download_dir = task.artifacts.get("download_dir")
@@ -2821,6 +2836,8 @@ class Stage12_MetadataReports(BaseStage):
 
         try:
             from youtube_metadata import generate_youtube_metadata
+            from title_engine import DEFAULT_REGISTRY_PATH, TitleRegistry, build_hook_sheet, generate_llm_hooks
+            from series_bible import load_bible
             chapters = task.artifacts.get("chapters")
             story_memory = None
             story_mem_path = os.path.join(download_dir, "story_memory.json")
@@ -2830,14 +2847,42 @@ class Stage12_MetadataReports(BaseStage):
                         story_memory = json.load(smf)
                 except Exception:
                     pass
+
+            comic_title = task.comic_title or "Comic"
+            from_ep, to_ep = task.from_episode or 1, task.to_episode or 1
+            language = task.payload.get("language", "en")
+            registry = TitleRegistry.load(task.payload.get("title_registry_path") or DEFAULT_REGISTRY_PATH)
+            hook_sheet = build_hook_sheet(
+                comic_title, download_dir, from_ep, to_ep,
+                story_memory=story_memory, bible=load_bible(download_dir), language=language,
+            )
+            llm_hooks = await generate_llm_hooks(hook_sheet, self._title_llm_call(task))
+            if hook_sheet.has_story and not llm_hooks:
+                await context.log("Title Engine: LLM không trả về title, dùng template dự phòng (vẫn qua bộ kiểm tra).", "warning")
+
             metadata["youtube_metadata"] = generate_youtube_metadata(
-                task.comic_title or "Comic",
-                task.from_episode or 1,
-                task.to_episode or 1,
+                comic_title,
+                from_ep,
+                to_ep,
                 chapters=chapters,
                 story_memory=story_memory,
                 download_dir=download_dir,
+                llm_title_candidates=llm_hooks,
+                registry_titles=registry.titles_for_dedup(comic_title),
+                language=language,
             )
+
+            title_engine_audit = metadata["youtube_metadata"]["prepublish_audit"]["claim_audit"].get("title_engine", {})
+            rejected = sum(1 for c in title_engine_audit.get("checks", []) if not c.get("passed"))
+            await context.log(
+                f"Title Engine: {title_engine_audit.get('status')} — {len(llm_hooks)} title từ LLM, "
+                f"loại {rejected} title không đạt kiểm tra.",
+                "info" if title_engine_audit.get("status") == "validated" else "warning",
+            )
+            # Only grounded titles enter the registry; no narration means nothing was verified.
+            if hook_sheet.has_story and title_engine_audit.get("status") == "validated":
+                registry.record_kit_title(metadata["youtube_metadata"]["title"], comic_title, from_ep, to_ep)
+                registry.save()
         except Exception as e:
             logger.warning(f"Failed to generate YouTube metadata: {e}")
 

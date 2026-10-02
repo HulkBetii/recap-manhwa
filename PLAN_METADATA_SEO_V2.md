@@ -68,7 +68,12 @@ Tiêu chí kiểm chứng:
 - Test: truyện zombie mới (không phải 82-08) không bị gán "Tae".
 
 ### B. Title gắn nội dung thật & không trùng
-**Kiến trúc: LLM đề xuất → code kiểm duyệt.**
+**Trạng thái: ĐÃ CODE (2026-10-02)** — `title_engine.py`, `tests/test_title_engine.py` (17 test). Stage 12 gọi LLM (`_title_llm_call`, cùng cấu hình 9Router với Stage 5) → `generate_youtube_metadata(llm_title_candidates=..., registry_titles=...)` → `select_titles`. Bỏ `_enforce_title_pre_pipe` (nguồn gốc "One Lone!").
+Bổ sung so với thiết kế: luật `claim_not_in_story` — từ hứa hẹn thể loại (SSS, trainee, regress, academy, weakest…) phải xuất hiện nguyên văn ≥3 lần trong narration (tiền tố 5 ký tự quá dễ dãi trên narration 13h).
+Giới hạn:
+- Không có LLM → chỉ còn template; trên dữ liệu thật mọi template zombie đều >60 ký tự → `status = no_valid_candidates`, kit giữ title cũ chưa kiểm định (mục E phải gắn FAIL).
+- Narration không phải tiếng Anh (chạy `vi`) → bỏ qua kiểm tra bám từ vựng, chỉ còn kiểm tra số/format/trùng.
+- Registry: `channel_registry.json` (gitignored). Nhập video đã đăng: `python title_engine.py import-studio-csv "<thư mục export Content>"`.
 1. `HookSheet` (từ StoryFactGraph + tóm tắt tập + Bible): premise, lợi thế riêng của MC, con số cụ thể có trong narration, sub-niche (zombie/frozen/bunker/regression…).
 2. LLM sinh ~10 title theo công thức niche.
 3. Validator (deterministic, tái dùng `validate_text_surface`):
