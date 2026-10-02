@@ -52,3 +52,18 @@ def test_kit_pinned_comment_has_no_guessed_lines(tmp_path):
     assert first == second
     assert "Sanctuary" not in first and "Companion" not in first and " in Days" not in first
     assert "🌍 Premise:" in first
+
+
+def test_where_we_left_off_uses_the_last_episode_not_the_last_saved():
+    """Parallel Stage 5 chunks save StoryMemory episodes in completion order (here 3, 1, 2)."""
+    def ep(n, cliff):
+        return {"opening": f"Episode {n} opens on the ruined highway.", "summary": f"Summary of episode {n}.", "closing_cliffhanger": cliff}
+
+    memory = {"episodes": {
+        "3": ep(3, "The final gate cracks open and a colossal shadow steps through the breach."),
+        "1": ep(1, "The countdown hits zero as the first sirens wail across the city."),
+        "2": ep(2, "Behind the president, a demonic entity looms in the shadows of the hall."),
+    }}
+    pinned = generate_youtube_metadata("Veteran of the Apocalypse", 1, 3, story_memory=memory)["pinned_comment"]
+    assert "The final gate cracks open" in pinned
+    assert "demonic entity looms" not in pinned

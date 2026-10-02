@@ -1778,11 +1778,15 @@ def _extract_story_beats(
     if story_memory and isinstance(story_memory, dict):
         episodes_dict = story_memory.get("episodes", {})
         if isinstance(episodes_dict, dict):
-            for ep_key, ep_data in episodes_dict.items():
+            def _ep_order(item):
                 try:
-                    ep_num = int(ep_key)
+                    return int(item[0])
                 except (ValueError, TypeError):
-                    ep_num = 1
+                    return 1
+            # Stage 5 narrates episodes in parallel chunks, so StoryMemory stores them in completion
+            # order: "first opening" / "last cliffhanger" must follow episode numbers.
+            for ep_key, ep_data in sorted(episodes_dict.items(), key=_ep_order):
+                ep_num = _ep_order((ep_key, ep_data))
                 if from_ep <= ep_num <= to_ep and isinstance(ep_data, dict):
                     op = str(ep_data.get("opening", ""))
                     sm = str(ep_data.get("summary", ""))
