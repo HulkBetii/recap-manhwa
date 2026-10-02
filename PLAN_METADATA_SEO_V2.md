@@ -93,6 +93,10 @@ Tiêu chí kiểm chứng:
 - Test: title trùng registry bị loại.
 
 ### E. Báo cáo pre-publish
+**Trạng thái: ĐÃ CODE (2026-10-02)** — `prepublish_gate.py`, `tests/test_prepublish_gate.py` (12 test), `series_bible.audit_names`. Banner PASS/WARN/FAIL ở đầu kit; `prepublish_audit.passed = gate_status != "FAIL"`; Stage 12 log trạng thái gate và báo lỗi metadata lên UI.
+Checks: FAIL — `title_validated`, `title_not_duplicate`, `names_consistent` (tên giữ chỗ / lệch MC), `chapters_valid` (<3, không bắt đầu 00:00, trùng, cắt cụt, em dash), `youtube_limits`. WARN — `names_consistent` khi chưa có Bible, `title_promise_in_opening` (sẽ nâng lên FAIL sau mục D), `description_placeholders` (link "Coming Soon", link playlist tự bịa `...-full-recap`).
+Chạy thử trên dữ liệu thật (Veteran of the Apocalypse 1–33): FAIL vì title chưa kiểm định + chapter cắt cụt "The News Anchor Sounds Calm But Those".
+
 - Bỏ `calculate_prime_time_publishing_schedule` khỏi kit (tài liệu SEO: YouTube chưa thấy bằng chứng giờ đăng ảnh hưởng dài hạn).
 - Thêm check: title–nội dung, trùng registry, nhất quán tên (Bible), chất lượng chapter, intro có nêu lời hứa title.
 - Lỗi nghiêm trọng → `FAIL` rõ ràng trong `youtube_upload_kit.txt` thay vì `passed: True`.

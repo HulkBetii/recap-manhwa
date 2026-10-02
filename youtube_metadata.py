@@ -23,11 +23,19 @@ except ImportError:
     can_use_fact_for_surface = None # type: ignore
 
 try:
-    from series_bible import load_bible
+    from series_bible import audit_names, load_bible
 except ImportError:
+    audit_names = None  # type: ignore
     load_bible = None  # type: ignore
 
-from title_engine import TITLE_SUFFIX as ENGINE_TITLE_SUFFIX, TitleValidator, build_hook_sheet, select_titles
+from prepublish_gate import render_gate_banner, run_prepublish_gate
+from title_engine import (
+    TITLE_SUFFIX as ENGINE_TITLE_SUFFIX,
+    TitleValidator,
+    build_hook_sheet,
+    load_narration_by_episode,
+    select_titles,
+)
 
 try:
     from channel_profile import CHANNEL_PROFILE, get_channel_profile
@@ -3614,7 +3622,7 @@ def generate_prepublish_checklist(
 
 
 # =============================================================================
-# ALTERNATIVE COMIC TITLES & PRIME-TIME PUBLISHING SCHEDULER
+# ALTERNATIVE COMIC TITLES
 # =============================================================================
 
 KNOWN_ALTERNATIVE_TITLES: Dict[str, List[str]] = {
@@ -3708,48 +3716,6 @@ def resolve_alternative_titles(
             break
 
     return results[:6]
-
-
-def calculate_prime_time_publishing_schedule(
-    market: str = "us_apocalypse",
-) -> Dict[str, Any]:
-    """
-    Calculates the 2026 algorithmic prime-time publishing windows for target audience
-    to maximize Initial 2-Hour Velocity (crucial for YouTube Browse feature ignition).
-    """
-    return {
-        "target_market": market,
-        "primary_timezone": "EST (US Eastern Time) / UTC-5",
-        "best_days_to_publish": ["Friday", "Saturday", "Sunday"],
-        "schedule_windows": [
-            {
-                "days": "Weekdays (Mon – Thu)",
-                "us_est_window": "2:00 PM – 4:00 PM EST",
-                "utc_window": "19:00 – 21:00 UTC",
-                "vietnam_ict_window": "02:00 AM – 04:00 AM (Next Day)",
-                "rationale": "Allows YouTube algorithm to process HD & captions before US school/work dismisses.",
-            },
-            {
-                "days": "Friday (Weekend Ramp-up)",
-                "us_est_window": "12:00 PM – 3:00 PM EST",
-                "utc_window": "17:00 – 20:00 UTC",
-                "vietnam_ict_window": "00:00 AM – 03:00 AM (Saturday)",
-                "rationale": "Captures viewers starting weekend binge sessions early.",
-            },
-            {
-                "days": "Saturday & Sunday (Peak Binge-Watching)",
-                "us_est_window": "9:00 AM – 12:00 PM EST",
-                "utc_window": "14:00 – 17:00 UTC",
-                "vietnam_ict_window": "21:00 PM – 00:00 AM (Same Day)",
-                "rationale": "Highest global viewership window for long-form manhwa recaps.",
-            },
-        ],
-        "workflow_strategy": (
-            "1. Upload video 2–3 hours ahead of target window as UNLISTED.\n"
-            "2. Ensure 1080p/4K processing, Closed Captions (.srt), and Thumbnail are ready.\n"
-            "3. Switch video to PUBLIC at the exact start of the prime-time window."
-        ),
-    }
 
 
 def find_character_image_references(
@@ -3968,10 +3934,11 @@ def generate_us_apocalypse_metadata(
     primary_title = title_options[0] if title_options else format_recap_title(f"{comic_title} [{ep_range}]")
 
     # ── 1b. TITLE ENGINE: LLM drafts + templates through one deterministic gate ──
+    series_bible = load_bible(download_dir) if load_bible is not None else None
     hook_sheet = build_hook_sheet(
         comic_title, download_dir, from_ep, to_ep,
         story_memory=story_memory,
-        bible=load_bible(download_dir) if load_bible is not None else None,
+        bible=series_bible,
         language=language,
     )
     title_validator = TitleValidator(
@@ -3992,6 +3959,10 @@ def generate_us_apocalypse_metadata(
         final_candidates = {f"option_{i + 1}": t for i, t in enumerate(title_options)}
         final_candidates.update(title_variants)
         claim_audit["title_validation"] = evidence_index.validate_all_candidates(final_candidates, archetype)
+        primary_title_reasons: List[str] = []
+    else:
+        # Explain why the unvalidated fallback title is not fit to publish.
+        primary_title_reasons = title_validator.check(primary_title, "template").reasons
     claim_audit["title_engine"] = {
         "status": title_selection.status,
         "llm_candidates": len(llm_title_candidates or []),
@@ -4273,7 +4244,6 @@ def generate_us_apocalypse_metadata(
         primary_title=primary_title,
         resolved_playlist=resolved_playlist,
     )
-    publishing_schedule = calculate_prime_time_publishing_schedule(market="us_apocalypse")
 
     # ── 8. PACKAGING CONSISTENCY AUDIT ─────────────────────────────────────
     packaging_audit = validate_packaging_consistency(
@@ -4311,15 +4281,34 @@ def generate_us_apocalypse_metadata(
     else:
         chapter_00_ok = False  # missing Stage 11 timeline
 
-    passed_all = (
-        len(rejected_items) == 0 and
-        len(primary_title) <= 100 and
-        desc_bytes <= 5000 and
-        tag_chars <= 500 and
-        chapter_00_ok and
-        packaging_audit["checks"].get("chapters_grounded", False) and
-        packaging_audit["is_consistent"]
+    # ── 9b. PRE-PUBLISH GATE: single PASS/WARN/FAIL verdict shown at the top of the kit ──
+    narration_by_episode = load_narration_by_episode(download_dir, from_ep, to_ep)
+    name_audit = (
+        audit_names(series_bible, narration_by_episode)
+        if audit_names is not None and narration_by_episode else None
     )
+    first_episode = min(narration_by_episode) if narration_by_episode else None
+    gate_report = run_prepublish_gate(
+        primary_title=primary_title,
+        title_engine_audit=claim_audit.get("title_engine", {}),
+        primary_title_reasons=primary_title_reasons,
+        name_audit=name_audit,
+        narrative_chapters=narrative_chapters,
+        description=desc_text,
+        chapters_explicitly_disabled=chapters_explicitly_disabled,
+        legacy_flags={
+            "title_claims_supported": len(rejected_items) == 0,
+            "title_max_100_chars": len(primary_title) <= 100,
+            "description_max_5000_bytes": desc_bytes <= 5000,
+            "tags_max_500_chars": tag_chars <= 500,
+            "chapters_grounded": bool(packaging_audit["checks"].get("chapters_grounded", False)) or chapters_explicitly_disabled,
+            "packaging_consistent": bool(packaging_audit["is_consistent"]),
+            "hashtags_max_5": len(final_hashtags) <= 5,
+            "originality_statement": "original scripted narration" in desc_text.lower(),
+        },
+        opening_segments=narration_by_episode.get(first_episode, []) if first_episode is not None else [],
+    )
+    passed_all = gate_report.status != "FAIL"
 
     # V5.2: fact_usage_audit summarizes trust boundary metrics
     prov_summary = _vfg.provenance_summary() if _vfg is not None else {}
@@ -4346,6 +4335,9 @@ def generate_us_apocalypse_metadata(
 
     prepublish_audit = {
         "passed": passed_all,
+        "gate_status": gate_report.status,
+        "gate": gate_report.model_dump(),
+        "name_audit": name_audit.model_dump() if name_audit is not None else None,
         "unsupported_claims": unsupported_claims,
         "archetype": archetype,
         "archetype_mismatch": [],
@@ -4385,7 +4377,7 @@ def generate_us_apocalypse_metadata(
         "=" * 80,
         f"⚡ JAEHWAN MANHWA — YOUTUBE UPLOAD KIT: {comic_title}",
         f"Episodes: {from_ep} - {to_ep} | Market: us_apocalypse | Archetype: {archetype.upper()} | Persona: Sarcastic Bro",
-        "=" * 80,
+        *render_gate_banner(gate_report),
         "",
         "[1. NATIVE A/B TEST TITLE HYPOTHESES (Paste 3 options into YouTube A/B Tester)]",
         "★ Option A (Juxtaposition / High CTR Hook):",
@@ -4434,7 +4426,7 @@ def generate_us_apocalypse_metadata(
     kit_lines.extend([
         "",
         "=" * 80,
-        "[6. FAST ACTION GUIDE (SEO FILENAMES & PRIME TIME)]",
+        "[6. FAST ACTION GUIDE (SEO FILENAMES, CARDS & END SCREEN)]",
         "=" * 80,
         "• SEO Filenames (Rename files before upload):",
         f"  - Video File    : {seo_filenames['video_filename']}",
@@ -4445,12 +4437,6 @@ def generate_us_apocalypse_metadata(
         f"  - Card 1 (Series Playlist Link) : Place at timestamp [{card_anchors['card_1_playlist']['recommended_timestamp']}] -> \"{card_anchors['card_1_playlist']['teaser_text']}\"",
         f"  - Card 2 (Next/Previous Arc)    : Place at timestamp [{card_anchors['card_2_next_arc']['recommended_timestamp']}] -> \"{card_anchors['card_2_next_arc']['teaser_text']}\"",
         f"  - End Screen Placement          : {card_anchors['end_screen']['timing']} (Elements: {', '.join(card_anchors['end_screen']['recommended_elements'])})",
-        "",
-        "• Global Prime-Time Publishing Schedule (US/Global High-Velocity):",
-        f"  - Target Market        : {publishing_schedule['target_market'].upper()} ({publishing_schedule['primary_timezone']})",
-        f"  - Best Days to Publish : {', '.join(publishing_schedule['best_days_to_publish'])}",
-        "  - Weekend Peak (Fri-Sun) : 10:00 AM – 01:00 PM US EST (22:00 – 01:00 Vietnam ICT)",
-        "  - Weekday Slot (Mon-Thu) : 02:00 PM – 05:00 PM US EST (02:00 – 05:00 Vietnam ICT)",
         "=" * 80,
     ])
 
@@ -4486,7 +4472,6 @@ def generate_us_apocalypse_metadata(
         "seo_filenames": seo_filenames,
         "prepublish_checklist": prepublish_checklist,
         "alternative_titles": alt_titles_list,
-        "publishing_schedule": publishing_schedule,
         "series_navigation": {
             "playlist_url": resolved_playlist,
             "previous_arc": f"Ep {prev_from}–{prev_to}" if from_ep > 1 else None,

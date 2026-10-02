@@ -2883,8 +2883,18 @@ class Stage12_MetadataReports(BaseStage):
             if hook_sheet.has_story and title_engine_audit.get("status") == "validated":
                 registry.record_kit_title(metadata["youtube_metadata"]["title"], comic_title, from_ep, to_ep)
                 registry.save()
+
+            gate = metadata["youtube_metadata"]["prepublish_audit"].get("gate", {})
+            blocking = [c["id"] for c in gate.get("checks", []) if not c["passed"] and c["severity"] == "fail"]
+            review = [c["id"] for c in gate.get("checks", []) if not c["passed"] and c["severity"] == "warn"]
+            await context.log(
+                f"Pre-publish gate: {gate.get('status')} — chặn: {', '.join(blocking) or 'không'}; "
+                f"cần xem lại: {', '.join(review) or 'không'}.",
+                {"PASS": "success", "WARN": "warning"}.get(gate.get("status"), "error"),
+            )
         except Exception as e:
             logger.warning(f"Failed to generate YouTube metadata: {e}")
+            await context.log(f"Không tạo được YouTube metadata: {e}", "error")
 
         yt_meta = metadata.get("youtube_metadata")
         compliance_audit = None
@@ -2916,7 +2926,7 @@ class Stage12_MetadataReports(BaseStage):
                 kit_lines = [
                     "=" * 80,
                     f"YOUTUBE UPLOAD KIT: {task.comic_title or 'Comic'}",
-                    f"Episodes: {task.from_episode} - {task.to_episode} | Market: {market_id}",
+                    f"Episodes: {task.from_episode} - {task.to_episode} | Market: us_apocalypse",
                     "=" * 80,
                     "",
                     "[1. TITLE CANDIDATES & A/B TEST OPTIONS]",

@@ -165,7 +165,6 @@ for folder_name in os.listdir(downloads_root):
         "community_posts": yt_meta.get("community_posts", {}),
         "survival_dashboard": yt_meta.get("survival_dashboard", {}),
         "card_anchors_timestamps": yt_meta.get("card_anchors", {}),
-        "publishing_schedule": yt_meta.get("publishing_schedule", {}),
         "seo_filenames": yt_meta.get("seo_filenames", {}),
         "thumbnail_concepts": yt_meta.get("thumbnail_concepts", []),
         "compliance_flags": yt_meta.get("compliance_flags", {}),

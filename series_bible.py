@@ -506,6 +506,23 @@ def _count_mentions(texts: List[str], names: Iterable[str]) -> int:
     return total
 
 
+def _scan_names(bible: SeriesBible, texts: List[str]) -> Tuple[int, Counter]:
+    """Returns (protagonist mentions, counts of proper names unknown to the bible)."""
+    mc_mentions = 0
+    if bible.protagonist:
+        mc_names = [bible.protagonist.name, *bible.protagonist.aliases]
+        mc_names += [p for p in bible.protagonist.name.split() if len(p) > 2]
+        mc_mentions = _count_mentions(texts, set(mc_names))
+
+    known = bible.known_names()
+    blocked = {name_key(n) for n in bible.placeholder_blocklist}
+    unknown_counts = Counter({
+        name: n for name, n in extract_name_candidates(texts).items()
+        if name_key(name) not in known and name_key(name) not in blocked
+    })
+    return mc_mentions, unknown_counts
+
+
 def observe_episode(
     bible: SeriesBible,
     episode: int,
@@ -519,17 +536,7 @@ def observe_episode(
     texts = [s.get("speech", "") for s in segments if isinstance(s, dict)]
     report = EpisodeNameReport(episode=episode, placeholders_replaced=placeholders_replaced)
 
-    if bible.protagonist:
-        mc_names = [bible.protagonist.name, *bible.protagonist.aliases]
-        mc_names += [p for p in bible.protagonist.name.split() if len(p) > 2]
-        report.protagonist_mentions = _count_mentions(texts, set(mc_names))
-
-    known = bible.known_names()
-    blocked = {name_key(n) for n in bible.placeholder_blocklist}
-    unknown_counts = Counter({
-        name: n for name, n in extract_name_candidates(texts).items()
-        if name_key(name) not in known and name_key(name) not in blocked
-    })
+    report.protagonist_mentions, unknown_counts = _scan_names(bible, texts)
     if unknown_counts:
         top_name, top_n = unknown_counts.most_common(1)[0]
         report.top_unknown_name, report.top_unknown_mentions = top_name, top_n
@@ -546,3 +553,35 @@ def observe_episode(
     for name in report.promoted_names:
         bible.observed_names.pop(name, None)
     return report
+
+
+class NameAudit(BaseModel):
+    """Read-only name consistency verdict over the final narration (used by the pre-publish gate)."""
+    protagonist: str = ""
+    episodes_checked: int = 0
+    placeholder_hits: Dict[str, int] = Field(default_factory=dict)
+    drift_episodes: List[int] = Field(default_factory=list)
+
+
+def audit_names(bible: Optional[SeriesBible], episodes: Dict[int, List[str]]) -> NameAudit:
+    """Counts leaked placeholder names and protagonist-drift episodes without mutating the bible."""
+    audit = NameAudit(protagonist=bible.protagonist_name if bible else "")
+    placeholders = list(bible.placeholder_blocklist) if bible else list(DEFAULT_PLACEHOLDER_NAMES)
+    placeholders = [p for p in placeholders if p.casefold() != audit.protagonist.casefold()]
+
+    for ep, texts in sorted(episodes.items()):
+        audit.episodes_checked += 1
+        for p in placeholders:
+            hits = _count_mentions(texts, [p])
+            if hits:
+                audit.placeholder_hits[p] = audit.placeholder_hits.get(p, 0) + hits
+        bracket_hits = sum(len(BRACKET_PLACEHOLDER_RE.findall(t)) for t in texts)
+        if bracket_hits:
+            audit.placeholder_hits["[MC name]"] = audit.placeholder_hits.get("[MC name]", 0) + bracket_hits
+
+        if bible is not None and bible.protagonist:
+            mc_mentions, unknown_counts = _scan_names(bible, texts)
+            top_n = unknown_counts.most_common(1)[0][1] if unknown_counts else 0
+            if mc_mentions == 0 and top_n >= DRIFT_MIN_RIVAL_MENTIONS:
+                audit.drift_episodes.append(ep)
+    return audit

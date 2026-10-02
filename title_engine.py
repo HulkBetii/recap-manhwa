@@ -130,9 +130,15 @@ class HookSheet(BaseModel):
 
 def load_narration(download_dir: Optional[str], from_ep: int, to_ep: int) -> List[str]:
     """Returns every narration segment (`speech`) for the episode range, in order."""
-    segments: List[str] = []
+    by_episode = load_narration_by_episode(download_dir, from_ep, to_ep)
+    return [seg for ep in sorted(by_episode) for seg in by_episode[ep]]
+
+
+def load_narration_by_episode(download_dir: Optional[str], from_ep: int, to_ep: int) -> Dict[int, List[str]]:
+    """Narration segments keyed by episode; episodes without a readable recap.json are omitted."""
+    result: Dict[int, List[str]] = {}
     if not download_dir or not os.path.isdir(download_dir):
-        return segments
+        return result
     for ep in range(from_ep, to_ep + 1):
         path = os.path.join(download_dir, f"episode_{ep}", "recap.json")
         if not os.path.isfile(path):
@@ -144,8 +150,8 @@ def load_narration(download_dir: Optional[str], from_ep: int, to_ep: int) -> Lis
             logger.warning("Skipping unreadable recap %s: %s", path, err)
             continue
         if isinstance(data, list):
-            segments.extend(str(s.get("speech", "")) for s in data if isinstance(s, dict) and s.get("speech"))
-    return segments
+            result[ep] = [str(s.get("speech", "")) for s in data if isinstance(s, dict) and s.get("speech")]
+    return result
 
 
 def _numeric_facts(corpus: Sequence[str]) -> List[NumericFact]:
