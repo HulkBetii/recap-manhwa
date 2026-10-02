@@ -1379,9 +1379,12 @@ class Stage5_GeminiAutomation(BaseStage):
                     "info", episode=ep,
                 )
             else:
+                # Warn only when a rewrite was rejected; "already flows" / skipped are normal outcomes.
+                rejected = bool(result.attempts) and not result.attempts[-1].passed
+                llm_failed = any(r.startswith("llm_error") for r in result.reasons)
                 await context.log(
                     f"Tập {ep}: Nối mạch — giữ nguyên mở đầu ({'; '.join(result.reasons) or result.status}).",
-                    "info" if result.status == "skipped" else "warning", episode=ep,
+                    "warning" if rejected or llm_failed else "info", episode=ep,
                 )
 
         async def finalize_episode(ep, fresh):
