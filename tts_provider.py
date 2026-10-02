@@ -692,20 +692,38 @@ async def generate_tts(
             logger.info(f"OmniVoice: Generating TTS with native language='{target_lang}'")
 
         # 3. Resolve reference audio from preset or default
+        if not ref_audio_path or ref_audio_path in ("<path>", "none", "null") or not os.path.exists(ref_audio_path):
+            ref_audio_path = None
+
         if not ref_audio_path:
-            if active_preset and active_preset.get("ref_audio") and os.path.exists(active_preset["ref_audio"]):
-                ref_audio_path = active_preset["ref_audio"]
-                logger.info(f"OmniVoice: Using preset '{clean_vid}' reference audio: {ref_audio_path}")
-            elif target_lang == "English":
-                andrew_ref = getattr(config, "ANDREW_DEFAULT_REF_AUDIO", None)
-                if andrew_ref and os.path.exists(andrew_ref):
-                    ref_audio_path = andrew_ref
-                    logger.info(f"OmniVoice: Using default English (US) reference audio: {ref_audio_path}")
+            if active_preset and active_preset.get("ref_audio"):
+                candidate = active_preset["ref_audio"]
+                if not os.path.isabs(candidate):
+                    candidate = os.path.join(getattr(config, "STATIC_DIR", os.getcwd()), candidate.lstrip("/\\"))
+                if os.path.exists(candidate):
+                    ref_audio_path = candidate
+                    logger.info(f"OmniVoice: Using preset '{clean_vid}' reference audio: {ref_audio_path}")
+
+            if not ref_audio_path:
+                if target_lang == "English" or clean_vid == "andrew" or v_id in ("clone_andrew", "andrew"):
+                    andrew_ref = getattr(config, "ANDREW_DEFAULT_REF_AUDIO", None)
+                    if not andrew_ref or not os.path.exists(andrew_ref):
+                        andrew_ref = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "voices", "andrew_smooth_ref.wav")
+                    if andrew_ref and os.path.exists(andrew_ref):
+                        ref_audio_path = andrew_ref
+                        logger.info(f"OmniVoice: Using default English (US) reference audio: {ref_audio_path}")
+                elif target_lang == "Vietnamese" or clean_vid == "jessa" or v_id in ("clone_jessa", "jessa"):
+                    vi_ref = getattr(config, "DEFAULT_VI_REF_AUDIO", getattr(config, "DEFAULT_REF_AUDIO_PATH", None))
+                    if not vi_ref or not os.path.exists(vi_ref):
+                        vi_ref = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "jessa - easygoing and effortless.mp3")
+                    if vi_ref and os.path.exists(vi_ref):
+                        ref_audio_path = vi_ref
+                        logger.info(f"OmniVoice: Using default Vietnamese reference audio: {ref_audio_path}")
 
         # Fallback to default reference audio
         default_ref = getattr(config, "DEFAULT_REF_AUDIO_PATH", None)
         if not default_ref or not os.path.exists(default_ref):
-            default_ref = os.path.join(os.getcwd(), "static", "jessa - easygoing and effortless.mp3")
+            default_ref = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "jessa - easygoing and effortless.mp3")
 
         if (not voice_id or voice_id in ("auto", "clone", "omnivoice", "default")) and not ref_audio_path:
             if default_ref and os.path.exists(default_ref):
@@ -731,12 +749,24 @@ async def generate_tts(
             except Exception as e:
                 logger.debug(f"OmniVoice: Could not check ref audio duration: {e}")
 
+        is_clone_intent = (
+            bool(active_preset)
+            or v_id.lower().startswith("clone")
+            or v_id.lower().startswith("voice_")
+            or v_id.lower() in ("andrew", "jessa")
+        )
+
         if ref_audio_path and os.path.exists(ref_audio_path):
             logger.info(f"OmniVoice: Generating TTS with Voice Cloning from reference audio: {ref_audio_path}")
             ref_text = await asyncio.to_thread(get_ref_audio_text, ref_audio_path)
             kwargs["ref_audio"] = ref_audio_path
             kwargs["ref_text"] = ref_text
-        elif voice_id and voice_id not in ("auto", "clone", "omnivoice", "default") and voice_id.strip() != "":
+        elif is_clone_intent and default_ref and os.path.exists(default_ref):
+            logger.info(f"OmniVoice: Fallback to default reference audio for cloning: {default_ref}")
+            ref_text = await asyncio.to_thread(get_ref_audio_text, default_ref)
+            kwargs["ref_audio"] = default_ref
+            kwargs["ref_text"] = ref_text
+        elif not is_clone_intent and voice_id and voice_id not in ("auto", "clone", "omnivoice", "default") and voice_id.strip() != "":
             logger.info(f"OmniVoice: Generating TTS with Voice Design instruct: {voice_id}")
             kwargs["instruct"] = voice_id
         elif default_ref and os.path.exists(default_ref):

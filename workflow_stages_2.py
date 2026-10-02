@@ -164,9 +164,18 @@ class Stage8_LocalTTS(BaseStage):
             voice_id = normalize_tts_voice_mode(raw_voice_id or default_voice, default=default_voice)
 
         ref_audio_path = task.payload.get("ref_audio_path")
-        if not ref_audio_path and voice_id in ("auto", "clone", "omnivoice", "default"):
+        if not ref_audio_path or ref_audio_path in ("<path>", "none", "null") or not os.path.exists(ref_audio_path):
             import config
-            if language in ("vi", "vietnamese"):
+            clean_vid = (voice_id or "").lower().replace("clone_", "").replace("voice_", "").strip()
+            presets = getattr(config, "OMNIVOICE_PRESETS", {})
+            if clean_vid in presets and presets[clean_vid].get("ref_audio") and os.path.exists(presets[clean_vid]["ref_audio"]):
+                ref_audio_path = presets[clean_vid]["ref_audio"]
+            elif language in ("en", "english") or voice_id in ("clone_andrew", "andrew"):
+                andrew_ref = getattr(config, "ANDREW_DEFAULT_REF_AUDIO", None)
+                if not andrew_ref or not os.path.exists(andrew_ref):
+                    andrew_ref = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "voices", "andrew_smooth_ref.wav")
+                ref_audio_path = andrew_ref if andrew_ref and os.path.exists(andrew_ref) else None
+            elif language in ("vi", "vietnamese"):
                 ref_audio_path = getattr(config, "DEFAULT_VI_REF_AUDIO", getattr(config, "DEFAULT_REF_AUDIO_PATH", None))
             else:
                 ref_audio_path = getattr(config, "DEFAULT_REF_AUDIO_PATH", None)
