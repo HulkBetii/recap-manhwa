@@ -3017,6 +3017,7 @@ class Stage12_MetadataReports(BaseStage):
                 log=context.log,
             )
             metadata["premise_pitch"] = task.artifacts.get("premise_pitch")
+            metadata["llm_title_hooks"] = task.artifacts.get("llm_title_hooks")
         except Exception as e:
             logger.warning(f"Failed to generate YouTube metadata: {e}")
             await context.log(f"Không tạo được YouTube metadata: {e}", "error")

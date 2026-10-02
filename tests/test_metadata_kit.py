@@ -61,6 +61,10 @@ def test_regenerate_writes_kit_and_keeps_recorded_pitch(tmp_path):
     assert (root / "output" / "youtube_upload_kit.txt").read_text(encoding="utf-8")
     saved = json.loads((root / "output" / "metadata.json").read_text(encoding="utf-8"))
     assert saved["premise_pitch"] == PITCH
+    # Without recorded drafts the kit keeps the title the rendered pitch promises.
+    assert saved["llm_title_hooks"] == [HOOK]
+    assert saved["youtube_metadata"]["title"] == PITCH["title"]
+    assert saved["youtube_metadata"]["prepublish_audit"]["premise_pitch_in_video"] is True
     assert saved["youtube_metadata"]["prepublish_audit"]["gate_status"] in {"PASS", "WARN", "FAIL"}
     assert "VALIDATED_100_PERCENT_GROUNDED" not in json.dumps(saved)
 

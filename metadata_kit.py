@@ -268,7 +268,15 @@ async def regenerate_kit(
         with open(metadata_path, "r", encoding="utf-8") as f:
             previous = json.load(f)
     # The pitch in the rendered video is whatever Stage 11 recorded; never invented here.
-    artifacts: Dict[str, Any] = {"premise_pitch": previous.get("premise_pitch")}
+    pitch = previous.get("premise_pitch")
+    artifacts: Dict[str, Any] = {"premise_pitch": pitch}
+    # Reuse the recorded drafts so the kit keeps the title the rendered pitch promises. Older folders
+    # have no drafts: the pitch's own title is then the only candidate (it is still re-validated).
+    if previous.get("llm_title_hooks"):
+        artifacts["llm_title_hooks"] = previous["llm_title_hooks"]
+    elif pitch and pitch.get("prepended") and pitch.get("title"):
+        from title_engine import strip_suffix
+        artifacts["llm_title_hooks"] = [strip_suffix(pitch["title"])]
     payload: Dict[str, Any] = {"language": resolve_language(download_dir, story_memory)}
     if registry_path:
         payload["title_registry_path"] = registry_path
@@ -295,6 +303,7 @@ async def regenerate_kit(
         "to_episode": to_ep,
         "generation_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "premise_pitch": artifacts.get("premise_pitch"),
+        "llm_title_hooks": artifacts.get("llm_title_hooks"),
         "youtube_metadata": yt_meta,
         "compliance_audit": yt_meta.get("compliance_flags"),
     }
