@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, Field
 
+from chapter_engine import DANGLING_LAST_WORDS
 from title_engine import NUMBER_RE, STOPWORDS, UNGROUNDED_OK_WORDS, WORD_RE, strip_suffix
 
 Severity = Literal["fail", "warn"]
@@ -23,10 +24,6 @@ MIN_CHAPTERS = 3
 OPENING_SEGMENTS = 15            # ~first 1-2 minutes of narration
 MIN_PROMISE_COVERAGE = 0.5       # share of the title's key words echoed by the opening
 TIMESTAMP_LINE_RE = re.compile(r"^\d{1,2}:\d{2}(?::\d{2})?\s")
-DANGLING_LAST_WORDS = STOPWORDS | {
-    "with", "from", "into", "onto", "over", "under", "against", "after", "before", "until",
-    "than", "his", "her", "their", "its", "our", "your", "my", "this", "that", "these", "those",
-}
 # Placeholders the description generator emits when a link is unknown, including the
 # synthesized playlist URL (".../playlist?list=<slug>-full-recap") which is not a real playlist.
 DESCRIPTION_PLACEHOLDER_RE = re.compile(
@@ -121,6 +118,15 @@ def check_chapters(
     return GateCheck(id="chapters_valid", severity="fail", passed=not problems, detail="; ".join(problems))
 
 
+def check_chapter_naming(narrative_chapters: Sequence[Dict[str, Any]]) -> GateCheck:
+    """Generic "Part N" names are valid for YouTube but tell viewers nothing about the arc."""
+    generic = [str(ch.get("theme")) for ch in narrative_chapters if ch.get("naming_source") == "fallback"]
+    return GateCheck(
+        id="chapters_descriptive", severity="warn", passed=not generic,
+        detail=f"{len(generic)} chapter(s) fell back to generic names: {', '.join(generic[:5])}" if generic else "",
+    )
+
+
 def check_legacy_compliance(flags: Dict[str, bool]) -> GateCheck:
     """Hard YouTube limits and channel policy already computed by the metadata generator."""
     failed = [name for name, ok in flags.items() if not ok]
@@ -178,6 +184,8 @@ def run_prepublish_gate(
     checks.extend(check_title(title_engine_audit, primary_title_reasons))
     checks.append(check_names(name_audit))
     checks.append(check_chapters(narrative_chapters, description, chapters_explicitly_disabled))
+    if not chapters_explicitly_disabled:
+        checks.append(check_chapter_naming(narrative_chapters))
     checks.append(check_legacy_compliance(legacy_flags))
     checks.append(check_title_promise_in_opening(primary_title, opening_segments))
     checks.append(check_description_placeholders(description))

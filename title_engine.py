@@ -526,6 +526,7 @@ class RegistryEntry(BaseModel):
     video_id: str = ""
     source: Literal["studio_csv", "upload_kit"] = "upload_kit"
     recorded_at: str = ""
+    chapters: List[str] = Field(default_factory=list)  # chapter names shipped with this kit
 
 
 class TitleRegistry(BaseModel):
@@ -561,7 +562,14 @@ class TitleRegistry(BaseModel):
             if not (e.source == "upload_kit" and e.comic_title.strip().casefold() == own)
         ]
 
-    def record_kit_title(self, title: str, comic_title: str, from_ep: int, to_ep: int) -> None:
+    def chapter_names_for_dedup(self, comic_title: str) -> List[str]:
+        """Chapter names shipped with other comics' kits (two stories once shared identical chapters)."""
+        own = comic_title.strip().casefold()
+        return [c for e in self.entries if e.comic_title.strip().casefold() != own for c in e.chapters]
+
+    def record_kit_title(
+        self, title: str, comic_title: str, from_ep: int, to_ep: int, chapters: Sequence[str] = (),
+    ) -> None:
         """Stores the chosen kit title, replacing earlier drafts for the same comic and range."""
         self.entries = [
             e for e in self.entries
@@ -571,6 +579,7 @@ class TitleRegistry(BaseModel):
         self.entries.append(RegistryEntry(
             title=title, comic_title=comic_title, from_ep=from_ep, to_ep=to_ep,
             source="upload_kit", recorded_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+            chapters=list(chapters),
         ))
 
     def import_studio_csv(self, csv_path: str) -> int:

@@ -23,11 +23,13 @@ except ImportError:
     can_use_fact_for_surface = None # type: ignore
 
 try:
-    from series_bible import audit_names, load_bible
+    from series_bible import DEFAULT_PLACEHOLDER_NAMES, audit_names, load_bible
 except ImportError:
+    DEFAULT_PLACEHOLDER_NAMES = ["Paran"]  # type: ignore
     audit_names = None  # type: ignore
     load_bible = None  # type: ignore
 
+from chapter_engine import ChapterNameValidator, apply_chapter_names
 from prepublish_gate import render_gate_banner, run_prepublish_gate
 from title_engine import (
     TITLE_SUFFIX as ENGINE_TITLE_SUFFIX,
@@ -1545,186 +1547,6 @@ def validate_chapter_theme(theme: str, archetype: str) -> bool:
     return True
 
 
-THEME_COMPONENT_REGISTRY = {
-    # Format: theme_name -> [(comp_name, word_boundary_tokens, exact_phrases)]
-    # word_boundary_tokens: matched with \b..\b — prevents false positives:
-    #   'training'->rain, 'cold stare'->cold/winter, 'steps into'->stairwell,
-    #   'bloodied'->bloodbath, 'sanctuary'->church, 'weapon platform'->subway/train
-    # exact_phrases: multi-word, matched as exact substrings
-    "The Church Stairwell Betrayal": [
-        ("church",    ["church", "chapel", "cathedral"],    ["the sanctuary church", "inside the chapel"]),
-        ("stairwell", ["stairwell", "staircase"],           ["up the stairs", "down the stairs", "stair landing", "flight of stairs"]),
-        ("betrayal",  ["betray", "coward"],                 ["locked out", "shut the door", "left behind", "abandoned him"]),
-    ],
-    "Midnight Rain & Shadow Stalker": [
-        ("rain",    ["rain", "downpour", "deluge"],    ["it\'s raining", "rain pours", "midnight rain", "rain falls"]),
-        ("stalker", ["stalker", "predator", "lurk"],   ["shadow creature", "in the shadows", "stalked by"]),
-    ],
-    "Atomic Research Station in the Deluge": [
-        ("atomic_research", ["atomic", "nuclear", "perimeter"],   ["research station", "research lab", "nuclear facility"]),
-        ("deluge",          ["deluge", "flooding"],                ["heavy rain", "flood water", "storm flood", "rising water"]),
-    ],
-    "The Outbreak & Boat 82-08 Incident": [
-        ("outbreak",  ["outbreak", "infection", "virus", "patient"],  ["patient zero", "infection spreads"]),
-        ("boat_8208", ["vessel", "ocean"],                             ["82-08", "boat 82", "the ship", "on the boat", "aboard"]),
-    ],
-    "Martial Law & First Encounters": [
-        ("martial_law",      ["conscript"],              ["martial law", "military broadcast"]),
-        ("first_encounters", ["chopper", "helicopter"],  ["first encounter", "infected screams", "screams outside"]),
-    ],
-    "Syndicate Enforcers & Urban Collapse": [
-        ("syndicate",      ["syndicate", "enforcer", "thug", "mob"],  ["gang members", "criminal syndicate"]),
-        ("urban_collapse", [],                                          ["city collapse", "streets overrun", "city falls"]),
-    ],
-    "Subway Descent & Platform Bloodbath": [
-        ("subway",    ["subway", "platform", "tracks"],               ["subway station", "train station", "underground platform"]),
-        ("bloodbath", ["bloodbath", "slaughter", "carnage"],          ["mass slaughter", "platform massacre", "bodies everywhere"]),
-    ],
-    "Winter Onslaught & Freezing Ambush": [
-        ("winter",  ["blizzard", "frost", "winter", "freeze"],  ["freezing cold", "bitter cold", "winter storm", "frozen wasteland"]),
-        ("ambush",  ["ambush", "onslaught"],                    ["surprise attack", "ambushed by", "overwhelmed by horde"]),
-    ],
-    "Quarantine Breach & Mutant Lab Collapse": [
-        ("quarantine", ["quarantine", "biolab"],    ["research lab", "mutant lab", "quarantine breach"]),
-        ("mutant",     ["mutant", "monstrosity"],   ["awakened monster", "mutant outbreak", "lab breach"]),
-    ],
-    "Convoy Ambush & The Canister Race": [
-        ("convoy",   ["convoy", "transport"],  ["supply convoy", "convoy ambush", "armored truck"]),
-        ("canister", ["canister"],             ["the race for", "secure the cargo", "cargo run"]),
-    ],
-}
-
-
-
-def _kw_match_word_boundary(text_lower: str, words: List[str], phrases: List[str]) -> bool:
-    """
-    V5 word-boundary safe keyword matching — prevents false positives.
-
-    - words: matched with \\b..\\b (word boundary for single tokens).
-      Prevents: 'training'->rain, 'steps into'->stairwell,
-                'cold stare'->cold (winter), 'sanctuary'->church,
-                'bloodied'->bloodbath, 'weapon platform'->subway/train.
-    - phrases: exact substring match (multi-word; natural word boundaries).
-
-    Returns True if ANY word OR phrase matches.
-    """
-    for w in words:
-        if re.search(r'\b' + re.escape(w) + r'\b', text_lower):
-            return True
-    for ph in phrases:
-        if ph.lower() in text_lower:
-            return True
-    return False
-
-
-def extract_episode_theme_with_snippet(
-    recap_path: str,
-    ep: int,
-    comic_title: str = "",
-    archetype: str = "general_apocalypse",
-) -> Tuple[str, Optional[str], List[Dict[str, Any]]]:
-    """
-    Extracts a punchy narrative theme for an episode, verifies core semantic components,
-    and returns (theme, primary_snippet, evidence_list_per_assertion).
-    """
-    if not os.path.isfile(recap_path):
-        return f"Survival Operation (Ep {ep})", None, []
-    try:
-        with open(recap_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return f"Survival Operation (Ep {ep})", None, []
-
-    if not data or not isinstance(data, list):
-        return f"Survival Operation (Ep {ep})", None, []
-
-    speech_segments = [item.get("speech", "") for item in data if isinstance(item, dict) and item.get("speech")]
-    if not speech_segments:
-        return f"Survival Operation (Ep {ep})", None, []
-
-    full_speech = " ".join(speech_segments)
-    lower_speech = full_speech.lower()
-
-    # Match predefined themes with component decomposition (V5: word-boundary safe)
-    for theme_name, components in THEME_COMPONENT_REGISTRY.items():
-        if not validate_chapter_theme(theme_name, archetype):
-            continue
-
-        comp_evidence = []
-        all_comps_found = True
-        for comp_name, words, phrases in components:
-            found_seg = None
-            for seg in speech_segments:
-                seg_lower = seg.lower()
-                if _kw_match_word_boundary(seg_lower, words, phrases):
-                    found_seg = seg
-                    break
-            if found_seg:
-                comp_evidence.append({
-                    "assertion": comp_name,
-                    "episode": ep,
-                    "snippet": found_seg[:200],
-                })
-            else:
-                all_comps_found = False
-                break
-
-        if all_comps_found and len(comp_evidence) == len(components):
-            return theme_name, comp_evidence[0]["snippet"], comp_evidence
-
-    # Fallback: clean action phrase with incomplete object repair
-    first_sent = re.split(r"[.!?]", speech_segments[0])[0].strip()
-    first_sent = re.sub(r"^(while|as|spotting|even with|with|after)\s+[^,]+,\s*", "", first_sent, flags=re.IGNORECASE)
-    first_sent = re.sub(r"^(south|tae|he|they|she|the hero|the survivor|[a-z]+-?[a-z]*)\s+(watches|scrambles|lunges|braces|realizes|slices|slams|freezes|frantically|doesn\'t waste|doesn\'t hesitate|locks|lets|steps|dashes)\s+[^,\.]*?(?:as|when|that|to)?\s*", "", first_sent, flags=re.IGNORECASE)
-    first_sent = re.sub(r"[,:;]+$", "", first_sent).strip()
-    words = first_sent.split()
-
-    STOP_WORDS = {
-        "on", "at", "to", "in", "of", "for", "with", "from", "as",
-        "by", "the", "a", "an", "and", "or", "so", "than", "against", "but"
-    }
-    DANGLING_MODIFIERS = {"incoming", "approaching", "advancing", "remaining", "unknown", "nearby", "rushing"}
-
-    if 2 <= len(words) <= 7:
-        clean_theme = " ".join(words).title()
-    elif len(words) > 7:
-        clean_theme = None
-        for cut in range(7, 4, -1):
-            if cut > len(words):
-                continue
-            last_w = words[cut - 1].rstrip(",:;").lower()
-            if last_w not in STOP_WORDS and last_w not in DANGLING_MODIFIERS:
-                clean_theme = " ".join(words[:cut]).title()
-                break
-        if not clean_theme:
-            phrase = list(words[:6])
-            while phrase and (phrase[-1].lower() in STOP_WORDS or phrase[-1].lower() in DANGLING_MODIFIERS):
-                phrase.pop()
-            clean_theme = " ".join(phrase).title() if phrase else f"Survival Operation (Ep {ep})"
-    else:
-        clean_theme = f"Survival Operation (Ep {ep})"
-
-    clean_theme = re.sub(r"[^a-zA-Z0-9\s\-–—\':]", "", clean_theme).strip()
-    clean_theme = re.sub(r"\s+(?:On|At|To|In|Of|For|With|From|As|By|The|A|An|And|Or|So|Than|Against|But|Incoming|Approaching|Advancing)$", "", clean_theme, flags=re.IGNORECASE).strip()
-
-    if not validate_chapter_theme(clean_theme, archetype) or len(clean_theme) <= 3:
-        clean_theme = f"Survival Operation (Ep {ep})"
-
-    evidence_list = [{"assertion": "general_action", "episode": ep, "snippet": speech_segments[0][:200]}]
-    return clean_theme, speech_segments[0], evidence_list
-
-
-def extract_episode_theme(
-    recap_path: str,
-    ep: int,
-    comic_title: str = "",
-    archetype: str = "general_apocalypse",
-) -> str:
-    """Backward-compatible wrapper returning only the theme string."""
-    theme, _, _ = extract_episode_theme_with_snippet(recap_path, ep, comic_title, archetype)
-    return theme
-
-
 def build_narrative_story_chapters(
     chapters: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]],
     download_dir: Optional[str] = None,
@@ -1776,25 +1598,6 @@ def build_narrative_story_chapters(
 
     num_input_chapters = len(raw_input)
     span_eps = to_ep - from_ep + 1
-    prog_list = [
-        "Outbreak & Patient Zero",
-        "The Barricades & Sector Defense",
-        "Road Ambush & Escape",
-        "Mutated Predators & Swarm Attack",
-        "Quarantine Zone Breach",
-        "Gathering Survivors",
-        "Underground Safehouse Infiltration",
-        "Perimeter Defense Fall",
-        "The Swarm Overruns The City",
-        "Final Stand Over The Ruins",
-    ] if archetype == "zombie_apocalypse" else [
-        "Cataclysm Warning & Shelter Prep",
-        "The Wasteland Ambush",
-        "Resource Competition",
-        "Safe Zone Fortification",
-        "Climax Under Siege",
-        "Dawn of Control",
-    ]
 
     # If input chapters is already a sampled list (e.g. 1 to 12 milestone chapters from Stage 11)
     if num_input_chapters <= 12:
@@ -1870,38 +1673,18 @@ def build_narrative_story_chapters(
         else:
             source_episode_range = f"Ep {start_ep}–{end_ep}"
 
-        # Window-based extraction: scan episodes in [start_ep, end_ep]
+        # Deterministic placeholder name only; chapter_engine replaces it with a validated,
+        # story-grounded name. No sentence truncation and no archetype boilerplate: both
+        # produced broken or false chapter names on published videos.
         chosen_theme = None
-        chapter_evidence = []
-        if download_dir and os.path.isdir(download_dir):
-            for ep_curr in range(start_ep, end_ep + 1):
-                recap_path = os.path.join(download_dir, f"episode_{ep_curr}", "recap.json")
-                if os.path.isfile(recap_path):
-                    cand_theme, snippet, comp_evs = extract_episode_theme_with_snippet(recap_path, ep_curr, comic_title, archetype)
-                    if cand_theme and validate_chapter_theme(cand_theme, archetype) and cand_theme not in used_themes and not cand_theme.startswith("Chapter"):
-                        chosen_theme = cand_theme
-                        chapter_evidence = comp_evs
-                        break
-
-        if not chosen_theme and raw_title and not raw_title.lower().startswith("episode"):
-            # Preserve existing meaningful Stage 11 CTR title
+        if raw_title and not raw_title.lower().startswith("episode"):
             cand = re.sub(r"\s*\(Ep.*?\)$", "", raw_title).strip()
-            if cand and cand not in used_themes:
+            cand = re.sub(r"^(?:Arc|Part|Chapter)\s*\d+\s*[:\-–—]\s*", "", cand, flags=re.IGNORECASE).strip()
+            if cand and cand not in used_themes and validate_chapter_theme(cand, archetype):
                 chosen_theme = cand
-
         if not chosen_theme:
-            theme_idx = min(len(prog_list) - 1, round(k * (len(prog_list) - 1) / max(1, num_arcs - 1)))
-            base_theme = prog_list[theme_idx]
-            if base_theme not in used_themes and validate_chapter_theme(base_theme, archetype):
-                chosen_theme = base_theme
-            else:
-                for cand in prog_list:
-                    if cand not in used_themes and validate_chapter_theme(cand, archetype):
-                        chosen_theme = cand
-                        break
-
-        if not chosen_theme:
-            chosen_theme = f"Survival Operation (Eps {start_ep}–{end_ep})"
+            chosen_theme = f"Part {k + 1}"
+        chapter_evidence: List[Dict[str, Any]] = []
 
         used_themes.add(chosen_theme)
         ep_label = f"Ep {start_ep}" if start_ep == end_ep else f"Ep {start_ep}–{end_ep}"
@@ -3885,6 +3668,27 @@ def validate_packaging_consistency(
 # MAIN METADATA GENERATOR
 # =============================================================================
 
+def plan_chapter_arcs(
+    chapters: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]],
+    comic_title: str,
+    story_memory: Optional[Dict[str, Any]],
+    download_dir: Optional[str],
+    from_ep: int,
+    to_ep: int,
+) -> List[Dict[str, Any]]:
+    """Arc boundaries exactly as generate_us_apocalypse_metadata will build them, so chapter
+    names can be drafted (async LLM) before the synchronous metadata pass."""
+    merged_memory = _merge_series_bible(story_memory, download_dir)
+    return build_narrative_story_chapters(
+        chapters,
+        download_dir=download_dir,
+        comic_title=comic_title,
+        archetype=detect_archetype(comic_title, merged_memory),
+        from_ep=from_ep,
+        to_ep=to_ep,
+    )
+
+
 def generate_us_apocalypse_metadata(
     comic_title: str,
     from_ep: int,
@@ -3901,6 +3705,8 @@ def generate_us_apocalypse_metadata(
     llm_title_candidates: Optional[List[str]] = None,
     registry_titles: Optional[List[str]] = None,
     language: str = "en",
+    llm_chapter_options: Optional[Dict[str, List[str]]] = None,
+    registry_chapter_names: Optional[List[str]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -3935,6 +3741,7 @@ def generate_us_apocalypse_metadata(
 
     # ── 1b. TITLE ENGINE: LLM drafts + templates through one deterministic gate ──
     series_bible = load_bible(download_dir) if load_bible is not None else None
+    narration_by_episode = load_narration_by_episode(download_dir, from_ep, to_ep)
     hook_sheet = build_hook_sheet(
         comic_title, download_dir, from_ep, to_ep,
         story_memory=story_memory,
@@ -3986,6 +3793,20 @@ def generate_us_apocalypse_metadata(
         )
         if not narrative_chapters and not chapters_explicitly_disabled:
             chapter_warnings.append("UNGROUNDED_CHAPTER_BLOCKED")
+
+    # ── 2b. CHAPTER NAMES: LLM options per arc through the chapter validator ──
+    chapter_naming_audit = None
+    if narrative_chapters:
+        chapter_validator = ChapterNameValidator(
+            narration_by_episode,
+            placeholder_names=series_bible.placeholder_blocklist if series_bible else DEFAULT_PLACEHOLDER_NAMES,
+            other_video_chapters=registry_chapter_names or [],
+            language=language,
+        )
+        narrative_chapters, chapter_naming_audit = apply_chapter_names(
+            narrative_chapters, llm_chapter_options or {}, chapter_validator
+        )
+        claim_audit["chapter_engine"] = chapter_naming_audit.model_dump()
 
     # ── 3. DESCRIPTION — Research-validated tier structure with Series Navigation ──────────
     disaster = beats.get("disaster", "the Apocalypse")
@@ -4282,7 +4103,6 @@ def generate_us_apocalypse_metadata(
         chapter_00_ok = False  # missing Stage 11 timeline
 
     # ── 9b. PRE-PUBLISH GATE: single PASS/WARN/FAIL verdict shown at the top of the kit ──
-    narration_by_episode = load_narration_by_episode(download_dir, from_ep, to_ep)
     name_audit = (
         audit_names(series_bible, narration_by_episode)
         if audit_names is not None and narration_by_episode else None

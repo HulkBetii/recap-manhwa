@@ -103,6 +103,10 @@ Chạy thử trên dữ liệu thật (Veteran of the Apocalypse 1–33): FAIL v
 - Sửa bug `market_id` chưa định nghĩa ở nhánh fallback Stage 12 (`workflow_stages_2.py:2872`).
 
 ### C. Chapter
+**Trạng thái: ĐÃ CODE (2026-10-02)** — `chapter_engine.py`, `tests/test_chapter_engine.py` (10 test). Đã xóa `THEME_COMPONENT_REGISTRY`, `extract_episode_theme*`, danh sách theme theo archetype (`prog_list`) — 180+ dòng. Stage 12: `plan_chapter_arcs` → `build_arc_inputs` → 1 lệnh LLM cho mọi arc (2 phương án/arc) → `apply_chapter_names` trong metadata. Thứ tự: tên LLM hợp lệ → tên Stage 11 hợp lệ → "Part N" (gate WARN `chapters_descriptive`). Registry lưu chapter đã ship để chặn trùng giữa các truyện.
+Khác thiết kế: cho phép 2–6 từ (thay vì 3–6) để giữ tên ngắn như "Convoy Ambush"; danh sách từ sự kiện chung (siege, showdown, brawl…) được miễn kiểm tra bám narration.
+Giới hạn: validator không bắt được lỗi ngữ pháp (vd câu mất chủ ngữ) — chỉ bắt định dạng/bám nội dung; hai script `regenerate_youtube_kit.py`, `generate_all_seo_packages.py` chưa gọi LLM nên chỉ ra "Part N".
+
 1. Bỏ `THEME_COMPONENT_REGISTRY` hardcode và fallback cắt câu đầu.
 2. LLM đặt tên chapter cho mỗi arc từ tóm tắt các tập trong arc.
 3. Validator: 3–6 từ; không kết thúc bằng mạo từ/giới từ/liên từ; không trùng/gần trùng; tên riêng phải có trong Bible; từ khóa chính có trong narration của arc.

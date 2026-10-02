@@ -2803,8 +2803,8 @@ class Stage12_MetadataReports(BaseStage):
     def weight(self) -> float: return 0.03
 
     @staticmethod
-    def _title_llm_call(task):
-        """Text-only Gemini call for title drafting, resolved the same way as Stage 5's 9Router engine."""
+    def _text_llm_call(task):
+        """Text-only Gemini call (titles, chapter names), resolved the same way as Stage 5's 9Router engine."""
         async def call(prompt: str):
             from app import load_config
             from gemini_api_engine import get_gemini_api_engine
@@ -2835,8 +2835,11 @@ class Stage12_MetadataReports(BaseStage):
         }
 
         try:
-            from youtube_metadata import generate_youtube_metadata
-            from title_engine import DEFAULT_REGISTRY_PATH, TitleRegistry, build_hook_sheet, generate_llm_hooks
+            from youtube_metadata import generate_youtube_metadata, plan_chapter_arcs
+            from title_engine import (
+                DEFAULT_REGISTRY_PATH, TitleRegistry, build_hook_sheet, generate_llm_hooks, load_narration_by_episode,
+            )
+            from chapter_engine import build_arc_inputs, generate_llm_chapter_options
             from series_bible import load_bible
             chapters = task.artifacts.get("chapters")
             story_memory = None
@@ -2852,13 +2855,24 @@ class Stage12_MetadataReports(BaseStage):
             from_ep, to_ep = task.from_episode or 1, task.to_episode or 1
             language = task.payload.get("language", "en")
             registry = TitleRegistry.load(task.payload.get("title_registry_path") or DEFAULT_REGISTRY_PATH)
+            series_bible = load_bible(download_dir)
+            llm_call = self._text_llm_call(task)
             hook_sheet = build_hook_sheet(
                 comic_title, download_dir, from_ep, to_ep,
-                story_memory=story_memory, bible=load_bible(download_dir), language=language,
+                story_memory=story_memory, bible=series_bible, language=language,
             )
-            llm_hooks = await generate_llm_hooks(hook_sheet, self._title_llm_call(task))
+            llm_hooks = await generate_llm_hooks(hook_sheet, llm_call)
             if hook_sheet.has_story and not llm_hooks:
                 await context.log("Title Engine: LLM không trả về title, dùng template dự phòng (vẫn qua bộ kiểm tra).", "warning")
+
+            arcs = build_arc_inputs(
+                plan_chapter_arcs(chapters, comic_title, story_memory, download_dir, from_ep, to_ep),
+                load_narration_by_episode(download_dir, from_ep, to_ep),
+                story_memory,
+            )
+            llm_chapter_options = await generate_llm_chapter_options(arcs, hook_sheet.character_names, llm_call)
+            if arcs and not llm_chapter_options:
+                await context.log("Chapter Engine: LLM không trả về tên chapter, dùng tên Stage 11 / 'Part N' (vẫn qua bộ kiểm tra).", "warning")
 
             metadata["youtube_metadata"] = generate_youtube_metadata(
                 comic_title,
@@ -2870,6 +2884,8 @@ class Stage12_MetadataReports(BaseStage):
                 llm_title_candidates=llm_hooks,
                 registry_titles=registry.titles_for_dedup(comic_title),
                 language=language,
+                llm_chapter_options=llm_chapter_options,
+                registry_chapter_names=registry.chapter_names_for_dedup(comic_title),
             )
 
             title_engine_audit = metadata["youtube_metadata"]["prepublish_audit"]["claim_audit"].get("title_engine", {})
@@ -2881,7 +2897,13 @@ class Stage12_MetadataReports(BaseStage):
             )
             # Only grounded titles enter the registry; no narration means nothing was verified.
             if hook_sheet.has_story and title_engine_audit.get("status") == "validated":
-                registry.record_kit_title(metadata["youtube_metadata"]["title"], comic_title, from_ep, to_ep)
+                shipped_chapters = [
+                    ch["theme"] for ch in metadata["youtube_metadata"].get("narrative_chapters", [])
+                    if ch.get("naming_source") != "fallback"
+                ]
+                registry.record_kit_title(
+                    metadata["youtube_metadata"]["title"], comic_title, from_ep, to_ep, chapters=shipped_chapters,
+                )
                 registry.save()
 
             gate = metadata["youtube_metadata"]["prepublish_audit"].get("gate", {})
