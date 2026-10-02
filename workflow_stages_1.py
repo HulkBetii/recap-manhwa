@@ -1354,6 +1354,103 @@ class Stage5_GeminiAutomation(BaseStage):
 
         _story_memory_lock = asyncio.Lock()
 
+        # Series Bible: cast fixed before parallel dispatch so every episode uses the same names
+        from series_bible import (
+            apply_inferred_protagonist, bootstrap_bible, normalize_segments, observe_episode,
+            render_prompt_block, save_bible,
+        )
+        BIBLE_BOOTSTRAP_MAX_EPISODES = 3
+        series_bible = None
+        _bible_lock = asyncio.Lock()
+
+        def resolve_episode_pdf(ep):
+            pdf_dir = os.path.join(download_dir, f"episode_{ep}", "pdf")
+            clean_title = "".join(c for c in task.comic_title if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+            expected = os.path.join(pdf_dir, f"{clean_title}_Tap_{ep}.pdf")
+            if os.path.isfile(expected):
+                return expected
+            if os.path.isdir(pdf_dir):
+                pdf_files = sorted(f for f in os.listdir(pdf_dir) if f.lower().endswith(".pdf"))
+                if pdf_files:
+                    return os.path.join(pdf_dir, pdf_files[0])
+            return None
+
+        async def bootstrap_series_bible():
+            async def llm_call(pdf_path, prompt, ep):
+                return await generate_with_gemini_api(pdf_path, prompt, ep=ep, is_primary=False)
+
+            async def warn(msg, ep):
+                await context.log(msg, "warning", episode=ep)
+
+            bible, reused = await bootstrap_bible(
+                comic_title,
+                download_dir,
+                episodes_to_process,
+                resolve_episode_pdf,
+                llm_call,
+                ip_context=task.payload.get("ip_context"),
+                protagonist_name=task.payload.get("protagonist_name", ""),
+                max_episodes=BIBLE_BOOTSTRAP_MAX_EPISODES,
+                on_warning=warn,
+            )
+            if reused:
+                await context.log(
+                    f"Series Bible: dùng lại danh sách nhân vật đã có (nhân vật chính: {bible.protagonist_name}, "
+                    f"{len(bible.characters)} nhân vật khác).",
+                    "info",
+                )
+                return bible
+
+            # Keep StoryMemory and the bible in agreement on the protagonist
+            from story_memory import StoryMemory
+            memory_kwargs = dict(
+                source_url=getattr(task, "comic_url", ""),
+                from_ep=getattr(task, "from_episode", 1),
+                to_ep=getattr(task, "to_episode", 1),
+                prompt_version="us_apocalypse_v2",
+            )
+            memory = StoryMemory.load_validated(download_dir, comic_title=comic_title, language=language, **memory_kwargs)
+            if not bible.protagonist_name and memory.protagonist_name:
+                apply_inferred_protagonist(bible, memory.protagonist_name, memory.protagonist_gender)
+            if bible.protagonist_name and memory.protagonist_name != bible.protagonist_name:
+                memory.set_protagonist_name(bible.protagonist_name)
+                if bible.protagonist_gender != "auto":
+                    memory.set_protagonist_gender(bible.protagonist_gender)
+                memory.save_with_fingerprint(download_dir, **memory_kwargs)
+
+            save_bible(bible, download_dir)
+            mc_txt = bible.protagonist_name or "chưa xác định"
+            await context.log(
+                f"Series Bible: nhân vật chính = {mc_txt}; {len(bible.characters)} nhân vật khác "
+                f"({', '.join(c.name for c in bible.characters[:6])}).",
+                "info" if bible.protagonist_name else "warning",
+            )
+            return bible
+
+        async def apply_series_bible(ep, segments):
+            """Normalizes names in fresh narration and records new names. Never blocks the episode."""
+            if series_bible is None:
+                return segments
+            try:
+                segments, replaced = normalize_segments(segments, series_bible)
+                async with _bible_lock:
+                    report = observe_episode(series_bible, ep, segments, placeholders_replaced=replaced)
+                    save_bible(series_bible, download_dir)
+                if replaced:
+                    await context.log(f"Tập {ep}: Series Bible đã chuẩn hóa {replaced} tên giữ chỗ/biệt danh về tên chuẩn.", "info", episode=ep)
+                if report.promoted_names:
+                    await context.log(f"Tập {ep}: Series Bible thêm nhân vật lặp lại: {', '.join(report.promoted_names)}.", "info", episode=ep)
+                if report.mc_drift:
+                    await context.log(
+                        f"Tập {ep}: CẢNH BÁO lệch tên nhân vật chính — không nhắc '{series_bible.protagonist_name}' "
+                        f"nhưng tên lạ '{report.top_unknown_name}' xuất hiện {report.top_unknown_mentions} lần.",
+                        "warning",
+                        episode=ep,
+                    )
+            except Exception as err:
+                await context.log(f"Tập {ep}: Series Bible lỗi khi chuẩn hóa tên: {err}", "warning", episode=ep)
+            return segments
+
         streaming_enabled = bool(task.payload.get("streaming_pipeline", True))
         streaming_consumer = None
         if streaming_enabled:
@@ -1427,7 +1524,12 @@ class Stage5_GeminiAutomation(BaseStage):
             elif task.payload.get("protagonist_name"):
                 confirmed_mc_name = str(task.payload["protagonist_name"]).strip()
 
-            # Priority 2: Existing memory / glossary
+            # Priority 2: Series Bible (shared by all parallel episodes)
+            if not confirmed_mc_name and series_bible is not None and series_bible.protagonist_name:
+                confirmed_mc_name = series_bible.protagonist_name
+                confirmed_gender = series_bible.protagonist_gender
+
+            # Priority 3: Existing memory / glossary
             if not confirmed_mc_name and memory and memory.protagonist_name:
                 confirmed_mc_name = memory.protagonist_name
                 confirmed_gender = memory.protagonist_gender
@@ -1449,6 +1551,7 @@ class Stage5_GeminiAutomation(BaseStage):
                 len(image_files),
                 language,
                 previous_context=previous_context,
+                cast_bible=render_prompt_block(series_bible),
             )
 
             # Editorial Framing to prevent false-positive safety refusals in Gemini Web UI
@@ -1609,6 +1712,7 @@ class Stage5_GeminiAutomation(BaseStage):
                             parsed_data = enforce_monotonic_page_order(parsed_data)
 
                             normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
+                            normalized_data = await apply_series_bible(ep, normalized_data)
                             raw_temp_path = raw_response_path + ".tmp"
                             recap_temp_path = recap_json_path + ".tmp"
                             with open(raw_temp_path, "w", encoding="utf-8") as rf:
@@ -2197,6 +2301,7 @@ class Stage5_GeminiAutomation(BaseStage):
                     parsed_data = enforce_monotonic_page_order(parsed_data)
 
                     normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
+                    normalized_data = await apply_series_bible(ep, normalized_data)
                     raw_temp_path = raw_response_path + ".tmp"
                     recap_temp_path = recap_json_path + ".tmp"
                     with open(raw_temp_path, "w", encoding="utf-8") as rf:
@@ -2408,6 +2513,7 @@ class Stage5_GeminiAutomation(BaseStage):
                                 parsed_data = enforce_monotonic_page_order(parsed_data)
 
                                 normalized_data = [item.model_dump(mode="json") for item in parse_recap_data(parsed_data, max_page=len(image_files))]
+                                normalized_data = await apply_series_bible(ep, normalized_data)
                                 raw_temp_path = raw_response_path + ".tmp"
                                 recap_temp_path = recap_json_path + ".tmp"
                                 with open(raw_temp_path, "w", encoding="utf-8") as rf:
@@ -2454,6 +2560,13 @@ class Stage5_GeminiAutomation(BaseStage):
             valid_count = sum(1 for e in range(from_ep, to_ep + 1) if validate_recap_json(os.path.join(download_dir, f"episode_{e}", "recap.json")))
             await context.update_stage_progress(self.name, (valid_count / (to_ep - from_ep + 1)) * 100.0)
             return success
+
+        # Must finish before any episode is dispatched so parallel episodes share one cast.
+        try:
+            series_bible = await bootstrap_series_bible()
+        except Exception as bible_err:
+            series_bible = None
+            await context.log(f"Series Bible: không khởi tạo được ({bible_err}); tiếp tục không có Bible.", "warning")
 
         concurrency = int(task.payload.get("concurrency", 2))
         from app import ChromeProfilePoolManager, load_config

@@ -3700,6 +3700,7 @@ def generate_gemini_prompt(
     glossary: str = None,
     point_score_threshold: int = 65,
     previous_context: dict = None,
+    cast_bible: str = None,
 ) -> str:
     comic_title = re.sub(r'[\r\n\t"\\]', ' ', str(comic_title or "")).strip()[:150]
 
@@ -4105,6 +4106,9 @@ MAX 18 WORDS PER SEGMENT:
 [15:70%, 16:30%] - {_mc_ex} nhanh chóng gom đồ sinh tồn, khóa chặt cánh cửa hầm trú ẩn an toàn.#
 24 - Thế nhưng vừa mới kịp thở phào, một dòng cảnh báo đỏ rực từ hệ thống bất ngờ hiện lên, báo hiệu cơn ác mộng thực sự mới chỉ bắt đầu.#"""
 
+    # Series Bible: authoritative cast shared by every episode, even when episodes run in parallel
+    cast_bible_section = f"\n{cast_bible.strip()}\n" if cast_bible and cast_bible.strip() else ""
+
     _seg_lo = max(22, total_pages // 2)
     _seg_hi = max(_seg_lo + 5, min(total_pages, max(_seg_lo + 5, int(total_pages * 0.65))))
     _min_coverage_page = max(1, total_pages - 8)
@@ -4403,7 +4407,7 @@ as the closing anchor instead.
 --------------------------------------------------
 
 {intro_rule}
-
+{cast_bible_section}
 --------------------------------------------------
 10. VIOLENCE AND SENSITIVE MATERIAL
 --------------------------------------------------

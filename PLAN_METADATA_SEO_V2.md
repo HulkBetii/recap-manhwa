@@ -35,6 +35,13 @@ Overfit nguy hiểm cần gỡ (sẽ đặt sai tên cho truyện mới):
 ## 3. Workstreams (thứ tự thực hiện: A → B → E → C → D)
 
 ### A. Series Bible — đồng bộ ngữ cảnh nhân vật
+**Trạng thái: ĐÃ CODE (2026-10-02)** — `series_bible.py`, `tests/test_series_bible.py` (23 test). Nối vào Stage 5 (bootstrap trước khi chạy song song, inject prompt, chuẩn hóa + quan sát ở cả 3 điểm ghi recap.json), Stage 11 intro, metadata (`_merge_series_bible`, bỏ đoán tên theo title).
+Giới hạn còn lại:
+- recap.json đã có từ lần chạy trước KHÔNG được chuẩn hóa lại (tránh làm mất cache TTS/render).
+- Bootstrap bằng LLM cần API key (9Router hoặc GEMINI_API_KEY); chế độ chỉ-Chrome rơi về tên do user nhập / StoryMemory.
+- Các tên hardcode kích hoạt theo nội dung narration (Dingo, Hyeongjun, Migyeong, Elena trong `_extract_story_beats` và concept thumbnail) vẫn còn — không gây sai tên cho truyện khác, sẽ dọn khi làm B.
+- Thêm xử lý biến thể phiên âm ("Min-gu" → "Mingu") và tách "RECURRING PROPER NOUNS" (tên tự phát hiện, có thể là địa danh).
+
 **File mới:** `series_bible.py`, output `downloads/<task>/series_bible.json`.
 
 Schema (Pydantic v2):

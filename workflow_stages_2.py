@@ -2567,7 +2567,9 @@ class Stage11_FinalVideoAssembly(BaseStage):
                 top_paths = [img["path"] for img in top_images]
 
                 comic_title = task.comic_title or "Comic"
-                protagonist_name = task.payload.get("protagonist_name", "")
+                from series_bible import load_bible, normalize_text
+                series_bible = load_bible(download_dir, task.artifacts.get("comic_title") or comic_title)
+                protagonist_name = task.payload.get("protagonist_name", "") or (series_bible.protagonist_name if series_bible else "")
                 language = task.payload.get("language", "en")
                 custom_hook = task.payload.get("flash_forward_custom_hook")
 
@@ -2598,7 +2600,7 @@ class Stage11_FinalVideoAssembly(BaseStage):
                     custom_hook=custom_hook,
                     story_summary=story_summary
                 )
-                hook_script = hook_res["hook_script"]
+                hook_script, _ = normalize_text(hook_res["hook_script"], series_bible)
                 await context.log(f"  -> Kịch bản Hook [{hook_res['archetype']}]: \"{hook_script}\"", "info")
 
                 intro_dir = os.path.join(download_dir, "intro")

@@ -23,6 +23,11 @@ except ImportError:
     can_use_fact_for_surface = None # type: ignore
 
 try:
+    from series_bible import load_bible
+except ImportError:
+    load_bible = None  # type: ignore
+
+try:
     from channel_profile import CHANNEL_PROFILE, get_channel_profile
 except ImportError:
     CHANNEL_PROFILE = {
@@ -1486,40 +1491,37 @@ def detect_archetype(comic_title: str, story_memory: Optional[Dict[str, Any]] = 
 # CHARACTER NAME RESOLUTION
 # =============================================================================
 
+def _merge_series_bible(story_memory: Optional[Dict[str, Any]], download_dir: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Series Bible names take precedence over heuristically inferred StoryMemory names."""
+    bible = load_bible(download_dir) if load_bible is not None else None
+    if bible is None:
+        return story_memory
+    merged = dict(story_memory or {})
+    if bible.protagonist_name:
+        merged["protagonist_name"] = bible.protagonist_name
+    female = bible.first_female_character()
+    if female:
+        merged["female_lead_name"] = female.name
+    return merged
+
+
 def get_character_names(comic_title: str, story_memory: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
-    """Resolves protagonist and key supporting character names."""
-    title_lower = (comic_title or "").lower()
+    """
+    Resolves protagonist and female lead names from story evidence only (Series Bible / StoryMemory).
+    Never guesses a name from the comic title: a wrong name is worse than a generic role.
+    """
     mc_name = ""
     generic_words = ["a", "an", "the", "he", "she", "they", "we", "our", "him", "his", "her", "their", "it", "its", "protagonist", "mc", "unknown", "hero", "guy", "man"]
     if story_memory:
-        raw_mc = story_memory.get("protagonist_name", "").strip()
+        raw_mc = str(story_memory.get("protagonist_name", "")).strip()
         if raw_mc and len(raw_mc) > 1 and raw_mc.lower() not in generic_words:
             mc_name = raw_mc
-
     if not mc_name:
-        if "world after the fall" in title_lower:
-            mc_name = "Jaehwan"
-        elif "omniscient reader" in title_lower:
-            mc_name = "Kim Dokja"
-        elif "solo leveling" in title_lower:
-            mc_name = "Sung Jinwoo"
-        elif "doom breaker" in title_lower or "reincarnation of the suicidal" in title_lower:
-            mc_name = "Zephyr"
-        elif "veteran of the apocalypse" in title_lower or title_lower.strip().startswith("veteran of"):
-            mc_name = "Kang Seongho"
-        elif any(k in title_lower for k in ["zombie", "82-08", "8208"]):
-            mc_name = "Tae"
-        else:
-            mc_name = "The Lone Survivor"
+        mc_name = "The Lone Survivor"
 
-    if "world after the fall" in title_lower:
-        female_lead = "Mino / Sirwen Armelt"
-    elif "global freeze" in title_lower or "shelter" in title_lower:
-        female_lead = "Yu Qing / Zhou Keer"
-    elif any(k in title_lower for k in ["zombie", "82-08", "8208"]):
-        female_lead = "The Fearless Survivor"
-    else:
-        female_lead = "The Female Lead"
+    female_lead = "The Female Lead"
+    if story_memory and str(story_memory.get("female_lead_name", "")).strip():
+        female_lead = str(story_memory["female_lead_name"]).strip()
 
     return {
         "mc": mc_name,
@@ -3955,6 +3957,7 @@ def generate_us_apocalypse_metadata(
     and 100% compliant prepublish quality audit.
     """
     ep_range = f"Ep {from_ep}~{to_ep}" if from_ep != to_ep else f"Ep {from_ep}"
+    story_memory = _merge_series_bible(story_memory, download_dir)
     char_names = get_character_names(comic_title, story_memory)
     mc_name = char_names["mc"]
     archetype = detect_archetype(comic_title, story_memory)
