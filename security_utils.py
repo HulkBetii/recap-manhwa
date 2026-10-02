@@ -128,7 +128,7 @@ def upload_reference(path: Path | None) -> str | None:
     return f"static/uploads/{path.name}"
 
 
-def redact_sensitive_text(value: str | None, sensitive_values: Iterable[str] = ()) -> str | None:
+def redact_sensitive_text(value: str | None, sensitive_values: Iterable[str] = (), redact_paths: bool = True) -> str | None:
     if value is None:
         return None
     redacted = value
@@ -140,7 +140,8 @@ def redact_sensitive_text(value: str | None, sensitive_values: Iterable[str] = (
     for pattern in _SECRET_PATTERNS:
         redacted = pattern.sub(lambda match: (match.group(1) if match.lastindex else "") + "<redacted>", redacted)
     redacted = _SENSITIVE_QUERY_VALUE.sub(lambda match: match.group(1) + "<redacted>", redacted)
-    redacted = _WINDOWS_ABSOLUTE_PATH.sub("<path>", redacted)
+    if redact_paths:
+        redacted = _WINDOWS_ABSOLUTE_PATH.sub("<path>", redacted)
     return redacted
 
 
@@ -169,17 +170,17 @@ class RedactingTextStream:
         return getattr(self.stream, "encoding", None)
 
 
-def strip_sensitive_fields(value: Any) -> Any:
+def strip_sensitive_fields(value: Any, redact_paths: bool = True) -> Any:
     if isinstance(value, dict):
         return {
-            key: strip_sensitive_fields(child)
+            key: strip_sensitive_fields(child, redact_paths=redact_paths)
             for key, child in value.items()
             if key.casefold() not in SENSITIVE_PAYLOAD_KEYS
         }
     if isinstance(value, list):
-        return [strip_sensitive_fields(child) for child in value]
+        return [strip_sensitive_fields(child, redact_paths=redact_paths) for child in value]
     if isinstance(value, str):
-        return redact_sensitive_text(value)
+        return redact_sensitive_text(value, redact_paths=redact_paths)
     return value
 
 

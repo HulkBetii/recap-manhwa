@@ -84,10 +84,17 @@ class WorkflowTask:
         self.logs: List[Dict[str, Any]] = payload.get("logs") or []
         self.error_message: Optional[str] = payload.get("error_message")
         self.artifacts: Dict[str, Any] = payload.get("artifacts") or {}
+        if self.artifacts.get("download_dir") in ("<path>", "none", "null", ""):
+            folder_name = self.artifacts.get("download_folder_name")
+            if folder_name and folder_name != "<path>":
+                from security_utils import DOWNLOADS_ROOT
+                candidate = DOWNLOADS_ROOT / folder_name
+                if candidate.exists():
+                    self.artifacts["download_dir"] = str(candidate)
         self.runtime: Dict[str, Any] = payload.get("runtime") or {}
 
     def to_storage_dict(self, include_logs: bool = True) -> Dict[str, Any]:
-        result = strip_sensitive_fields(self.payload.copy())
+        result = strip_sensitive_fields(self.payload.copy(), redact_paths=False)
         result.update({
             "id": self.id,
             "comic_title": self.comic_title,
@@ -107,13 +114,13 @@ class WorkflowTask:
             "failed_count": self.failed_count,
             "elapsed_time": self.elapsed_time,
             "estimated_remaining_time": self.estimated_remaining_time,
-            "logs": strip_sensitive_fields(self.logs) if include_logs else [],
-            "error_message": redact_sensitive_text(self.error_message),
+            "logs": strip_sensitive_fields(self.logs, redact_paths=False) if include_logs else [],
+            "error_message": redact_sensitive_text(self.error_message, redact_paths=False),
             "artifacts": self.artifacts,
             "runtime": self.runtime,
             "language": self.payload.get("language", "vi")
         })
-        return strip_sensitive_fields(result)
+        return strip_sensitive_fields(result, redact_paths=False)
 
     def to_public_dict(self, include_logs: bool = True) -> Dict[str, Any]:
         return {

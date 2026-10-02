@@ -139,7 +139,10 @@ class Stage0_ProjectInit(BaseStage):
         project_dir = os.path.dirname(os.path.abspath(__file__))
         identity_hash = source_hash(context.task.comic_url)
         default_folder_name = f"{sanitized_title}_{context.task.from_episode}_{context.task.to_episode}_{context.task.payload.get('language', 'en')}_{identity_hash}"
-        download_dir = context.task.artifacts.get("download_dir") or os.path.join(project_dir, "downloads", default_folder_name)
+        download_dir = context.task.artifacts.get("download_dir")
+        if not download_dir or download_dir in ("<path>", "none", "null") or not os.path.exists(download_dir):
+            candidate_folder = context.task.artifacts.get("download_folder_name") or default_folder_name
+            download_dir = os.path.join(project_dir, "downloads", candidate_folder)
         download_folder_name = os.path.basename(download_dir)
         
         context.task.artifacts["download_folder_name"] = download_folder_name
