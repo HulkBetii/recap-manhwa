@@ -1,7 +1,9 @@
 import json
 
 from series_bible import CharacterEntry, new_bible, save_bible
-from youtube_metadata import detect_archetype, generate_youtube_metadata, plan_chapter_arcs
+from youtube_metadata import (
+    detect_archetype, generate_youtube_metadata, plan_chapter_arcs, recommend_card_and_endscreen_anchors,
+)
 
 # Story memory as produced for Veteran of the Apocalypse ep 1-3: no zombie vocabulary yet,
 # but a "Personal Dimensional Gate" — which used to classify the comic as hunter_gate.
@@ -95,6 +97,43 @@ def test_niche_hashtag_beats_brand_and_tags_are_capped(tmp_path):
     assert "#jaehwanmanhwa" not in hashtags  # brand is dropped before a discovery hashtag
     assert 5 <= len(meta["tags"]) <= 10
     assert "manhwa english" not in meta["tags"] and "manhwa summary" not in meta["tags"]
+
+
+def test_kit_lists_each_ab_title_once_and_counts_thumbnails(tmp_path):
+    download_dir = _veteran_dir(tmp_path)
+    meta = generate_youtube_metadata(
+        "Veteran of the Apocalypse", 1, 1, story_memory=EARLY_MEMORY, download_dir=download_dir,
+        llm_title_candidates=["The Zombie Apocalypse HIT But His Room Holds a Gate!"],
+    )
+    lines = meta["formatted_kit"].splitlines()
+    start = next(i for i, l in enumerate(lines) if l.startswith("[1. NATIVE A/B TEST"))
+    end = lines.index("--- Top Ranked Title Candidates ---")
+    options = [lines[i + 1].strip() for i in range(start, end) if lines[i].startswith("★ Option ")]
+    assert options and len(options) == len(set(options))
+    if len(options) == 1:
+        assert "upload without A/B test" in lines[start]
+    else:
+        assert f"Paste these {len(options)} options" in lines[start]
+
+    concepts = sum(1 for l in lines if l.startswith("▶ CONCEPT "))
+    assert f"[5. TOP {concepts} VIRAL THUMBNAILS" in meta["formatted_kit"]
+
+
+CHAPTERS = [{"timestamp": t} for t in ("00:00", "06:56", "13:41")]
+
+
+def test_cards_never_share_a_slot_and_skip_missing_series_links():
+    anchors = recommend_card_and_endscreen_anchors(CHAPTERS)
+    card_1, card_2 = anchors["card_1_playlist"], anchors["card_2_next_arc"]
+    assert card_1["recommended_timestamp"] == "06:56" and card_2["recommended_timestamp"] == "13:41"
+    assert "Playlist" not in card_1["card_type"] and card_1["link"] is None
+    assert "Next Part" not in card_2["card_type"]
+    assert not any("Playlist" in e for e in anchors["end_screen"]["recommended_elements"])
+
+    nav = {"playlist_url": "https://www.youtube.com/playlist?list=PLabc123", "next_part_url": "https://youtu.be/xyz"}
+    anchors = recommend_card_and_endscreen_anchors(CHAPTERS, nav)
+    assert anchors["card_1_playlist"]["link"] == nav["playlist_url"]
+    assert anchors["card_2_next_arc"]["link"] == nav["next_part_url"]
 
 
 def test_real_links_are_kept(tmp_path):

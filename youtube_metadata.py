@@ -3260,36 +3260,44 @@ def generate_community_posts(
 
 def recommend_card_and_endscreen_anchors(
     narrative_chapters: List[Dict[str, Any]],
+    series_navigation: Optional[Dict[str, Optional[str]]] = None,
 ) -> Dict[str, Any]:
     """
-    Recommends optimal YouTube Cards and End Screen timestamp placements
-    to maximize Viewer Session Watch Time and Binge-Watching.
-    """
-    card_playlist_timestamp = "02:00"
-    card_next_episode_timestamp = "08:00"
+    Recommends YouTube Card and End Screen placements to keep viewers on the channel.
 
+    Series cards (playlist / next part) are only recommended when the user supplied the real link:
+    the channel publishes one video per story, so there is usually no series playlist or next part.
+    Without them the cards point to another recap from the channel.
+    """
+    nav = series_navigation or {}
+    card_1_timestamp = "02:00"
+    card_2_timestamp = "08:00"
     if narrative_chapters and len(narrative_chapters) >= 3:
-        # Card 1 (Playlist/Subscribe) around Chapter 2
-        card_playlist_timestamp = narrative_chapters[1].get("timestamp", "02:00")
-        # Card 2 (Next/Previous Arc) near Climax (penultimate chapter)
-        card_next_episode_timestamp = narrative_chapters[-2].get("timestamp", "08:00")
+        # Card 1 around Chapter 2; Card 2 near the climax (penultimate chapter), never the same slot.
+        card_1_timestamp = narrative_chapters[1].get("timestamp", card_1_timestamp)
+        card_2_index = max(len(narrative_chapters) - 2, 2)
+        card_2_timestamp = narrative_chapters[card_2_index].get("timestamp", card_2_timestamp)
+
+    if nav.get("playlist_url"):
+        card_1 = {"card_type": "Playlist / Series Link", "teaser_text": "Watch Full Series Playlist!",
+                  "link": nav["playlist_url"]}
+    else:
+        card_1 = {"card_type": "Video / Channel Recap", "teaser_text": "Another Apocalypse Survival Recap!",
+                  "link": None}
+    next_link = nav.get("next_part_url") or nav.get("previous_part_url")
+    if next_link:
+        card_2 = {"card_type": "Video / Next Part", "teaser_text": "Up Next: Continue The Story!", "link": next_link}
+    else:
+        card_2 = {"card_type": "Video / Best For Viewer", "teaser_text": "Watch This Next!", "link": None}
 
     return {
-        "card_1_playlist": {
-            "recommended_timestamp": card_playlist_timestamp,
-            "card_type": "Playlist / Series Link",
-            "teaser_text": "Watch Full Series Playlist!",
-        },
-        "card_2_next_arc": {
-            "recommended_timestamp": card_next_episode_timestamp,
-            "card_type": "Video / Next Episode",
-            "teaser_text": "Up Next: Continue The Story!",
-        },
+        "card_1_playlist": {"recommended_timestamp": card_1_timestamp, **card_1},
+        "card_2_next_arc": {"recommended_timestamp": card_2_timestamp, **card_2},
         "end_screen": {
             "timing": "Final 20 seconds of video",
             "recommended_elements": [
                 "1x Video (Best for Viewer)",
-                "1x Playlist (Full Series Arc)",
+                "1x Playlist (Full Series Arc)" if nav.get("playlist_url") else "1x Video (Most Recent Upload)",
                 "1x Subscribe Button",
             ],
         },
@@ -4175,7 +4183,9 @@ def generate_us_apocalypse_metadata(
         to_ep=to_ep,
         disaster=disaster,
     )
-    card_anchors = recommend_card_and_endscreen_anchors(narrative_chapters)
+    card_anchors = recommend_card_and_endscreen_anchors(narrative_chapters, {
+        "playlist_url": playlist_url, "previous_part_url": previous_part_url, "next_part_url": next_part_url,
+    })
 
     # ── 7.2. SEO FILENAMES & PRE-PUBLISH CHECKLIST ─────────────────────────
     seo_filenames = generate_seo_filenames(comic_title, from_ep, to_ep)
@@ -4319,6 +4329,12 @@ def generate_us_apocalypse_metadata(
     # ── 10. FORMATTED KIT STRING (STREAMLINED 30-SECOND FAST-PASTE LAYOUT) ─
     top_3_thumbnails = thumbnail_concepts[:3]
     top_3_candidates = title_options[:3] if title_options else [primary_title]
+    # Identical options make an A/B test meaningless: list each distinct validated title once.
+    ab_titles = list(dict.fromkeys([*title_variants.values(), *top_3_candidates]))[:3] or [primary_title]
+    if len(ab_titles) >= 2:
+        ab_header = f"[1. NATIVE A/B TEST TITLE HYPOTHESES (Paste these {len(ab_titles)} options into YouTube A/B Tester)]"
+    else:
+        ab_header = "[1. NATIVE A/B TEST TITLE HYPOTHESES (Only 1 title passed validation — upload without A/B test)]"
 
     kit_lines = [
         "=" * 80,
@@ -4326,16 +4342,11 @@ def generate_us_apocalypse_metadata(
         f"Episodes: {from_ep} - {to_ep} | Market: us_apocalypse | Archetype: {archetype.upper()} | Persona: Sarcastic Bro",
         *render_gate_banner(gate_report),
         "",
-        "[1. NATIVE A/B TEST TITLE HYPOTHESES (Paste 3 options into YouTube A/B Tester)]",
-        "★ Option A (Juxtaposition / High CTR Hook):",
-        f"  {title_variants.get('variant_a_conflict', primary_title)}",
-        "★ Option B (Retaliation / Paradox Hook):",
-        f"  {title_variants.get('variant_b_paradox', primary_title)}",
-        "★ Option C (Scale / Survival Arc Hook):",
-        f"  {title_variants.get('variant_c_scale', primary_title)}",
-        "",
-        f"--- Top Ranked Title Candidates ---",
+        ab_header,
     ]
+    for label, t in zip("ABC", ab_titles):
+        kit_lines.extend([f"★ Option {label}:", f"  {t}"])
+    kit_lines.extend(["", "--- Top Ranked Title Candidates ---"])
     for i, t in enumerate(top_3_candidates, 1):
         prefix = "★ " if i == 1 else "  "
         kit_lines.append(f"{prefix}Option {i}: {t}")
@@ -4352,7 +4363,7 @@ def generate_us_apocalypse_metadata(
         ", ".join(tags),
         "",
         "=" * 80,
-        "[5. TOP 3 VIRAL THUMBNAILS & AI PROMPTS]",
+        f"[5. TOP {len(top_3_thumbnails)} VIRAL THUMBNAILS & AI PROMPTS]",
         "=" * 80,
     ])
 
@@ -4381,8 +4392,11 @@ def generate_us_apocalypse_metadata(
         f"  - Thumbnail File: {seo_filenames['thumbnail_filename']}",
         "",
         "• Recommended Cards & End Screen Placements:",
-        f"  - Card 1 (Series Playlist Link) : Place at timestamp [{card_anchors['card_1_playlist']['recommended_timestamp']}] -> \"{card_anchors['card_1_playlist']['teaser_text']}\"",
-        f"  - Card 2 (Next/Previous Arc)    : Place at timestamp [{card_anchors['card_2_next_arc']['recommended_timestamp']}] -> \"{card_anchors['card_2_next_arc']['teaser_text']}\"",
+        *[
+            f"  - Card {i} ({card['card_type']}) : Place at timestamp [{card['recommended_timestamp']}] -> "
+            f"\"{card['teaser_text']}\"" + (f" ({card['link']})" if card["link"] else "")
+            for i, card in enumerate((card_anchors["card_1_playlist"], card_anchors["card_2_next_arc"]), 1)
+        ],
         f"  - End Screen Placement          : {card_anchors['end_screen']['timing']} (Elements: {', '.join(card_anchors['end_screen']['recommended_elements'])})",
         "=" * 80,
     ])
