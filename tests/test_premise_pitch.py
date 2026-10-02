@@ -154,6 +154,45 @@ def test_gate_counts_pitch_only_when_it_matches_the_shipped_title(tmp_path):
     assert meta["prepublish_audit"]["premise_pitch_in_video"] is False
 
 
+# --- Pitch images ------------------------------------------------------------
+
+def _fake_select(calls):
+    def select(download_dir, ep, num_images=3):
+        calls.append((ep, num_images))
+        return [{"path": f"ep{ep}_img{i}.jpg"} for i in range(num_images)]
+    return select
+
+
+def test_pitch_images_come_from_first_two_thirds_in_episode_order():
+    calls = []
+    paths = Stage11_FinalVideoAssembly._pitch_images("d", 1, 143, 8, select_fn=_fake_select(calls))
+    episodes = [ep for ep, _ in calls]
+    assert episodes == sorted(episodes) and episodes[0] == 1
+    assert max(episodes) <= 96  # ceil(143 * 2/3) = 96: never climax-end panels
+    assert len(episodes) == 4 and len(paths) == 8
+    assert paths[0].startswith("ep1_")
+
+
+def test_pitch_images_short_range_and_missing_episode():
+    calls = []
+    paths = Stage11_FinalVideoAssembly._pitch_images("d", 1, 3, 8, select_fn=_fake_select(calls))
+    assert [ep for ep, _ in calls] == [1, 2]
+
+    def flaky(download_dir, ep, num_images=3):
+        if ep == 1:
+            raise FileNotFoundError("no images")
+        return [{"path": f"ep{ep}.jpg"}]
+
+    assert Stage11_FinalVideoAssembly._pitch_images("d", 1, 3, 2, select_fn=flaky) == ["ep2.jpg"]
+
+
+def test_pitch_images_keep_page_order_within_an_episode():
+    def by_score(download_dir, ep, num_images=3):
+        return [{"path": "p/109.jpg"}, {"path": "p/040.jpg"}, {"path": "p/098.jpg"}]
+
+    assert Stage11_FinalVideoAssembly._pitch_images("d", 1, 1, 3, select_fn=by_score) == ["p/040.jpg", "p/098.jpg", "p/109.jpg"]
+
+
 # --- Stage 11 intro bookkeeping ----------------------------------------------
 
 @pytest.fixture

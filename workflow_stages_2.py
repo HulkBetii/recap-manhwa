@@ -2588,6 +2588,37 @@ class Stage11_FinalVideoAssembly(BaseStage):
         os.remove(p["state"])
         return still_ours
 
+    PITCH_IMAGE_EPISODES = 4
+
+    @classmethod
+    def _pitch_images(cls, download_dir, from_ep, to_ep, count, select_fn=None):
+        """
+        Panels for the premise pitch from the first two thirds of the range, evenly spread.
+        The pitch states the premise and must not reveal the outcome, so climax-episode panels
+        (the flash-forward's source) would both spoil and contradict the narration.
+        """
+        import math
+        if select_fn is None:
+            from arc_intro_engine import ArcClimaxMiner
+            select_fn = ArcClimaxMiner.select_top_climax_images
+        span = to_ep - from_ep + 1
+        candidates = list(range(from_ep, from_ep + max(1, math.ceil(span * 2 / 3))))
+        n = min(cls.PITCH_IMAGE_EPISODES, len(candidates))
+        if n <= 1:
+            episodes = candidates[:1]
+        else:
+            episodes = sorted({candidates[round(i * (len(candidates) - 1) / (n - 1))] for i in range(n)})
+        per_episode = math.ceil(count / len(episodes))
+        paths = []
+        for ep in episodes:
+            try:
+                picked = select_fn(download_dir, ep, num_images=per_episode)
+                # Best panels are chosen by score but shown in page order: the pitch narrates in sequence.
+                paths.extend(sorted((img["path"] for img in picked), key=os.path.basename))
+            except FileNotFoundError as err:
+                logger.warning(f"Premise pitch: no usable panels in episode {ep}: {err}")
+        return paths[:count]
+
     async def _prepend_premise_pitch(self, context, download_dir, folder_name) -> bool:
         """Drafts the title-aligned premise pitch, renders it and prepends it to the first episode.
         Returns True only when the pitch is actually in the video."""
@@ -2595,7 +2626,7 @@ class Stage11_FinalVideoAssembly(BaseStage):
         from_ep, to_ep = task.from_episode, task.to_episode
         try:
             import config
-            from arc_intro_engine import ArcClimaxMiner, MicroIntroRenderer
+            from arc_intro_engine import MicroIntroRenderer
             from premise_pitch import generate_premise_pitch
             from series_bible import load_bible
             from title_engine import DEFAULT_REGISTRY_PATH, TitleRegistry, build_hook_sheet, generate_llm_hooks
@@ -2642,14 +2673,16 @@ class Stage11_FinalVideoAssembly(BaseStage):
                 return False
             await context.log(f"Premise Pitch cho title \"{title}\": \"{pitch.text}\"", "info")
 
-            climax = ArcClimaxMiner.scan_climax_episode(download_dir, from_ep=from_ep, to_ep=to_ep)
-            images = ArcClimaxMiner.select_top_climax_images(
-                download_dir, climax["climax_episode"], num_images=getattr(config, "PREMISE_PITCH_IMAGE_COUNT", 8)
+            image_paths = self._pitch_images(
+                download_dir, from_ep, to_ep, getattr(config, "PREMISE_PITCH_IMAGE_COUNT", 8)
             )
+            if not image_paths:
+                await context.log("Premise Pitch: không tìm được ảnh phù hợp ở các tập đầu, bỏ qua.", "warning")
+                return False
             intro_artifacts = await MicroIntroRenderer.render_intro_clip(
                 intro_dir=os.path.join(download_dir, "intro_pitch"),
                 hook_script=pitch.text,
-                image_paths=[img["path"] for img in images],
+                image_paths=image_paths,
                 language=language,
                 voice_id=task.payload.get("voice_id", "ai33pro"),
                 ref_audio_path=task.payload.get("ref_audio_path"),
