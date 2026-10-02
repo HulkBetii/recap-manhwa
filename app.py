@@ -222,9 +222,14 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cleanup_temp_profiles()
-    workflow_manager.start()
+    # Tests open TestClient(app): without this, every waiting task in the store would start a real
+    # pipeline worker (crawl, LLM, TTS) during the test run.
+    workers_enabled = os.getenv("RECAP_DISABLE_WORKERS", "").strip() != "1"
+    if workers_enabled:
+        workflow_manager.start()
     yield
-    await workflow_manager.stop()
+    if workers_enabled:
+        await workflow_manager.stop()
     try:
         await reset_shared_browser_context()
     except Exception:
