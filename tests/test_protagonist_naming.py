@@ -8,13 +8,13 @@ from story_memory import StoryMemory
 
 def test_us_apocalypse_prompt_ep1_has_name_anchoring_and_gender_adaptive():
     prompt = generate_gemini_prompt("Veteran of the Apocalypse", ep=1, total_pages=30)
-    # Check Name Anchoring in Episode 1
-    assert "PROTAGONIST NAME IDENTIFICATION & ANCHORING" in prompt
-    assert "MUST explicitly introduce the protagonist by their actual name" in prompt
+    # Check Name Anchoring in Episode 1 (unified master prompt, f76c802: "PROTAGONIST EARLY LOCK")
+    assert "PROTAGONIST EARLY LOCK (CRITICAL FOR RETENTION)" in prompt
+    assert "MUST appear by name or clear personal action within Segments 1–3" in prompt
     # Check Contextual Anchoring (now under "PROTAGONIST ANCHORING" section)
     assert "PROTAGONIST ANCHORING" in prompt
-    assert "4 Critical Anchors" in prompt or "4 points" in prompt or "4 CRITICAL CONTEXTUAL ANCHORS" in prompt or "4 Critical" in prompt
-    assert "Opening Hook (0-15s)" in prompt
+    assert "4 CRITICAL CONTEXTUAL ANCHORS" in prompt
+    assert "1. Opening Scene: Anchor identity as soon as the character appears in the scene." in prompt
     assert "80%" in prompt
     # Check Anti-AI Cliché Filter
     assert "ANTI-AI CLICHÉ FILTER" in prompt
@@ -30,7 +30,7 @@ def test_us_apocalypse_prompt_ep1_has_name_anchoring_and_gender_adaptive():
 def test_vietnamese_prompt_has_name_anchoring_and_gender_adaptive():
     prompt_vi = generate_gemini_prompt("Veteran of the Apocalypse", 1, 30, target_language="vi")
     # Check Name Anchoring in VN Ep 1
-    assert "PROTAGONIST NAME IDENTIFICATION & ANCHORING" in prompt_vi
+    assert "PROTAGONIST EARLY LOCK (CRITICAL FOR RETENTION)" in prompt_vi
     # Check VN Contextual Anchoring (new condensed form)
     assert "ĐỊNH DANH NHÂN VẬT CHÍNH" in prompt_vi or "CONTEXTUAL PROTAGONIST ANCHORING" in prompt_vi
     assert "CHỦ NGỮ ẨN" in prompt_vi

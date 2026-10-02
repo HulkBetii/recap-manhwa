@@ -4,6 +4,15 @@ import pytest
 
 from moderation_utils import is_text_bubble_dominant
 
+# Since 0a4290b the reason names the rule that fired (e.g. "massive_bubble_0.93").
+BUBBLE_REASON_PREFIXES = (
+    "massive_bubble_", "dominant_bubble_", "bubble_low_art_", "central_bubble_box_", "text_bubble_dominant",
+)
+
+
+def _is_bubble_reason(reason):
+    return reason.startswith(BUBBLE_REASON_PREFIXES)
+
 
 def test_empty_and_small_images():
     is_bub, reason = is_text_bubble_dominant(None)
@@ -15,10 +24,11 @@ def test_empty_and_small_images():
     assert not is_bub
     assert reason == "too_small"
 
+    # A tall blank slice is merged like a standalone bubble (0a4290b removed the "too tall" exemption).
     tall = np.ones((1500, 800, 3), dtype=np.uint8) * 255
     is_bub, reason = is_text_bubble_dominant(tall)
-    assert not is_bub
-    assert reason == "too_tall_for_isolated_bubble"
+    assert is_bub is True
+    assert reason.startswith("massive_bubble_")
 
 
 def test_isolated_speech_bubble_white_on_black():
@@ -29,7 +39,7 @@ def test_isolated_speech_bubble_white_on_black():
 
     is_bub, reason = is_text_bubble_dominant(img)
     assert is_bub is True
-    assert reason == "text_bubble_dominant"
+    assert _is_bubble_reason(reason), reason
 
 
 def test_isolated_speech_bubble_white_on_white():
@@ -40,7 +50,7 @@ def test_isolated_speech_bubble_white_on_white():
 
     is_bub, reason = is_text_bubble_dominant(img)
     assert is_bub is True
-    assert reason == "text_bubble_dominant"
+    assert _is_bubble_reason(reason), reason
 
 
 def test_character_action_panel_not_bubble():

@@ -75,31 +75,34 @@ def test_camera_planner_mode_selection():
     assert plan_tall["easing"] in ("easeInOutCubic", "soft_linear_glide")
     assert len(plan_tall["keyframes"]) in (2, 3)
 
-    # 2. Smart direction on tall panel: bubble in upper 35% -> bottom_to_top
+    # 2. Speech bubble at the top of a tall panel: the glide starts below it and never reveals it
+    #    (bubble-edge clamping replaced bubble-driven direction in 38e349f).
+    bubble_bottom = 300.0
     plan_bubble_top = CameraPlanner.generate_camera_plan(
         page_num=1,
         duration=3.0,
         bounds=(0, 0, 600, 1600),
-        bubble_centroid=(300.0, 300.0),  # y=300 < 0.35*1600=560
-        bubble_coverage_ratio=0.25,
+        top_bubble_bottom_y=bubble_bottom,
     )
     assert plan_bubble_top["animation_type"] == "vertical_pan_glide"
-    assert plan_bubble_top["direction"] == "bottom_to_top"
+    assert plan_bubble_top["direction"] == "top_to_bottom"
+    half_view = (600 / 0.68) * 0.5
+    assert all(kf["y"] - half_view > bubble_bottom for kf in plan_bubble_top["keyframes"])
 
-    # 3. Standard / Square / Low-height panel -> Ken Burns Focus Zoom luân phiên (never frozen!)
+    # 3. Standard / Square / Low-height panel -> subtle continuous zoom, alternating in/out (never frozen!)
     plan_square_even = CameraPlanner.generate_camera_plan(1, 3.0, (0, 0, 800, 800), shot_index=0)
-    assert plan_square_even["animation_type"] == "focal_zoom_in"
+    assert plan_square_even["animation_type"] == "subtle_focal_zoom_in"
     assert plan_square_even["keyframes"][0]["scale"] == 1.00
-    assert plan_square_even["keyframes"][1]["scale"] == 1.08
+    assert plan_square_even["keyframes"][1]["scale"] == 1.06
 
     plan_square_odd = CameraPlanner.generate_camera_plan(1, 3.0, (0, 0, 800, 800), shot_index=1)
-    assert plan_square_odd["animation_type"] == "focal_zoom_out"
-    assert plan_square_odd["keyframes"][0]["scale"] == 1.08
+    assert plan_square_odd["animation_type"] == "subtle_focal_zoom_out"
+    assert plan_square_odd["keyframes"][0]["scale"] == 1.06
     assert plan_square_odd["keyframes"][1]["scale"] == 1.00
 
-    # 4. Standard moderate wide panel (aspect_ratio < 1.70, e.g. 1000x700 = 1.43) -> Ken Burns Focus Zoom
+    # 4. Standard moderate wide panel (aspect_ratio < 1.70, e.g. 1000x700 = 1.43) -> subtle zoom
     plan_mod_wide = CameraPlanner.generate_camera_plan(1, 3.0, (0, 0, 1000, 700))
-    assert plan_mod_wide["animation_type"] in ("focal_zoom_in", "focal_zoom_out")
+    assert plan_mod_wide["animation_type"] in ("subtle_focal_zoom_in", "subtle_focal_zoom_out")
 
     # 5. Landscape / Panoramic panel (aspect_ratio >= 1.70, e.g. 1200x600 = 2.0, 1500x500 = 3.0) -> Cinematic Horizontal Pan
     plan_wide = CameraPlanner.generate_camera_plan(1, 3.0, (0, 0, 1200, 600))
@@ -189,7 +192,8 @@ def test_adaptive_velocity_clamping_v170():
 
 
 def test_camera_planner_semi_vertical_top_threat_and_action_panning():
-    """Verify tall vertical panels (usable_v_travel >= 160) and focal point asymmetry trigger smart directional panning."""
+    """Tall panels pan from the subject: subject low (looming threat) -> bottom_to_top, subject high -> top_to_bottom.
+    The focal point overrides the shot_index alternation (38e349f)."""
     # 1. Composite panel (800x1800) with character in lower half (y=1300 > 0.55*1800=990)
     tall_bounds = (0, 0, 800, 1800)
     plan_threat = CameraPlanner.generate_camera_plan(
@@ -197,20 +201,20 @@ def test_camera_planner_semi_vertical_top_threat_and_action_panning():
         duration=3.5,
         bounds=tall_bounds,
         focal_point=(400.0, 1300.0),
-        shot_index=1  # Even if shot_index is odd, top-threat forces top_to_bottom
+        shot_index=0  # alternation alone would give top_to_bottom
     )
     assert plan_threat["animation_type"] == "vertical_pan_glide"
-    assert plan_threat["direction"] == "top_to_bottom"
+    assert plan_threat["direction"] == "bottom_to_top"
 
-    # 2. Tall panel with subject in upper half (y=500 < 0.40*1800=720)
+    # 2. Tall panel with subject in upper half (y=500 < 0.45*1800=810)
     plan_upper = CameraPlanner.generate_camera_plan(
         page_num=41,
         duration=3.5,
         bounds=tall_bounds,
         focal_point=(400.0, 500.0),
-        shot_index=0  # Subject at top -> pans bottom_to_top
+        shot_index=1  # alternation alone would give bottom_to_top
     )
     assert plan_upper["animation_type"] == "vertical_pan_glide"
-    assert plan_upper["direction"] == "bottom_to_top"
+    assert plan_upper["direction"] == "top_to_bottom"
 
 

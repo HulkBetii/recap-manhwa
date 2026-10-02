@@ -77,8 +77,10 @@ def test_parse_gemini_recap_text_multi_panel():
 
 def test_generate_gemini_prompt_us_recap_culture_and_retention_hook():
     prompt_ep1_en = generate_gemini_prompt("Solo Leveling", 1, 45, "en")
-    assert "EPISODE 1 HIGH-RETENTION HOOK" in prompt_ep1_en
-    assert "0–5s GOLDEN RULE" in prompt_ep1_en
+    # The cold-open hook moved out of the narration into the separately rendered Premise Pitch:
+    # episode 1 narration now starts directly on page 1.
+    assert "EPISODE 1 OPENING DIRECTIVE (DIRECT IN MEDIA RES - ZERO SYNTHETIC INTRO)" in prompt_ep1_en
+    assert "NO synthetic trailer hook" in prompt_ep1_en
     assert "US MANHWA/WEBTOON CULTURE RULES" in prompt_ep1_en
     assert "Awakened abilities" in prompt_ep1_en or "Status Window" in prompt_ep1_en
     assert "YOUTUBE MONETIZATION & ADVERTISER-FRIENDLY SAFETY" in prompt_ep1_en

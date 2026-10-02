@@ -76,15 +76,15 @@ def test_145_confirmed_protagonist_identity_box():
     assert "CONFIRMED PROTAGONIST IDENTITY:" in prompt
     assert "Name: Tae" in prompt
     assert "Gender: Male" in prompt
-    assert 'You MUST explicitly introduce "Tae" in Segment 1 or 2!' in prompt
+    assert 'CONFIRMED PROTAGONIST NAME: "Tae"' in prompt
     assert "This identity is authoritative." in prompt
-    assert 'IP CONTEXT & HOOK ELEMENT: "Underground Bunker Prepper"' in prompt
+    assert 'IP CONTEXT: "Underground Bunker Prepper"' in prompt
 
 
 def test_146_character_first_hook_override_directive():
     """
-    Test 146: Verify that Episode 1 prompt contains the CHARACTER-FIRST OPENING OVERRIDE directive
-    ensuring 0-15s protagonist establishment even when opening art is pure environmental disaster.
+    Test 146: Episode 1 must establish the protagonist early even when the opening art is pure
+    environmental disaster (now "PROTAGONIST EARLY LOCK" in the unified master prompt, f76c802).
     """
     prompt = generate_gemini_prompt(
         comic_title="Zombie Revelation 82-08",
@@ -92,11 +92,11 @@ def test_146_character_first_hook_override_directive():
         total_pages=50,
         previous_context={"protagonist_name": "Tae"},
     )
-    assert "CHARACTER-FIRST OPENING OVERRIDE (CRITICAL FOR RETENTION):" in prompt
-    assert "Even if the opening comic pages (Pages 1-5) depict only:" in prompt
-    assert "city destruction / smoke / rubble" in prompt
-    assert "You MUST narrate the event through the protagonist's survival lens from Line 1!" in prompt
-    assert "Segment 1 or Segment 2 (0-15s) must communicate:" in prompt
+    assert "PROTAGONIST EARLY LOCK (CRITICAL FOR RETENTION):" in prompt
+    assert "If Pages 1–5 depict only environment/disaster/crowds with no visible protagonist:" in prompt
+    assert "Cover the establishing context in 1 segment MAXIMUM." in prompt
+    assert "Immediately anchor the protagonist in Segment 2 or 3." in prompt
+    assert "NEVER spend more than 1 segment on pure environment/background before anchoring the protagonist." in prompt
 
 
 def test_147_normalize_protagonist_entities():

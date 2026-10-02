@@ -85,9 +85,11 @@ def test_create_numbered_pdf_forbidden_cover_page_detection(tmp_path):
         story_page[y, :] = [(y * 80 // 800) + 30, (y * 120 // 800) + 40, (y * 160 // 800) + 50]
     for i in range(80):
         cv2.circle(story_page, (int((i * 43) % 720), int((i * 61) % 800)), int(15 + (i % 20)), (int(i*5 % 255), int(i*7 % 255), int(i*9 % 255)), -1)
+    # Dark ink lines: 25 light-grey lines across the page merge into one "speech bubble" region
+    # (bubble_coverage 0.44) under the current bubble detector, which real pages never show.
     for i in range(25):
-        cv2.line(story_page, (0, i * 32), (720, 800 - i * 32), (200, 200, 200), 2)
-    cv2.circle(story_page, (180, 250), 50, (220, 180, 100), -1)  # Character face
+        cv2.line(story_page, (0, i * 32), (720, 800 - i * 32), (20, 20, 20), 2)
+    cv2.ellipse(story_page, (180, 250), (70, 90), 0, 0, 360, (140, 175, 225), -1)  # Character face (BGR skin tone)
     cv2.putText(story_page, "Hero Counter Attack", (50, 450), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
     cv2.imwrite(str(images_dir / "002.jpg"), story_page)
 

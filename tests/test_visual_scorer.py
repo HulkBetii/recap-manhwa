@@ -29,11 +29,19 @@ def _make_gradient(size: tuple[int, int] = (500, 300)) -> np.ndarray:
 
 
 def _make_complex_art(size: tuple[int, int] = (800, 500)) -> np.ndarray:
-    """Create a synthetic 'comic art' image with shapes, colours and edges."""
-    h, w = size
-    img = np.full((h, w, 3), (240, 240, 240), dtype=np.uint8)
+    """Create a synthetic comic panel: painted (non-white) scene, a skin-toned face, shapes and ink lines.
 
-    # Draw random rectangles (panels)
+    A near-white background reads as a speech bubble to the scorer (bubble_coverage_ratio 1.0), so the
+    old white-canvas fixture scored 11 while real Veteran panels score ~71 (median of 365).
+    """
+    h, w = size
+    yy = np.linspace(0, 1, h)[:, None]
+    img = np.zeros((h, w, 3), dtype=np.uint8)
+    img[..., 0] = (60 + 90 * yy).astype(np.uint8)  # dark blue night scene (BGR)
+    img[..., 1] = (50 + 60 * yy).astype(np.uint8)
+    img[..., 2] = (40 + 40 * yy).astype(np.uint8)
+
+    # Draw random rectangles (buildings / props)
     rng = np.random.RandomState(42)
     for _ in range(8):
         x1, y1 = rng.randint(0, w - 50), rng.randint(0, h - 50)
@@ -41,15 +49,14 @@ def _make_complex_art(size: tuple[int, int] = (800, 500)) -> np.ndarray:
         colour = tuple(int(c) for c in rng.randint(0, 200, 3))
         cv2.rectangle(img, (x1, y1), (x2, y2), colour, -1)
 
-    # Draw circles (characters / heads)
-    for _ in range(5):
-        cx, cy = rng.randint(50, w - 50), rng.randint(50, h - 50)
-        radius = rng.randint(20, 60)
-        colour = tuple(int(c) for c in rng.randint(50, 255, 3))
-        cv2.circle(img, (cx, cy), radius, colour, -1)
+    # Character face in skin tone (BGR) with eyes and mouth
+    cv2.ellipse(img, (w // 2, h // 3), (90, 115), 0, 0, 360, (140, 175, 225), -1)
+    cv2.circle(img, (w // 2 - 35, h // 3 - 20), 10, (30, 30, 30), -1)
+    cv2.circle(img, (w // 2 + 35, h // 3 - 20), 10, (30, 30, 30), -1)
+    cv2.ellipse(img, (w // 2, h // 3 + 50), (35, 12), 0, 0, 180, (40, 40, 120), 3)
 
-    # Draw lines (speed lines / action)
-    for _ in range(12):
+    # Ink lines (speed lines / action)
+    for _ in range(60):
         pt1 = (rng.randint(0, w), rng.randint(0, h))
         pt2 = (rng.randint(0, w), rng.randint(0, h))
         cv2.line(img, pt1, pt2, (0, 0, 0), 2)
@@ -113,13 +120,14 @@ class TestVisualSemanticScorer:
             assert 0 <= score <= 100
 
     def test_breakdown_keys(self):
-        """Breakdown dict must contain all 5 criteria + bubble_coverage_ratio + final_score + is_meaningless."""
+        """Breakdown dict must contain all 5 criteria + bubble_coverage_ratio + final_score + is_meaningless
+        + is_establishing_shot (scenic panels without characters, e92f122)."""
         img = _make_gradient()
         _, breakdown = VisualSemanticScorer.calculate_score(img)
         expected_keys = {
             "semantic_similarity", "visual_detail", "character_presence",
             "action_context", "image_quality", "bubble_coverage_ratio",
-            "is_meaningless", "final_score",
+            "is_meaningless", "is_establishing_shot", "final_score",
         }
         assert set(breakdown.keys()) == expected_keys
 
