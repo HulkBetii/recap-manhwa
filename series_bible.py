@@ -68,9 +68,12 @@ NON_NAME_TOKENS = {
     "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
 }
 
-# A capitalized token preceded by a lowercase word, digit or clause punctuation is
-# almost always a proper noun in English narration (sentence starts are excluded).
-MID_SENTENCE_NAME_RE = re.compile(r"(?<=[a-z0-9,;:] )([A-Z][a-z]{2,}(?:-[A-Z]?[a-z]+)?)\b")
+# A capitalized run preceded by a lowercase word, digit or clause punctuation is almost always a
+# proper noun in English narration (sentence starts are excluded). Whole runs are captured so
+# compound terms ("Survival Life", "Owl Bear") are not split into fake single-word names.
+MID_SENTENCE_NAME_RE = re.compile(
+    r"(?<=[a-z0-9,;:] )([A-Z][a-z]{2,}(?:-[A-Z]?[a-z]+)?(?: [A-Z][a-z]+(?:-[A-Z]?[a-z]+)?)*)\b"
+)
 
 def name_key(name: str) -> str:
     """Spelling-insensitive key: romanizations vary in hyphens/spaces ("Min-gu" == "Mingu")."""
@@ -434,7 +437,14 @@ def render_prompt_block(bible: Optional[SeriesBible]) -> str:
 # =============================================================================
 
 def normalize_text(text: str, bible: Optional[SeriesBible]) -> tuple[str, int]:
-    """Replaces placeholder names and listed aliases with canonical names. Returns (text, replacements)."""
+    """
+    Fixes genuine naming errors only: placeholder names ("Paran", "[MC name]") and romanization
+    variants of canonical names ("Min-gu" -> "Mingu"). Returns (text, replacements).
+
+    Aliases are deliberately NOT rewritten: a nickname such as "Duck" is a real in-story name the
+    viewer also sees in the panels, and rewriting it would also corrupt ordinary words
+    ("Duck!" as a command). Aliases still count as known names for drift detection.
+    """
     if not text or bible is None:
         return text, 0
     replacements = 0
@@ -450,12 +460,6 @@ def normalize_text(text: str, bible: Optional[SeriesBible]) -> tuple[str, int]:
         replacements += n
 
     for entry in bible._all_entries():
-        for alias in entry.aliases:
-            if alias.casefold() == entry.name.casefold():
-                continue
-            text, n = re.subn(rf"\b{re.escape(alias)}\b", entry.name, text)
-            replacements += n
-
         # Romanization drift: "Min-gu" / "Min Gu" -> canonical "Mingu"
         variant_hits = 0
 
@@ -486,13 +490,24 @@ def normalize_segments(segments: List[Dict[str, Any]], bible: Optional[SeriesBib
     return result, total
 
 
+def _strip_title_words(phrase: str) -> str:
+    """'President Park' -> 'Park'; 'Zombie Apocalypse' -> '' (titles/generic words at the edges)."""
+    words = phrase.split(" ")
+    while words and words[0] in NON_NAME_TOKENS:
+        words.pop(0)
+    while words and words[-1] in NON_NAME_TOKENS:
+        words.pop()
+    return " ".join(words)
+
+
 def extract_name_candidates(texts: Iterable[str]) -> Counter:
-    """Counts capitalized mid-sentence tokens that look like proper names."""
+    """Counts capitalized mid-sentence runs that look like proper names or named terms."""
     counts: Counter = Counter()
     for text in texts:
         for match in MID_SENTENCE_NAME_RE.findall(text or ""):
-            if match not in NON_NAME_TOKENS:
-                counts[match] += 1
+            candidate = _strip_title_words(match)
+            if candidate and candidate not in NON_NAME_TOKENS:
+                counts[candidate] += 1
     return counts
 
 
@@ -514,7 +529,11 @@ def _scan_names(bible: SeriesBible, texts: List[str]) -> Tuple[int, Counter]:
         mc_names += [p for p in bible.protagonist.name.split() if len(p) > 2]
         mc_mentions = _count_mentions(texts, set(mc_names))
 
-    known = bible.known_names()
+    # Bible terms ("Survival Life", "Personal Dimensional Gate") are known vocabulary, not unknown names.
+    # Compare them the way candidates are produced: edge title/generic words ("Gate") are stripped.
+    known = bible.known_names() | {name_key(t) for t in bible.terms} | {
+        name_key(_strip_title_words(t)) for t in bible.terms if _strip_title_words(t)
+    }
     blocked = {name_key(n) for n in bible.placeholder_blocklist}
     unknown_counts = Counter({
         name: n for name, n in extract_name_candidates(texts).items()

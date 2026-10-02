@@ -54,12 +54,32 @@ def test_words_containing_placeholder_are_untouched():
     assert text == "Paranoid raiders approach the gate."
 
 
-def test_listed_alias_maps_to_canonical_name():
+def test_aliases_are_kept_and_common_words_never_rewritten():
+    """Nicknames are real in-story names; rewriting them also corrupted words like 'Duck!'."""
     bible = _zombie_bible()
-    bible.characters[0].aliases = ["Jin"]
-    text, n = normalize_text("Jin panics about boot camp.", bible)
-    assert n == 1
-    assert text == "Jinwoo panics about boot camp."
+    bible.characters.append(CharacterEntry(name="Duckbuttquackquack", aliases=["Duck"]))
+    text = "Duck rushes forward with twin daggers. Duck! The beast swings again."
+    assert normalize_text(text, bible) == (text, 0)
+
+
+def test_alias_still_counts_as_known_name():
+    bible = _zombie_bible()
+    bible.characters.append(CharacterEntry(name="Duckbuttquackquack", aliases=["Duck"]))
+    report = observe_episode(bible, 1, [_seg(" ".join(["Tae watches as Duck charges."] * 6))])
+    assert report.top_unknown_name is None
+
+
+def test_compound_terms_are_one_candidate_and_bible_terms_are_known():
+    texts = ["The game called Survival Life becomes real as an Owl Bear attacks and President Park hides."]
+    counts = extract_name_candidates(texts)
+    assert counts["Survival Life"] == 1 and counts["Owl Bear"] == 1 and counts["Park"] == 1
+    assert "Survival" not in counts and "Life" not in counts and "President Park" not in counts
+
+    bible = _zombie_bible()
+    bible.terms = ["Survival Life", "Personal Dimensional Gate"]
+    texts = ["Everyone in Survival Life hides while he opens the Personal Dimensional Gate."] * 6
+    report = observe_episode(bible, 1, [_seg(" ".join(texts))])
+    assert report.top_unknown_name is None  # "Gate" is stripped from candidates, terms still match
 
 
 def test_romanization_variants_map_to_canonical_spelling():
