@@ -127,6 +127,15 @@ def check_chapter_naming(narrative_chapters: Sequence[Dict[str, Any]]) -> GateCh
     )
 
 
+def check_thumbnail_overlays(top_concepts: Sequence[Dict[str, Any]]) -> GateCheck:
+    """Overlays that failed validation keep their template text; they need a human rewrite."""
+    bad = [str(c.get("thumbnail_text", "")) for c in top_concepts if c.get("overlay_valid") is False]
+    return GateCheck(
+        id="thumbnail_overlays_valid", severity="warn", passed=not bad,
+        detail=f"rewrite overlay text before generating thumbnails: {' | '.join(bad)}" if bad else "",
+    )
+
+
 def check_legacy_compliance(flags: Dict[str, bool]) -> GateCheck:
     """Hard YouTube limits and channel policy already computed by the metadata generator."""
     failed = [name for name, ok in flags.items() if not ok]
@@ -182,6 +191,7 @@ def run_prepublish_gate(
     chapters_explicitly_disabled: bool,
     legacy_flags: Dict[str, bool],
     opening_segments: Sequence[str],
+    thumbnail_concepts: Sequence[Dict[str, Any]] = (),
 ) -> GateReport:
     checks: List[GateCheck] = []
     checks.extend(check_title(title_engine_audit, primary_title_reasons))
@@ -192,6 +202,8 @@ def run_prepublish_gate(
     checks.append(check_legacy_compliance(legacy_flags))
     checks.append(check_title_promise_in_opening(primary_title, opening_segments))
     checks.append(check_description_placeholders(description))
+    if thumbnail_concepts:
+        checks.append(check_thumbnail_overlays(thumbnail_concepts))
 
     if any(not c.passed and c.severity == "fail" for c in checks):
         status: GateStatus = "FAIL"

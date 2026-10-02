@@ -30,6 +30,7 @@ except ImportError:
     load_bible = None  # type: ignore
 
 from chapter_engine import ChapterNameValidator, apply_chapter_names
+from thumbnail_text import OVERLAY_CONCEPTS, OverlayValidator, apply_overlays
 from prepublish_gate import render_gate_banner, run_prepublish_gate
 from title_engine import (
     TITLE_SUFFIX as ENGINE_TITLE_SUFFIX,
@@ -130,26 +131,12 @@ class SemanticAssertion:
 
 def _cap_overlay_text(text: str, max_chars: int = 15) -> str:
     """
-    Hard cap thumbnail overlay text (main_text OR sub_text) to max_chars via
-    word-boundary truncation. Guarantees len(output) <= max_chars always.
-
-    Symmetry Rule: apply to ALL overlay text surfaces equally — not just main_text.
-    The cap is enforced here so callers don't need to remember to validate.
+    Returns overlay text unchanged. It used to cut at a word boundary and append "!", which
+    shipped half-phrases such as "YOU'RE!" (from "YOU'RE CORNERED!") and "THE COLOSSAL!".
+    Over-long overlays are now rejected (and replaced) by thumbnail_text.OverlayValidator,
+    the same reject-don't-truncate rule used for titles.
     """
-    if len(text) <= max_chars:
-        return text
-    # Strip trailing punctuation before truncating
-    base = text.rstrip("!?. ")
-    words = base.split()
-    result = ""
-    for w in words:
-        candidate = (result + " " + w).strip() if result else w
-        # Reserve 1 char for "!" suffix
-        if len(candidate) + 1 <= max_chars:
-            result = candidate
-        else:
-            break
-    return (result + "!") if result else text[:max_chars]
+    return text
 
 
 # =============================================================================
@@ -2657,22 +2644,9 @@ def _mine_dynamic_story_concepts(
     if has_beast:
         c2_id = "concept_apex_beast_showdown"
         c2_name = f"Apex Monster Clash (Quyết Đấu {c2_beast_name})"
-        # Hard cap: thumbnail text must be ≤ 15 chars for mobile 3-second readability
-        _c2_name_up = c2_beast_name.upper()
-        _c2_candidate = f"{_c2_name_up}!"
-        if len(_c2_candidate) <= 15:
-            c2_main_text = _c2_candidate
-        else:
-            # Truncate at last word boundary that fits within 13 chars (+ "!" = 14, room for safety)
-            _words = _c2_name_up.split()
-            _short = ""
-            for _w in _words:
-                _try = (_short + " " + _w).strip() if _short else _w
-                if len(_try) + 1 <= 14:  # +1 for "!"
-                    _short = _try
-                else:
-                    break
-            c2_main_text = f"{_short}!" if _short else "BOSS FIGHT!"
+        # Whole name or a neutral label; never a cut name ("THE COLOSSAL!").
+        _c2_candidate = f"{c2_beast_name.upper()}!"
+        c2_main_text = _c2_candidate if len(_c2_candidate) <= 15 else "BOSS FIGHT!"
         c2_sub_text = _cap_overlay_text("ONE SHOT ELIMINATION!")
         c2_comp = f"Extreme close-up: {mc_name} dodging left with {c2_weapon} primed, {c2_beast_name} looming in upper-right"
         c2_prompt = (
@@ -2789,57 +2763,54 @@ def _mine_dynamic_story_concepts(
     has_betrayal = any(k in text_lower for k in ["betray", "abandon", "traitor", "left for dead", "backstab"])
     rival_display = beats.get("rival_name") or "Corrupt Awakened Leader"
 
-    if has_betrayal:
-        c4_main_text = "YOU WERE DEAD?!"
-        c4_sub_text = _cap_overlay_text("I'M BACK FOR REVENGE!")
-        c4_rival_desc = f"A treacherous former ally ({rival_display}) frozen in pure horror and disbelief"
-        c4_id = "concept_betrayal_retribution"
-        c4_name = f"Betrayal Retribution Confrontation (Trừng Phạt {rival_display})"
-    elif has_raiders:
-        c4_main_text = _cap_overlay_text("HAND OVER THE SHELTER!")
-        c4_sub_text = _cap_overlay_text("OVER MY DEAD BODY!")
-        c4_rival_desc = f"A ruthless leader of {rival_display} with a menacing yet shocked expression"
-        c4_id = "concept_raider_siege_clash"
-        c4_name = f"Awakened Standoff (Đột Kích {rival_display})"
-    else:
-        c4_main_text = _cap_overlay_text("YOU'RE CORNERED!")
-        c4_sub_text = _cap_overlay_text("NOT EVEN CLOSE!")
-        c4_rival_desc = f"A hostile rival fighter ({rival_display}) looking completely outmatched"
-        c4_id = "concept_rival_standoff"
-        c4_name = f"Rival Survivor Face-Off (Đối Đầu {rival_display})"
+    # Only when the story shows real antagonists: the unconditional "Rival Face-Off" invented a
+    # "Corrupt Survivors" rival for stories that had none.
+    if has_betrayal or has_raiders:
+        if has_betrayal:
+            c4_main_text = "YOU WERE DEAD?!"
+            c4_sub_text = _cap_overlay_text("I'M BACK FOR REVENGE!")
+            c4_rival_desc = f"A treacherous former ally ({rival_display}) frozen in pure horror and disbelief"
+            c4_id = "concept_betrayal_retribution"
+            c4_name = f"Betrayal Retribution Confrontation (Trừng Phạt {rival_display})"
+        elif has_raiders:
+            c4_main_text = _cap_overlay_text("HAND OVER THE SHELTER!")
+            c4_sub_text = _cap_overlay_text("OVER MY DEAD BODY!")
+            c4_rival_desc = f"A ruthless leader of {rival_display} with a menacing yet shocked expression"
+            c4_id = "concept_raider_siege_clash"
+            c4_name = f"Awakened Standoff (Đột Kích {rival_display})"
 
-    c4_prompt = (
-        f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
-        f"{art_style_block}\n\n"
-        f"[COMPOSITION — EXTREME CLOSE-UP CONFRONTATION TWO-SHOT]:\n"
-        f"Extreme medium close-up, cinematic slightly low camera angle. Two characters fill almost the entire frame. "
-        f"LEFT character (~52% of frame): {mc_name}, the protagonist. Young adult anime design, 20-25 years old, athletic build, "
-        f"messy dark hair with layered bangs, sharp confident eyes, defined jawline, worn tactical survival clothing. "
-        f"Expression: fearless, intimidating — narrowed eyes, raised eyebrow, small mischievous smirk. Leans aggressively forward.\n"
-        f"RIGHT character (~48% of frame): {c4_rival_desc}. "
-        f"Expression: extreme surprise, fear, and disbelief — wide-open eyes, tense eyebrow, slightly open mouth, sweat drop on cheek. Leans backward.\n"
-        f"Their faces are very close (20-30cm apart in frame), creating maximum dramatic tension.\n\n"
-        f"[BACKGROUND]:\n"
-        f"Ruined post-apocalyptic environment under a dramatic daytime sky. "
-        f"Shallow depth of field: characters razor sharp, background architecture softly blurred.\n\n"
-        f"[LIGHTING]:\n"
-        f"Strong bright daylight from upper-left, warm highlights on skin, crisp anime shadows under hair and jawlines, "
-        f"subtle rim lighting, glossy hair reflections.\n\n"
-        f"[THUMBNAIL TEXT OVERLAYS]:\n"
-        f"Upper-left corner: huge bold text '{c4_main_text}' in bright saturated yellow (#FFD700), "
-        f"very thick black outline, subtle drop shadow, counterclockwise tilt. Yellow comic triangular speech pointer toward protagonist.\n"
-        f"Lower center-right: text '{c4_sub_text}' in bright yellow uppercase, thick black outline, heavy bold condensed font.\n\n"
-        f"{negative_prompt_block}"
-    )
-    concepts.append({
-        "id": c4_id,
-        "name": c4_name,
-        "thumbnail_text": f"{c4_main_text} / {c4_sub_text}",
-        "text_style": f"Upper-left: bold yellow ('{c4_main_text}'), thick black outline, speech pointer. Lower-right: ('{c4_sub_text}').",
-        "composition": "Extreme close-up two-shot: protagonist left ~52%, adversary right ~48%, faces 20-30cm apart",
-        "gpt_prompt": c4_prompt,
-        "visual_facts_used": [],
-    })
+        c4_prompt = (
+            f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
+            f"{art_style_block}\n\n"
+            f"[COMPOSITION — EXTREME CLOSE-UP CONFRONTATION TWO-SHOT]:\n"
+            f"Extreme medium close-up, cinematic slightly low camera angle. Two characters fill almost the entire frame. "
+            f"LEFT character (~52% of frame): {mc_name}, the protagonist. Young adult anime design, 20-25 years old, athletic build, "
+            f"messy dark hair with layered bangs, sharp confident eyes, defined jawline, worn tactical survival clothing. "
+            f"Expression: fearless, intimidating — narrowed eyes, raised eyebrow, small mischievous smirk. Leans aggressively forward.\n"
+            f"RIGHT character (~48% of frame): {c4_rival_desc}. "
+            f"Expression: extreme surprise, fear, and disbelief — wide-open eyes, tense eyebrow, slightly open mouth, sweat drop on cheek. Leans backward.\n"
+            f"Their faces are very close (20-30cm apart in frame), creating maximum dramatic tension.\n\n"
+            f"[BACKGROUND]:\n"
+            f"Ruined post-apocalyptic environment under a dramatic daytime sky. "
+            f"Shallow depth of field: characters razor sharp, background architecture softly blurred.\n\n"
+            f"[LIGHTING]:\n"
+            f"Strong bright daylight from upper-left, warm highlights on skin, crisp anime shadows under hair and jawlines, "
+            f"subtle rim lighting, glossy hair reflections.\n\n"
+            f"[THUMBNAIL TEXT OVERLAYS]:\n"
+            f"Upper-left corner: huge bold text '{c4_main_text}' in bright saturated yellow (#FFD700), "
+            f"very thick black outline, subtle drop shadow, counterclockwise tilt. Yellow comic triangular speech pointer toward protagonist.\n"
+            f"Lower center-right: text '{c4_sub_text}' in bright yellow uppercase, thick black outline, heavy bold condensed font.\n\n"
+            f"{negative_prompt_block}"
+        )
+        concepts.append({
+            "id": c4_id,
+            "name": c4_name,
+            "thumbnail_text": f"{c4_main_text} / {c4_sub_text}",
+            "text_style": f"Upper-left: bold yellow ('{c4_main_text}'), thick black outline, speech pointer. Lower-right: ('{c4_sub_text}').",
+            "composition": "Extreme close-up two-shot: protagonist left ~52%, adversary right ~48%, faces 20-30cm apart",
+            "gpt_prompt": c4_prompt,
+            "visual_facts_used": [],
+        })
 
     # ─────────────────────────────────────────────────────────────────────────
     # CONCEPT TYPE 5: Climax Firestorm / Solo Annihilation (Cơn Bão Chiến Trận / Hủy Diệt)
@@ -2890,6 +2861,10 @@ def _mine_dynamic_story_concepts(
     elif "elena" in text_lower:
         female_name = "Elena"
         female_role = "Elena, the skilled mage companion"
+    elif isinstance(story_memory, dict) and str(story_memory.get("female_lead_name", "")).strip():
+        # Series Bible female character (merged in by _merge_series_bible)
+        female_name = str(story_memory["female_lead_name"]).strip()
+        female_role = f"{female_name}, the female lead"
     else:
         # Check glossary or common heroine terms
         for k in ["heroine", "priestess", "elf", "archer", "healer", "mage", "scout"]:
@@ -2984,15 +2959,18 @@ def _mine_dynamic_story_concepts(
         f"{negative_prompt_block}"
     )
 
-    concepts.append({
-        "id": c7_id,
-        "name": c7_name,
-        "thumbnail_text": f"{c7_main_text} / {c7_sub_text}",
-        "text_style": f"Upper-left: bold yellow with hot pink glow ('{c7_main_text}'), thick black outline. Lower-right: ('{c7_sub_text}').",
-        "composition": c7_comp,
-        "gpt_prompt": c7_prompt,
-        "visual_facts_used": [],
-    })
+    # Only for stories with a named female character: otherwise the scene invents a heroine
+    # (the Veteran of the Apocalypse ep 1-3 kit had none yet shipped this concept in its top 3).
+    if female_name:
+        concepts.append({
+            "id": c7_id,
+            "name": c7_name,
+            "thumbnail_text": f"{c7_main_text} / {c7_sub_text}",
+            "text_style": f"Upper-left: bold yellow with hot pink glow ('{c7_main_text}'), thick black outline. Lower-right: ('{c7_sub_text}').",
+            "composition": c7_comp,
+            "gpt_prompt": c7_prompt,
+            "visual_facts_used": [],
+        })
 
     return concepts
 
@@ -3816,6 +3794,26 @@ def preview_primary_title(
     )
 
 
+def preview_thumbnail_concepts(
+    comic_title: str,
+    from_ep: int,
+    to_ep: int,
+    story_memory: Optional[Dict[str, Any]] = None,
+    download_dir: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """The top concepts the kit will present, built exactly as generate_us_apocalypse_metadata
+    does, so Stage 12 can draft overlay text for them before the synchronous metadata pass."""
+    story_memory = _merge_series_bible(story_memory, download_dir)
+    archetype = _resolve_archetype(comic_title, story_memory, download_dir)
+    mc_name = get_character_names(comic_title, story_memory)["mc"]
+    beats = _extract_story_beats(comic_title, archetype, story_memory, download_dir, from_ep, to_ep)
+    concepts = _build_resource_contrast_concepts(
+        comic_title, archetype, mc_name, beats,
+        story_memory=story_memory, download_dir=download_dir, from_ep=from_ep, to_ep=to_ep,
+    )
+    return concepts[:OVERLAY_CONCEPTS]
+
+
 def generate_us_apocalypse_metadata(
     comic_title: str,
     from_ep: int,
@@ -3835,6 +3833,7 @@ def generate_us_apocalypse_metadata(
     llm_chapter_options: Optional[Dict[str, List[str]]] = None,
     registry_chapter_names: Optional[List[str]] = None,
     premise_pitch: Optional[Dict[str, Any]] = None,
+    llm_overlay_options: Optional[Dict[str, List[Tuple[str, str]]]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -4020,6 +4019,12 @@ def generate_us_apocalypse_metadata(
         from_ep=from_ep,
         to_ep=to_ep,
     )
+    # Overlay text: LLM drafts + template text through one validator; never truncated.
+    overlay_validator = OverlayValidator(
+        title_result["hook_sheet"], primary_title, character_names=title_result["hook_sheet"].character_names,
+    )
+    thumbnail_concepts, overlay_checks = apply_overlays(thumbnail_concepts, llm_overlay_options or {}, overlay_validator)
+    claim_audit["thumbnail_overlays"] = [c.model_dump() for c in overlay_checks]
 
     # V5.2: Build StoryFactGraph early to ground dashboard, thumbnails, and title audit
     _vfg = None
@@ -4226,6 +4231,7 @@ def generate_us_apocalypse_metadata(
             "originality_statement": "original scripted narration" in desc_text.lower(),
         },
         opening_segments=opening_segments,
+        thumbnail_concepts=thumbnail_concepts[:OVERLAY_CONCEPTS],
     )
     passed_all = gate_report.status != "FAIL"
 

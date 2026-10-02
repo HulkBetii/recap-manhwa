@@ -3013,6 +3013,20 @@ class Stage12_MetadataReports(BaseStage):
             if arcs and not llm_chapter_options:
                 await context.log("Chapter Engine: LLM không trả về tên chapter, dùng tên Stage 11 / 'Part N' (vẫn qua bộ kiểm tra).", "warning")
 
+            # Overlay text must complement the shipped title: reuse the pitch's title or preview it.
+            from youtube_metadata import preview_primary_title, preview_thumbnail_concepts
+            from thumbnail_text import generate_llm_overlay_options
+            overlay_title = (task.artifacts.get("premise_pitch") or {}).get("title")
+            if not overlay_title:
+                overlay_title = preview_primary_title(
+                    comic_title, from_ep, to_ep, story_memory, download_dir,
+                    llm_title_candidates=llm_hooks,
+                    registry_titles=registry.titles_for_dedup(comic_title),
+                    language=language,
+                )["primary_title"]
+            top_concepts = preview_thumbnail_concepts(comic_title, from_ep, to_ep, story_memory, download_dir)
+            llm_overlay_options = await generate_llm_overlay_options(hook_sheet, overlay_title, top_concepts, llm_call)
+
             metadata["youtube_metadata"] = generate_youtube_metadata(
                 comic_title,
                 from_ep,
@@ -3026,6 +3040,7 @@ class Stage12_MetadataReports(BaseStage):
                 llm_chapter_options=llm_chapter_options,
                 registry_chapter_names=registry.chapter_names_for_dedup(comic_title),
                 premise_pitch=task.artifacts.get("premise_pitch"),
+                llm_overlay_options=llm_overlay_options,
                 # Navigation links only when the user supplies real URLs (never synthesized).
                 playlist_url=task.payload.get("playlist_url"),
                 previous_part_url=task.payload.get("previous_part_url"),
