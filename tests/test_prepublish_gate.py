@@ -124,10 +124,10 @@ def test_too_few_chapters_fail_unless_disabled():
 
 # --- Title promise & description ---------------------------------------------
 
-def test_title_promise_missing_from_opening_is_a_warning():
+def test_title_promise_missing_from_opening_blocks_upload():
     weekend = ["Friends gather around the barbecue grill and argue about idols."] * 5
     check = check_title_promise_in_opening(GOOD_TITLE, weekend)
-    assert not check.passed and check.severity == "warn"
+    assert not check.passed and check.severity == "fail"
     assert check_title_promise_in_opening(GOOD_TITLE, OPENING).passed
 
 

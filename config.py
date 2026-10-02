@@ -74,6 +74,11 @@ OMNIVOICE_PRESETS = {
 # Flash-Forward Intro Policy: Disabled by default per user request (Cold Open / Direct Start)
 ENABLE_FLASH_FORWARD_INTRO = os.getenv("ENABLE_FLASH_FORWARD_INTRO", "false").lower() in ("true", "1", "yes")
 
+# Premise Pitch: 30-45s title-aligned cold open prepended to the first episode (replaces the
+# template flash-forward). Enabled by default after the channel's 0:30-7:50 retention collapse.
+ENABLE_PREMISE_PITCH = os.getenv("ENABLE_PREMISE_PITCH", "true").lower() in ("true", "1", "yes")
+PREMISE_PITCH_IMAGE_COUNT = 8
+
 # Universal Automation Defaults (Pacing, Auto Clean-Crop, On-Demand Text Removal)
 DEFAULT_MIN_PANEL_DURATION = float(os.getenv("MIN_PANEL_DURATION", "3.5"))
 DEFAULT_HARD_FLOOR_DURATION = float(os.getenv("HARD_FLOOR_DURATION", "3.0"))

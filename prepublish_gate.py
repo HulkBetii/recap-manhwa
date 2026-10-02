@@ -134,14 +134,17 @@ def check_legacy_compliance(flags: Dict[str, bool]) -> GateCheck:
 
 
 def check_title_promise_in_opening(primary_title: str, opening_segments: Sequence[str]) -> GateCheck:
-    """Viewers who click must hear the title's promise early; a mismatch drives the early drop-off."""
+    """
+    Viewers who click must hear the title's promise early; a mismatch drove the channel's
+    0:30-7:50 collapse. Blocking since the premise pitch exists to satisfy it.
+    """
     hook = strip_suffix(primary_title)
     key_words = [
         w.lower() for w in WORD_RE.findall(hook)
         if len(w) >= 4 and w.lower() not in UNGROUNDED_OK_WORDS and w.lower() not in STOPWORDS
     ] + [n.replace(",", "") for n in NUMBER_RE.findall(hook)]
     if not key_words or not opening_segments:
-        return GateCheck(id="title_promise_in_opening", severity="warn", passed=False,
+        return GateCheck(id="title_promise_in_opening", severity="fail", passed=False,
                          detail="no opening narration or title key words to compare")
     opening = " ".join(opening_segments[:OPENING_SEGMENTS]).lower()
     opening_prefixes = {w[:5] for w in WORD_RE.findall(opening)}
@@ -150,7 +153,7 @@ def check_title_promise_in_opening(primary_title: str, opening_segments: Sequenc
     coverage = len(echoed) / len(key_words)
     missing = [w for w in key_words if w not in echoed]
     return GateCheck(
-        id="title_promise_in_opening", severity="warn", passed=coverage >= MIN_PROMISE_COVERAGE,
+        id="title_promise_in_opening", severity="fail", passed=coverage >= MIN_PROMISE_COVERAGE,
         detail="" if coverage >= MIN_PROMISE_COVERAGE else
         f"only {coverage:.0%} of the title's key words appear in the first {OPENING_SEGMENTS} segments (missing: {', '.join(missing[:6])})",
     )

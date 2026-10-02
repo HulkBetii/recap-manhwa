@@ -3689,6 +3689,102 @@ def plan_chapter_arcs(
     )
 
 
+def _select_video_titles(
+    comic_title: str,
+    archetype: str,
+    story_memory: Optional[Dict[str, Any]],
+    download_dir: Optional[str],
+    from_ep: int,
+    to_ep: int,
+    evidence_index: "EvidenceIndex",
+    series_bible: Any,
+    alt_titles_list: List[str],
+    language: str,
+    llm_title_candidates: Optional[List[str]],
+    registry_titles: Optional[List[str]],
+) -> Dict[str, Any]:
+    """
+    Title selection shared by the upload kit (Stage 12) and preview_primary_title (Stage 11),
+    so the premise-pitch intro is always written for the title that actually ships.
+    """
+    ep_range = f"Ep {from_ep}~{to_ep}" if from_ep != to_ep else f"Ep {from_ep}"
+    title_options, title_variants, claim_audit = generate_dynamic_titles(
+        comic_title, archetype, story_memory, download_dir, from_ep, to_ep
+    )
+    primary_title = title_options[0] if title_options else format_recap_title(f"{comic_title} [{ep_range}]")
+
+    hook_sheet = build_hook_sheet(
+        comic_title, download_dir, from_ep, to_ep,
+        story_memory=story_memory,
+        bible=series_bible,
+        language=language,
+    )
+    title_validator = TitleValidator(
+        hook_sheet,
+        registry_titles=registry_titles or [],
+        alt_titles=alt_titles_list,
+        evidence_check=lambda t: evidence_index.validate_candidate(t, archetype),
+    )
+    title_selection = select_titles(
+        llm_hooks=llm_title_candidates or [],
+        template_hooks=list(title_options) + list(title_variants.values()),
+        validator=title_validator,
+    )
+    primary_title_reasons: List[str] = []
+    if title_selection.status == "validated":
+        title_options = title_selection.titles
+        title_variants = title_selection.variants
+        primary_title = title_options[0]
+        final_candidates = {f"option_{i + 1}": t for i, t in enumerate(title_options)}
+        final_candidates.update(title_variants)
+        claim_audit["title_validation"] = evidence_index.validate_all_candidates(final_candidates, archetype)
+    else:
+        # Explain why the unvalidated fallback title is not fit to publish.
+        primary_title_reasons = title_validator.check(primary_title, "template").reasons
+    claim_audit["title_engine"] = {
+        "status": title_selection.status,
+        "llm_candidates": len(llm_title_candidates or []),
+        "registry_titles_checked": len(registry_titles or []),
+        "checks": [c.model_dump() for c in title_selection.checks],
+    }
+    return {
+        "title_options": title_options,
+        "title_variants": title_variants,
+        "primary_title": primary_title,
+        "claim_audit": claim_audit,
+        "primary_title_reasons": primary_title_reasons,
+        "status": title_selection.status,
+        "hook_sheet": hook_sheet,
+    }
+
+
+def preview_primary_title(
+    comic_title: str,
+    from_ep: int,
+    to_ep: int,
+    story_memory: Optional[Dict[str, Any]] = None,
+    download_dir: Optional[str] = None,
+    llm_title_candidates: Optional[List[str]] = None,
+    registry_titles: Optional[List[str]] = None,
+    alt_titles: Optional[List[str]] = None,
+    language: str = "en",
+) -> Dict[str, Any]:
+    """The title generate_us_apocalypse_metadata will pick for the same inputs (no kit built)."""
+    story_memory = _merge_series_bible(story_memory, download_dir)
+    archetype = detect_archetype(comic_title, story_memory)
+    evidence_index = EvidenceIndex(
+        comic_title=comic_title, archetype=archetype, story_memory=story_memory,
+        download_dir=download_dir, from_ep=from_ep, to_ep=to_ep,
+    )
+    return _select_video_titles(
+        comic_title, archetype, story_memory, download_dir, from_ep, to_ep,
+        evidence_index,
+        load_bible(download_dir) if load_bible is not None else None,
+        resolve_alternative_titles(comic_title, story_memory, alt_titles),
+        language, llm_title_candidates, registry_titles,
+    )
+
+
 def generate_us_apocalypse_metadata(
     comic_title: str,
     from_ep: int,
@@ -3707,6 +3803,7 @@ def generate_us_apocalypse_metadata(
     language: str = "en",
     llm_chapter_options: Optional[Dict[str, List[str]]] = None,
     registry_chapter_names: Optional[List[str]] = None,
+    premise_pitch: Optional[Dict[str, Any]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -3733,49 +3830,19 @@ def generate_us_apocalypse_metadata(
 
     beats = _extract_story_beats(comic_title, archetype, story_memory, download_dir, from_ep, to_ep)
 
-    # ── 1. DYNAMIC TITLES & A/B TEST VARIANTS ──────────────────────────────
-    title_options, title_variants, claim_audit = generate_dynamic_titles(
-        comic_title, archetype, story_memory, download_dir, from_ep, to_ep
-    )
-    primary_title = title_options[0] if title_options else format_recap_title(f"{comic_title} [{ep_range}]")
-
-    # ── 1b. TITLE ENGINE: LLM drafts + templates through one deterministic gate ──
+    # ── 1. TITLES: templates + LLM drafts through one deterministic gate ──
     series_bible = load_bible(download_dir) if load_bible is not None else None
     narration_by_episode = load_narration_by_episode(download_dir, from_ep, to_ep)
-    hook_sheet = build_hook_sheet(
-        comic_title, download_dir, from_ep, to_ep,
-        story_memory=story_memory,
-        bible=series_bible,
-        language=language,
+    title_result = _select_video_titles(
+        comic_title, archetype, story_memory, download_dir, from_ep, to_ep,
+        evidence_index, series_bible, alt_titles_list, language,
+        llm_title_candidates, registry_titles,
     )
-    title_validator = TitleValidator(
-        hook_sheet,
-        registry_titles=registry_titles or [],
-        alt_titles=alt_titles_list,
-        evidence_check=lambda t: evidence_index.validate_candidate(t, archetype),
-    )
-    title_selection = select_titles(
-        llm_hooks=llm_title_candidates or [],
-        template_hooks=list(title_options) + list(title_variants.values()),
-        validator=title_validator,
-    )
-    if title_selection.status == "validated":
-        title_options = title_selection.titles
-        title_variants = title_selection.variants
-        primary_title = title_options[0]
-        final_candidates = {f"option_{i + 1}": t for i, t in enumerate(title_options)}
-        final_candidates.update(title_variants)
-        claim_audit["title_validation"] = evidence_index.validate_all_candidates(final_candidates, archetype)
-        primary_title_reasons: List[str] = []
-    else:
-        # Explain why the unvalidated fallback title is not fit to publish.
-        primary_title_reasons = title_validator.check(primary_title, "template").reasons
-    claim_audit["title_engine"] = {
-        "status": title_selection.status,
-        "llm_candidates": len(llm_title_candidates or []),
-        "registry_titles_checked": len(registry_titles or []),
-        "checks": [c.model_dump() for c in title_selection.checks],
-    }
+    title_options = title_result["title_options"]
+    title_variants = title_result["title_variants"]
+    primary_title = title_result["primary_title"]
+    claim_audit = title_result["claim_audit"]
+    primary_title_reasons = title_result["primary_title_reasons"]
 
     # ── 2. NARRATIVE CHAPTERS (Timestamps) ─────────────────────────────────
     chapter_warnings: List[str] = []
@@ -4108,6 +4175,14 @@ def generate_us_apocalypse_metadata(
         if audit_names is not None and narration_by_episode else None
     )
     first_episode = min(narration_by_episode) if narration_by_episode else None
+    opening_segments = narration_by_episode.get(first_episode, []) if first_episode is not None else []
+    # The pitch only counts when it is in the video and was written for the title being shipped.
+    pitch_in_video = bool(
+        premise_pitch and premise_pitch.get("prepended") and premise_pitch.get("text")
+        and premise_pitch.get("title") == primary_title
+    )
+    if pitch_in_video:
+        opening_segments = [premise_pitch["text"], *opening_segments]
     gate_report = run_prepublish_gate(
         primary_title=primary_title,
         title_engine_audit=claim_audit.get("title_engine", {}),
@@ -4126,7 +4201,7 @@ def generate_us_apocalypse_metadata(
             "hashtags_max_5": len(final_hashtags) <= 5,
             "originality_statement": "original scripted narration" in desc_text.lower(),
         },
-        opening_segments=narration_by_episode.get(first_episode, []) if first_episode is not None else [],
+        opening_segments=opening_segments,
     )
     passed_all = gate_report.status != "FAIL"
 
@@ -4157,6 +4232,7 @@ def generate_us_apocalypse_metadata(
         "passed": passed_all,
         "gate_status": gate_report.status,
         "gate": gate_report.model_dump(),
+        "premise_pitch_in_video": pitch_in_video,
         "name_audit": name_audit.model_dump() if name_audit is not None else None,
         "unsupported_claims": unsupported_claims,
         "archetype": archetype,

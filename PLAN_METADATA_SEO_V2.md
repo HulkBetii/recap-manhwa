@@ -120,6 +120,15 @@ Tiêu chí kiểm chứng: test với bộ chapter Zombie Revelation → không 
 **Đã xác nhận:** người dùng đổi " — " thành " - " trong mô tả Zombie Revelation → chapter hiển thị. Nguyên nhân gốc = em dash ở dòng timestamp.
 
 ### D. Hook 3 phút đầu
+**Trạng thái: ĐÃ CODE (2026-10-02)** — `premise_pitch.py`, `tests/test_premise_pitch.py` (16 test).
+Thay đổi thiết kế (người dùng chọn): pitch là **intro riêng render sau khi có title**, không viết trong prompt tập 1 — vì Hook Sheet/title chỉ có sau khi narration xong.
+- `youtube_metadata._select_video_titles` dùng chung cho kit và `preview_primary_title`; Stage 11 lưu `llm_title_hooks` để Stage 12 dùng lại → title của kit luôn là title pitch đã hứa.
+- Stage 11 `_prepend_premise_pitch`: LLM viết pitch (60–115 từ EN) → kiểm tra (số liệu, tên bịa kể cả đầu câu, từ hứa hẹn thể loại, chào hỏi, phải nhắc lại title) → thử lại 1 lần kèm lý do → TTS + render (`MicroIntroRenderer`, 8 ảnh) → ghép vào tập đầu. Bật mặc định (`ENABLE_PREMISE_PITCH`, payload `enable_premise_pitch`); khi bật thì flash-forward template không chạy.
+- Sửa rủi ro chạy lại: `intro_state.json` ghi chữ ký video sau khi ghép → nếu Stage 10 render lại tập đầu thì làm mới bản sao lưu; lần chạy không có intro thì gỡ intro cũ.
+- Stage 5 prompt tập 1–2: luật SETUP COMPRESSION (trang không xung đột ≤ 2 segment, giữ thứ tự).
+- Gate: `title_promise_in_opening` nâng lên **FAIL**, dùng pitch (nếu đúng title đang ship) + đoạn đầu tập 1.
+Giới hạn: chưa chạy với TTS/Gemini thật; kiểm tra tên ở pitch là heuristic; pitch tiếng Việt bỏ qua kiểm tra bám từ vựng và nhắc title.
+
 1. Thay luật "NO premise recap" (`app.py:3774`) bằng **Premise Pitch 30–45s** sinh từ HookSheet: nêu lời hứa title + stakes + con số trong 30s đầu, rồi vào cảnh xung đột.
 2. Tập 1–2: nén trang không có xung đột xuống ≤ 2 segment, giữ thứ tự kể.
 3. Flash-forward: bỏ template chung (`DynamicHookDirector.get_archetype_template`); chỉ giữ khi LLM sinh từ cảnh thật có bằng chứng.

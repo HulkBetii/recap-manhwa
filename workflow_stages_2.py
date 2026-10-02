@@ -2520,6 +2520,156 @@ class Stage11_FinalVideoAssembly(BaseStage):
     @property
     def weight(self) -> float: return 0.05
 
+    @staticmethod
+    def _first_episode_intro_paths(download_dir, from_ep):
+        ep1_dir = os.path.join(download_dir, f"episode_{from_ep}")
+        return {
+            "video": os.path.join(ep1_dir, "video.mp4"),
+            "srt": os.path.join(ep1_dir, "transcript.srt"),
+            "backup_video": os.path.join(ep1_dir, "video_no_intro.mp4"),
+            "backup_srt": os.path.join(ep1_dir, "transcript_no_intro.srt"),
+            "state": os.path.join(ep1_dir, "intro_state.json"),
+        }
+
+    @staticmethod
+    def _file_signature(path):
+        st = os.stat(path)
+        return [st.st_size, int(st.st_mtime)]
+
+    @classmethod
+    def _prepend_intro_to_first_episode(cls, intro_artifacts, download_dir, from_ep) -> bool:
+        """
+        Prepends an intro clip to the first episode, always rebuilding from a no-intro backup so
+        re-runs never stack intros. The backup is refreshed when Stage 10 re-rendered the episode
+        (video.mp4 no longer matches the signature recorded after the last prepend).
+        """
+        import shutil
+        from arc_intro_engine import FastIntroPrepender
+        p = cls._first_episode_intro_paths(download_dir, from_ep)
+        if not os.path.exists(p["video"]):
+            return False
+
+        rerendered = False
+        if os.path.exists(p["state"]):
+            with open(p["state"], "r", encoding="utf-8") as f:
+                rerendered = json.load(f).get("output_signature") != cls._file_signature(p["video"])
+        if rerendered or not os.path.exists(p["backup_video"]):
+            shutil.copy2(p["video"], p["backup_video"])
+            if os.path.exists(p["srt"]):
+                shutil.copy2(p["srt"], p["backup_srt"])
+
+        ok = FastIntroPrepender.prepend_intro(
+            intro_video_path=intro_artifacts["video_path"],
+            intro_srt_path=intro_artifacts["srt_path"],
+            intro_duration=intro_artifacts["duration"],
+            target_video_path=p["backup_video"],
+            target_srt_path=p["backup_srt"] if os.path.exists(p["backup_srt"]) else p["srt"],
+            output_video_path=p["video"],
+            output_srt_path=p["srt"],
+        )
+        if ok:
+            with open(p["state"], "w", encoding="utf-8") as f:
+                json.dump({"output_signature": cls._file_signature(p["video"])}, f)
+        return ok
+
+    @classmethod
+    def _restore_first_episode_without_intro(cls, download_dir, from_ep) -> bool:
+        """Removes an intro prepended by a previous run when this run ships none."""
+        import shutil
+        p = cls._first_episode_intro_paths(download_dir, from_ep)
+        if not (os.path.exists(p["state"]) and os.path.exists(p["backup_video"]) and os.path.exists(p["video"])):
+            return False
+        with open(p["state"], "r", encoding="utf-8") as f:
+            still_ours = json.load(f).get("output_signature") == cls._file_signature(p["video"])
+        if still_ours:  # otherwise Stage 10 already replaced the video with an intro-free render
+            shutil.copy2(p["backup_video"], p["video"])
+            if os.path.exists(p["backup_srt"]):
+                shutil.copy2(p["backup_srt"], p["srt"])
+        os.remove(p["state"])
+        return still_ours
+
+    async def _prepend_premise_pitch(self, context, download_dir, folder_name) -> bool:
+        """Drafts the title-aligned premise pitch, renders it and prepends it to the first episode.
+        Returns True only when the pitch is actually in the video."""
+        task = context.task
+        from_ep, to_ep = task.from_episode, task.to_episode
+        try:
+            import config
+            from arc_intro_engine import ArcClimaxMiner, MicroIntroRenderer
+            from premise_pitch import generate_premise_pitch
+            from series_bible import load_bible
+            from title_engine import DEFAULT_REGISTRY_PATH, TitleRegistry, build_hook_sheet, generate_llm_hooks
+            from youtube_metadata import preview_primary_title
+
+            comic_title = task.comic_title or "Comic"
+            language = task.payload.get("language", "en")
+            story_memory = None
+            story_mem_path = os.path.join(download_dir, "story_memory.json")
+            if os.path.exists(story_mem_path):
+                with open(story_mem_path, "r", encoding="utf-8") as f:
+                    story_memory = json.load(f)
+            bible = load_bible(download_dir)
+            llm_call = Stage12_MetadataReports._text_llm_call(task)
+
+            # Draft titles now and hand them to Stage 12 so the kit ships the title this pitch promises.
+            llm_hooks = task.artifacts.get("llm_title_hooks")
+            if llm_hooks is None:
+                sheet = build_hook_sheet(comic_title, download_dir, from_ep, to_ep, story_memory=story_memory, bible=bible, language=language)
+                llm_hooks = await generate_llm_hooks(sheet, llm_call)
+                task.artifacts["llm_title_hooks"] = llm_hooks
+            registry = TitleRegistry.load(task.payload.get("title_registry_path") or DEFAULT_REGISTRY_PATH)
+            preview = preview_primary_title(
+                comic_title, from_ep, to_ep, story_memory, download_dir,
+                llm_title_candidates=llm_hooks,
+                registry_titles=registry.titles_for_dedup(comic_title),
+                language=language,
+            )
+            if preview["status"] != "validated":
+                await context.log("Premise Pitch: bỏ qua vì chưa có title qua kiểm tra (pitch phải bám title thật).", "warning")
+                return False
+
+            title = preview["primary_title"]
+            pitch = await generate_premise_pitch(preview["hook_sheet"], title, llm_call, bible, language)
+            task.artifacts["premise_pitch"] = {
+                "title": title,
+                "text": pitch.text,
+                "attempts": [a.model_dump() for a in pitch.attempts],
+                "prepended": False,
+            }
+            if not pitch.ok:
+                last = pitch.attempts[-1].reasons if pitch.attempts else ["no attempt"]
+                await context.log(f"Premise Pitch: không đạt kiểm tra sau {len(pitch.attempts)} lần ({'; '.join(last)}).", "warning")
+                return False
+            await context.log(f"Premise Pitch cho title \"{title}\": \"{pitch.text}\"", "info")
+
+            climax = ArcClimaxMiner.scan_climax_episode(download_dir, from_ep=from_ep, to_ep=to_ep)
+            images = ArcClimaxMiner.select_top_climax_images(
+                download_dir, climax["climax_episode"], num_images=getattr(config, "PREMISE_PITCH_IMAGE_COUNT", 8)
+            )
+            intro_artifacts = await MicroIntroRenderer.render_intro_clip(
+                intro_dir=os.path.join(download_dir, "intro_pitch"),
+                hook_script=pitch.text,
+                image_paths=[img["path"] for img in images],
+                language=language,
+                voice_id=task.payload.get("voice_id", "ai33pro"),
+                ref_audio_path=task.payload.get("ref_audio_path"),
+                enable_sfx=False,
+            )
+            if not self._prepend_intro_to_first_episode(intro_artifacts, download_dir, from_ep):
+                await context.log("Premise Pitch: render xong nhưng không ghép được vào tập đầu.", "warning")
+                return False
+            task.artifacts["premise_pitch"].update({
+                "prepended": True,
+                "duration": intro_artifacts["duration"],
+                "intro_video_url": f"/downloads/{folder_name}/intro_pitch/video.mp4" if folder_name else "",
+            })
+            await context.log(f"Đã ghép Premise Pitch vào đầu tập {from_ep} (+{intro_artifacts['duration']:.1f}s).", "success")
+            return True
+        except Exception as err:
+            logger.warning(f"Premise pitch skipped: {err}")
+            await context.log(f"Premise Pitch: lỗi, bỏ qua ({err}).", "warning")
+            return False
+
     async def execute(self, context: WorkflowContext) -> bool:
         from app import find_ffmpeg
         import shutil
@@ -2548,16 +2698,22 @@ class Stage11_FinalVideoAssembly(BaseStage):
         total_episodes = to_ep - from_ep + 1
         episodes_processed = list(range(from_ep, to_ep + 1))
 
-        # Flash-Forward Teaser Intro (Disabled by default per user request)
         import config
+        # Premise Pitch: title-aligned cold open. Takes precedence over the template flash-forward.
+        pitch_prepended = False
+        if task.payload.get("enable_premise_pitch", getattr(config, "ENABLE_PREMISE_PITCH", True)):
+            pitch_prepended = await self._prepend_premise_pitch(context, download_dir, folder_name)
+
+        intro_prepended = pitch_prepended
+        # Flash-Forward Teaser Intro (Disabled by default per user request)
         enable_flash_forward = task.payload.get(
             "enable_flash_forward_intro",
             getattr(config, "ENABLE_FLASH_FORWARD_INTRO", False)
         )
-        if enable_flash_forward:
+        if enable_flash_forward and not pitch_prepended:
             try:
                 await context.log("Đang khởi tạo Flash-Forward Teaser Intro (15s In Medias Res hook)...", "info")
-                from arc_intro_engine import ArcClimaxMiner, DynamicHookDirector, MicroIntroRenderer, FastIntroPrepender
+                from arc_intro_engine import ArcClimaxMiner, DynamicHookDirector, MicroIntroRenderer
                 
                 climax_info = ArcClimaxMiner.scan_climax_episode(download_dir, from_ep=from_ep, to_ep=to_ep)
                 climax_ep = climax_info["climax_episode"]
@@ -2617,34 +2773,10 @@ class Stage11_FinalVideoAssembly(BaseStage):
                     enable_sfx=task.payload.get("enable_sfx", False)
                 )
 
-                intro_vid = intro_artifacts["video_path"]
-                intro_srt = intro_artifacts["srt_path"]
                 intro_dur = intro_artifacts["duration"]
-
-                ep1_dir = os.path.join(download_dir, f"episode_{from_ep}")
-                ep1_vid = os.path.join(ep1_dir, "video.mp4")
-                ep1_srt = os.path.join(ep1_dir, "transcript.srt")
-                ep1_backup_vid = os.path.join(ep1_dir, "video_no_intro.mp4")
-                ep1_backup_srt = os.path.join(ep1_dir, "transcript_no_intro.srt")
-
+                ep1_vid = os.path.join(download_dir, f"episode_{from_ep}", "video.mp4")
                 if os.path.exists(ep1_vid):
-                    if not os.path.exists(ep1_backup_vid):
-                        shutil.copy2(ep1_vid, ep1_backup_vid)
-                    if os.path.exists(ep1_srt) and not os.path.exists(ep1_backup_srt):
-                        shutil.copy2(ep1_srt, ep1_backup_srt)
-
-                    target_base_vid = ep1_backup_vid if os.path.exists(ep1_backup_vid) else ep1_vid
-                    target_base_srt = ep1_backup_srt if os.path.exists(ep1_backup_srt) else ep1_srt
-
-                    prepended_ok = FastIntroPrepender.prepend_intro(
-                        intro_video_path=intro_vid,
-                        intro_srt_path=intro_srt,
-                        intro_duration=intro_dur,
-                        target_video_path=target_base_vid,
-                        target_srt_path=target_base_srt,
-                        output_video_path=ep1_vid,
-                        output_srt_path=ep1_srt
-                    )
+                    prepended_ok = self._prepend_intro_to_first_episode(intro_artifacts, download_dir, from_ep)
                     if prepended_ok:
                         task.artifacts["flash_forward_intro"] = {
                             "enabled": True,
@@ -2655,12 +2787,16 @@ class Stage11_FinalVideoAssembly(BaseStage):
                             "images": [os.path.basename(p) for p in top_paths],
                             "intro_video_url": f"/downloads/{folder_name}/intro/video.mp4" if folder_name else ""
                         }
+                        intro_prepended = True
                         await context.log(f"Đã ghép nối Flash-Forward Intro thành công vào đầu tập {from_ep} (+{intro_dur:.2f}s).", "success")
                     else:
                         await context.log("Không thể ghép Flash-Forward Intro bằng faststream copy, tiếp tục ghép video thông thường.", "warning")
             except Exception as intro_err:
                 logger.warning(f"Flash-Forward Intro generation skipped due to: {intro_err}")
                 await context.log(f"Bỏ qua tạo Flash-Forward Intro do cảnh báo: {intro_err}", "warning")
+
+        if not intro_prepended and self._restore_first_episode_without_intro(download_dir, from_ep):
+            await context.log(f"Đã gỡ intro cũ khỏi tập {from_ep} (lần chạy này không ghép intro).", "info")
 
         video_durations = []
         srt_paths = []
@@ -2861,7 +2997,10 @@ class Stage12_MetadataReports(BaseStage):
                 comic_title, download_dir, from_ep, to_ep,
                 story_memory=story_memory, bible=series_bible, language=language,
             )
-            llm_hooks = await generate_llm_hooks(hook_sheet, llm_call)
+            # Reuse Stage 11's drafts: the premise pitch was written for the title they produce.
+            llm_hooks = task.artifacts.get("llm_title_hooks")
+            if llm_hooks is None:
+                llm_hooks = await generate_llm_hooks(hook_sheet, llm_call)
             if hook_sheet.has_story and not llm_hooks:
                 await context.log("Title Engine: LLM không trả về title, dùng template dự phòng (vẫn qua bộ kiểm tra).", "warning")
 
@@ -2886,6 +3025,7 @@ class Stage12_MetadataReports(BaseStage):
                 language=language,
                 llm_chapter_options=llm_chapter_options,
                 registry_chapter_names=registry.chapter_names_for_dedup(comic_title),
+                premise_pitch=task.artifacts.get("premise_pitch"),
             )
 
             title_engine_audit = metadata["youtube_metadata"]["prepublish_audit"]["claim_audit"].get("title_engine", {})

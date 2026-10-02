@@ -4109,6 +4109,15 @@ MAX 18 WORDS PER SEGMENT:
     # Series Bible: authoritative cast shared by every episode, even when episodes run in parallel
     cast_bible_section = f"\n{cast_bible.strip()}\n" if cast_bible and cast_bible.strip() else ""
 
+    # Channel data: 98% of viewers remained at 0:30 but only 7.5% at 7:50 while episode 1
+    # narrated slow setup (briefings, dinners, banter). Compress it instead of narrating it.
+    setup_compression_section = """
+SETUP COMPRESSION (EPISODES 1-2 ONLY - RETENTION CRITICAL):
+- Pages with no threat, conflict or reveal (meals, banter, routine, travel, small talk) get AT MOST 2 segments in this whole episode, merged into quick bridge lines.
+- Spend every other segment on threats, confrontations, reveals and decisions.
+- Keep chronological page order: compress, never reorder or drop a story-critical event.
+""" if ep <= 2 else ""
+
     _seg_lo = max(22, total_pages // 2)
     _seg_hi = max(_seg_lo + 5, min(total_pages, max(_seg_lo + 5, int(total_pages * 0.65))))
     _min_coverage_page = max(1, total_pages - 8)
@@ -4407,7 +4416,7 @@ as the closing anchor instead.
 --------------------------------------------------
 
 {intro_rule}
-{cast_bible_section}
+{setup_compression_section}{cast_bible_section}
 --------------------------------------------------
 10. VIOLENCE AND SENSITIVE MATERIAL
 --------------------------------------------------
