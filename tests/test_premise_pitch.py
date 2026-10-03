@@ -70,6 +70,14 @@ def test_pitch_must_echo_the_title():
     assert any("does not echo the title" in r for r in check.reasons)
 
 
+@pytest.mark.parametrize("opener", ["Fortunately", "Suddenly", "Facing the horde"])
+def test_sentence_openers_are_not_invented_names(opener):
+    # Real rejection: the Veteran 1-33 pitch failed twice on "Fortunately".
+    text = GOOD_PITCH.replace("Tae is no soldier", f"{opener}, Tae is no soldier")
+    check = validate_pitch(text, TITLE, _sheet(), _bible())
+    assert not any("names not in the story" in r for r in check.reasons), check.reasons
+
+
 def test_pitch_must_state_the_official_premise_when_known():
     sheet = _sheet()
     sheet.synopsis = "When the outbreak hits Seoul, Tae turns an abandoned church basement into a stockpiled fortress."

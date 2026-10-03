@@ -50,6 +50,14 @@ SENTENCE_START_COMMON = {
     "nothing", "all", "one", "two", "three", "no", "not", "the",
 }
 SENTENCE_START_RE = re.compile(r"(?:^|[.!?]\s+)([A-Z][a-z]{2,})\b")
+# Adverbs and participles that open sentences ("Fortunately", "Suddenly", "Facing"); a Veteran 1-33 pitch was
+# rejected twice for "Fortunately". Short tokens ("Ming", "Jing") may still be names, so length matters.
+OPENER_SUFFIXES = ("ly", "ing", "ed")
+OPENER_MIN_LENGTH = 6
+
+
+def _looks_like_sentence_opener(token: str) -> bool:
+    return len(token) >= OPENER_MIN_LENGTH and token.lower().endswith(OPENER_SUFFIXES)
 
 
 class PitchCheck(BaseModel):
@@ -157,6 +165,7 @@ def validate_pitch(
             candidates |= {
                 tok for tok in SENTENCE_START_RE.findall(text)
                 if tok.lower() not in SENTENCE_START_COMMON and tok.lower() not in lowercase_words
+                and not _looks_like_sentence_opener(tok)
             }
             # Places and minor characters from the narration are fine; names found nowhere are invented.
             invented_names = sorted(
