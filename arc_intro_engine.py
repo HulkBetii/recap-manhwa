@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import math
@@ -20,7 +21,53 @@ from PIL import Image, ImageEnhance, ImageFilter
 
 from visual_scorer import VisualSemanticScorer
 from app import find_ffmpeg, get_working_encoder, parse_time_to_seconds
-from workflow_stages_2 import detect_clean_panel_and_focal_point, get_video_duration
+from workflow_stages_2 import (
+    align_subtitles_to_segments,
+    detect_clean_panel_and_focal_point,
+    get_video_duration,
+    wrap_srt_text,
+)
+
+logger = logging.getLogger(__name__)
+
+SRT_CUE_RE = re.compile(
+    r"\d+\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n(.*?)(?=\n\n|\Z)", re.DOTALL
+)
+SCRIPT_SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
+
+
+def _srt_timestamp(seconds: float) -> str:
+    ms_total = int(round(max(0.0, seconds) * 1000))
+    hrs, rem = divmod(ms_total, 3_600_000)
+    mins, rem = divmod(rem, 60_000)
+    secs, ms = divmod(rem, 1000)
+    return f"{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}"
+
+
+def align_clip_srt_to_script(srt_path: str, script: str, audio_duration: float) -> bool:
+    """Keeps Whisper's timings but the script's wording, like the episodes' subtitle stage.
+
+    Raw Whisper text misspells names and drops words: a Veteran outro read "Seongho" as "Ciongho".
+    Returns False (raw SRT kept) when there is nothing to align.
+    """
+    if not os.path.exists(srt_path):
+        return False
+    with open(srt_path, "r", encoding="utf-8", errors="ignore") as f:
+        content = f.read().replace("\r\n", "\n").strip()
+    subtitles = [
+        {"start": parse_time_to_seconds(s.replace(",", ".")), "end": parse_time_to_seconds(e.replace(",", ".")),
+         "text": " ".join(text.split())}
+        for s, e, text in SRT_CUE_RE.findall(content)
+    ]
+    segments = [{"speech": s.strip()} for s in SCRIPT_SENTENCE_RE.split(script.strip()) if s.strip()]
+    if not subtitles or not segments:
+        return False
+    entries = align_subtitles_to_segments(subtitles, segments, audio_duration)
+    with open(srt_path, "w", encoding="utf-8") as f:
+        for idx, entry in enumerate(entries, 1):
+            f.write(f"{idx}\n{_srt_timestamp(entry['start'])} --> {_srt_timestamp(entry['end'])}\n"
+                    f"{wrap_srt_text(entry['text'])}\n\n")
+    return True
 
 
 # High-impact vocabulary for scoring climax intensity
@@ -654,6 +701,10 @@ class MicroIntroRenderer:
         duration = get_video_duration(raw_audio_path, ffmpeg_exe)
         if not duration or duration <= 0:
             duration = 15.0
+        try:
+            align_clip_srt_to_script(srt_path, hook_script, duration)
+        except Exception as align_err:
+            logger.warning(f"Clip subtitles keep raw Whisper text ({srt_path}): {align_err}")
 
         # Step 2: Audio Post-Production (Pure Voiceover Narration + Optional SFX)
         project_root = os.path.dirname(os.path.abspath(__file__))

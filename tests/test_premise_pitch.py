@@ -253,3 +253,52 @@ def test_run_without_intro_removes_previous_intro(tmp_path, fake_prepender):
     assert Stage11_FinalVideoAssembly._restore_first_episode_without_intro(str(tmp_path), 1)
     assert video.read_bytes() == b"EPISODE"
     assert not (tmp_path / "episode_1" / "intro_state.json").exists()
+
+
+# --- Outro assembly helpers (Stage 11) ---------------------------------------
+
+def test_outro_images_keep_latest_pages_in_order():
+    def by_score(_d, ep, num_images):
+        assert ep == 33 and num_images == 6
+        return [{"path": f"p/{n:03d}.jpg"} for n in (98, 12, 109, 40, 77, 5)]
+    assert Stage11_FinalVideoAssembly._outro_images("d", 33, 2, select_fn=by_score) == ["p/098.jpg", "p/109.jpg"]
+
+
+def test_outro_images_missing_episode_returns_empty():
+    def missing(_d, _ep, num_images):
+        raise FileNotFoundError("no images")
+    assert Stage11_FinalVideoAssembly._outro_images("d", 33, 5, select_fn=missing) == []
+
+
+def test_assembly_segments_append_outro_after_last_episode():
+    import os
+    plain = Stage11_FinalVideoAssembly._assembly_segments("d", [1, 2])
+    assert [os.path.normpath(v) for v, _ in plain] == [os.path.normpath("d/episode_1/video.mp4"), os.path.normpath("d/episode_2/video.mp4")]
+    outro = {"video_path": "d/outro/video.mp4", "srt_path": "d/outro/transcript.srt"}
+    with_outro = Stage11_FinalVideoAssembly._assembly_segments("d", [1, 2], outro)
+    assert with_outro[-1] == ("d/outro/video.mp4", "d/outro/transcript.srt") and len(with_outro) == 3
+    # A single-episode video with an outro has two segments, so it goes through concat, not a plain copy.
+    assert len(Stage11_FinalVideoAssembly._assembly_segments("d", [5], outro)) == 2
+
+
+def test_clip_subtitles_use_script_wording(tmp_path):
+    """Pitch/outro clips keep Whisper timings but the script's words (a Veteran outro read "Ciongho")."""
+    from arc_intro_engine import align_clip_srt_to_script
+    srt = tmp_path / "transcript.srt"
+    srt.write_text(
+        "1\n00:00:00,000 --> 00:00:01,700\nHunting season begins elsewhere.\n\n"
+        "2\n00:00:02,360 --> 00:00:06,900\nCiongho stands resolute before the injured woman.\n\n"
+        "3\n00:00:07,460 --> 00:00:09,840\nongoing chapters, the story continues.\n",
+        encoding="utf-8",
+    )
+    script = ("While hunting season begins elsewhere, Seongho stands resolute before the injured woman. "
+              "With ongoing chapters, the story continues.")
+    assert align_clip_srt_to_script(str(srt), script, 10.0)
+    text = srt.read_text(encoding="utf-8")
+    assert "Seongho" in text and "Ciongho" not in text and "With ongoing chapters" in text
+    assert text.startswith("1\n00:00:00,000 --> ")
+
+
+def test_clip_subtitles_missing_file_is_a_no_op(tmp_path):
+    from arc_intro_engine import align_clip_srt_to_script
+    assert not align_clip_srt_to_script(str(tmp_path / "none.srt"), "Text.", 5.0)

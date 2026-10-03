@@ -2634,6 +2634,86 @@ class Stage11_FinalVideoAssembly(BaseStage):
                 logger.warning(f"Premise pitch: no usable panels in episode {ep}: {err}")
         return paths[:count]
 
+    OUTRO_IMAGE_COUNT = 5
+    OUTRO_CANDIDATE_FACTOR = 3  # score this many times more panels, then keep the latest ones
+
+    @classmethod
+    def _outro_images(cls, download_dir, last_ep, count, select_fn=None):
+        """Panels for the outro: the best panels of the final episode, keeping the latest pages, so the
+        closing lines play over the scene where the video stops."""
+        if select_fn is None:
+            from arc_intro_engine import ArcClimaxMiner
+            select_fn = ArcClimaxMiner.select_top_climax_images
+        try:
+            picked = select_fn(download_dir, last_ep, num_images=count * cls.OUTRO_CANDIDATE_FACTOR)
+        except FileNotFoundError as err:
+            logger.warning(f"Outro: no usable panels in episode {last_ep}: {err}")
+            return []
+        return sorted((img["path"] for img in picked), key=os.path.basename)[-count:]
+
+    @staticmethod
+    def _assembly_segments(download_dir, episodes, outro_clip=None):
+        """(video, srt) pairs in playback order: every episode, then the outro clip when rendered."""
+        segments = [
+            (os.path.join(download_dir, f"episode_{ep}", "video.mp4"), os.path.join(download_dir, f"episode_{ep}", "transcript.srt"))
+            for ep in episodes
+        ]
+        if outro_clip:
+            segments.append((outro_clip["video_path"], outro_clip["srt_path"]))
+        return segments
+
+    async def _render_outro(self, context, download_dir, folder_name):
+        """Drafts the status-aware outro and renders it with the narration voice. Returns the clip
+        ({video_path, srt_path, duration}) or None; never raises, the video simply ships without it."""
+        task = context.task
+        from_ep, to_ep = task.from_episode, task.to_episode
+        try:
+            from arc_intro_engine import MicroIntroRenderer
+            from metadata_kit import load_story_memory
+            from outro_engine import build_outro_facts, classify_outro, generate_outro
+            from series_bible import load_bible
+            from series_status import load_release_status
+
+            language = task.payload.get("language", "en")
+            status = load_release_status(download_dir, task.artifacts)
+            outro_type = classify_outro(status, to_ep)
+            bible = load_bible(download_dir)
+            facts = build_outro_facts(download_dir, from_ep, to_ep, load_story_memory(download_dir), bible, task.payload)
+            result = await generate_outro(outro_type, facts, Stage12_MetadataReports._text_llm_call(task), bible, language)
+            task.artifacts["outro"] = {
+                "type": outro_type.value,
+                "text": result.text,
+                "source": result.source,
+                "release_status": status.model_dump(),
+                "attempts": [a.model_dump() for a in result.attempts],
+                "appended": False,
+            }
+            if not result.ok:
+                await context.log(f"Outro: không có lời kết cho ngôn ngữ '{language}', bỏ qua.", "warning")
+                return None
+            if result.source == "template":
+                last = result.attempts[-1].reasons if result.attempts else ["no LLM"]
+                await context.log(f"Outro: bản LLM không đạt ({'; '.join(last)}), dùng câu mẫu.", "warning")
+            await context.log(f"Outro [{outro_type.value}, {status.state}]: \"{result.text}\"", "info")
+
+            image_paths = self._outro_images(download_dir, to_ep, self.OUTRO_IMAGE_COUNT)
+            if not image_paths:
+                await context.log(f"Outro: không tìm được ảnh ở tập {to_ep}, bỏ qua.", "warning")
+                return None
+            return await MicroIntroRenderer.render_intro_clip(
+                intro_dir=os.path.join(download_dir, "outro"),
+                hook_script=result.text,
+                image_paths=image_paths,
+                language=language,
+                voice_id=task.payload.get("voice_id", "ai33pro"),
+                ref_audio_path=task.payload.get("ref_audio_path"),
+                enable_sfx=False,
+            )
+        except Exception as err:
+            logger.warning(f"Outro skipped: {err}")
+            await context.log(f"Outro: lỗi, bỏ qua ({err}).", "warning")
+            return None
+
     async def _prepend_premise_pitch(self, context, download_dir, folder_name) -> bool:
         """Drafts the title-aligned premise pitch, renders it and prepends it to the first episode.
         Returns True only when the pitch is actually in the video."""
@@ -2743,7 +2823,6 @@ class Stage11_FinalVideoAssembly(BaseStage):
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
-        total_episodes = to_ep - from_ep + 1
         episodes_processed = list(range(from_ep, to_ep + 1))
 
         # Premise Pitch: title-aligned cold open. Takes precedence over the template flash-forward.
@@ -2845,14 +2924,24 @@ class Stage11_FinalVideoAssembly(BaseStage):
         if not intro_prepended and self._restore_first_episode_without_intro(download_dir, from_ep):
             await context.log(f"Đã gỡ intro cũ khỏi tập {from_ep} (lần chạy này không ghép intro).", "info")
 
-        video_durations = []
-        srt_paths = []
-        for ep in episodes_processed:
-            ep_dir = os.path.join(download_dir, f"episode_{ep}")
-            video_path = os.path.join(ep_dir, "video.mp4")
-            srt_path = os.path.join(ep_dir, "transcript.srt")
-            video_durations.append(get_video_duration(video_path, ffmpeg_exe))
-            srt_paths.append(srt_path)
+        # Outro: status-aware closing appended after the last episode (own clip, episode files untouched).
+        task.artifacts.pop("outro", None)
+        outro_clip = None
+        if task.payload.get("enable_outro", getattr(config, "ENABLE_OUTRO", True)):
+            outro_clip = await self._render_outro(context, download_dir, folder_name)
+
+        segments = self._assembly_segments(download_dir, episodes_processed, outro_clip)
+        video_durations = [get_video_duration(video_path, ffmpeg_exe) for video_path, _ in segments]
+        srt_paths = [srt_path for _, srt_path in segments]
+        if outro_clip:
+            outro_start = sum(video_durations[:len(episodes_processed)])
+            task.artifacts["outro"].update({
+                "appended": True,
+                "start_seconds": round(outro_start, 2),
+                "duration": round(video_durations[-1], 2),
+                "outro_video_url": f"/downloads/{folder_name}/outro/video.mp4" if folder_name else "",
+            })
+            await context.log(f"Đã gắn Outro sau tập {to_ep} (bắt đầu {outro_start:.1f}s, +{video_durations[-1]:.1f}s).", "success")
 
         chapters = []
         curr_ts = 0.0
@@ -2871,7 +2960,7 @@ class Stage11_FinalVideoAssembly(BaseStage):
             curr_ts += dur
         task.artifacts["chapters"] = chapters
 
-        if total_episodes == 1:
+        if len(segments) == 1:
             single_video = os.path.join(download_dir, f"episode_{from_ep}", "video.mp4")
             cmd = [
                 ffmpeg_exe, "-y",
@@ -2900,9 +2989,7 @@ class Stage11_FinalVideoAssembly(BaseStage):
             concat_list_path = os.path.join(download_dir, "concat_list.txt")
             try:
                 with open(concat_list_path, "w", encoding="utf-8") as f:
-                    for ep in episodes_processed:
-                        ep_dir = os.path.join(download_dir, f"episode_{ep}")
-                        video_path = os.path.join(ep_dir, "video.mp4")
+                    for video_path, _ in segments:
                         rel_path = os.path.relpath(video_path, download_dir).replace('\\', '/')
                         f.write(f"file '{rel_path}'\n")
             except Exception as file_err:
@@ -3032,6 +3119,7 @@ class Stage12_MetadataReports(BaseStage):
             )
             metadata["premise_pitch"] = task.artifacts.get("premise_pitch")
             metadata["llm_title_hooks"] = task.artifacts.get("llm_title_hooks")
+            metadata["outro"] = task.artifacts.get("outro")
         except Exception as e:
             logger.warning(f"Failed to generate YouTube metadata: {e}")
             await context.log(f"Không tạo được YouTube metadata: {e}", "error")
