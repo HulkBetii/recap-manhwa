@@ -70,6 +70,16 @@ def test_pitch_must_echo_the_title():
     assert any("does not echo the title" in r for r in check.reasons)
 
 
+def test_pitch_must_state_the_official_premise_when_known():
+    sheet = _sheet()
+    sheet.synopsis = "When the outbreak hits Seoul, Tae turns an abandoned church basement into a stockpiled fortress."
+    assert validate_pitch(GOOD_PITCH, TITLE, sheet, _bible()).passed  # church basement = the premise
+    off_premise = GOOD_PITCH.replace("abandoned church basement", "quiet back room").replace("church", "district")
+    check = validate_pitch(off_premise, TITLE, sheet, _bible())
+    assert any("official premise" in r for r in check.reasons), check.reasons
+    assert "OFFICIAL PREMISE" in build_pitch_prompt(sheet, TITLE)
+
+
 def test_places_from_the_narration_are_allowed():
     assert "Jamsil" in GOOD_PITCH
     assert validate_pitch(GOOD_PITCH, TITLE, _sheet(), _bible()).passed

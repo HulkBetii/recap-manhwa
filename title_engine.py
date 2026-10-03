@@ -21,6 +21,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -44,6 +45,23 @@ VARIANT_MAX_JACCARD = 0.5    # A/B variants must differ at least this much
 LLM_TITLE_COUNT = 10
 MAX_HOOK_SHEET_NUMBERS = 12
 MAX_HOOK_SHEET_BEATS = 8
+# A number can carry a title only if it is central to the story: repeated, early, or official.
+# (Veteran 1-33 shipped "His 105 Points KEEP Him Alive!" from one line in episode 22 of 33.)
+CENTRAL_NUMBER_MIN_MENTIONS = 2
+EARLY_EPISODE_SHARE = 0.25
+NUMBER_SCORE = 3.0
+PREMISE_SCORE = 2.0          # title states the publisher's core premise (gate, hideout, ...)
+PREMISE_PREFIX = 5
+PREMISE_MIN_STEMS = 2
+# Synopsis words too vague to show a title is about the premise ("Doom STRIKES" is not "he opens gates").
+PREMISE_FILLER_WORDS = {
+    "time", "thing", "things", "about", "order", "other", "others", "worse", "final", "doom", "become",
+    "becomes", "expects", "having", "while", "there", "more", "very", "life", "lives", "days", "years",
+    "suddenly", "begins", "starts", "story", "must", "will", "would", "could", "should", "what", "your",
+    # common verbs: every story "hits", "turns" or "finds" something
+    "hits", "turns", "takes", "makes", "gets", "goes", "comes", "finds", "tries", "wants", "knows", "sees",
+    "uses", "gives", "keeps", "leaves", "runs", "falls", "rises", "works", "logs", "rushes", "lands",
+}
 
 REGISTRY_FILENAME = "channel_registry.json"
 DEFAULT_REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), REGISTRY_FILENAME)
@@ -110,6 +128,7 @@ TitleSource = Literal["llm", "template"]
 class NumericFact(BaseModel):
     phrase: str
     mentions: int
+    central: bool = True  # build_hook_sheet marks one-off late numbers False
 
 
 class HookSheet(BaseModel):
@@ -117,6 +136,7 @@ class HookSheet(BaseModel):
     language: str = "en"
     protagonist: str = ""
     setting: str = ""
+    synopsis: str = ""  # official publisher synopsis (Series Bible): the story's core premise
     sub_niches: List[str] = Field(default_factory=list)
     numeric_facts: List[NumericFact] = Field(default_factory=list)
     story_beats: List[str] = Field(default_factory=list)
@@ -126,6 +146,48 @@ class HookSheet(BaseModel):
     @property
     def has_story(self) -> bool:
         return bool(self.corpus)
+
+    @property
+    def central_facts(self) -> List[NumericFact]:
+        return [f for f in self.numeric_facts if f.central]
+
+    @property
+    def central_numbers(self) -> set[str]:
+        return {n.replace(",", "") for f in self.central_facts for n in NUMBER_RE.findall(f.phrase)}
+
+
+def premise_stem(word: str) -> str:
+    """'Gates' and 'gate' share a stem; prefixes keep 'dimensional' ~ 'dimension'."""
+    w = word.lower()
+    if len(w) > 4 and w.endswith("s"):
+        w = w[:-1]
+    return w[:PREMISE_PREFIX]
+
+
+def premise_prefixes(sheet: HookSheet) -> set[str]:
+    """Word stems that make the official premise specific (gate, realm, hideout), without the niche
+    umbrella terms every title carries anyway (zombie, apocalypse), filler words or the series title."""
+    if not sheet.synopsis:
+        return set()
+    generic = {w.lower() for k in NICHE_KEYWORDS for w in k.split()} | UNGROUNDED_OK_WORDS | PREMISE_FILLER_WORDS
+    generic |= {w.lower() for w in WORD_RE.findall(sheet.comic_title or "")}
+    generic |= {w.lower() for n in sheet.character_names for w in WORD_RE.findall(n)}
+    # Lowercase words only: names and places ("Seoul", "Survival Life") are context, not the hook itself.
+    words = [w for w in WORD_RE.findall(sheet.synopsis) if w.islower()]
+    return {premise_stem(w) for w in words if len(w) >= 4 and w not in generic and w not in STOPWORDS}
+
+
+def premise_matches(text: str, prefixes: set[str]) -> int:
+    """Distinct premise stems used in `text`."""
+    return len({premise_stem(w) for w in WORD_RE.findall(text or "") if len(w) >= 4} & prefixes)
+
+
+def states_premise(text: str, sheet: HookSheet) -> bool:
+    """True when `text` uses at least PREMISE_MIN_STEMS distinct words of the official premise.
+
+    One shared word is not enough: a generic verb ("SAVES", "PREPARES") also appears in synopses.
+    """
+    return premise_matches(text, premise_prefixes(sheet)) >= PREMISE_MIN_STEMS
 
 
 def load_narration(download_dir: Optional[str], from_ep: int, to_ep: int) -> List[str]:
@@ -154,16 +216,38 @@ def load_narration_by_episode(download_dir: Optional[str], from_ep: int, to_ep: 
     return result
 
 
-def _numeric_facts(corpus: Sequence[str]) -> List[NumericFact]:
+def _numeric_facts(by_episode: Dict[int, List[str]], synopsis: str = "") -> List[NumericFact]:
+    """Numeric phrases of the narration; a fact is central when its number is mentioned at least
+    twice, appears in the first quarter of the episodes, or appears in the official synopsis."""
+    episodes = sorted(by_episode)
+    early = set(episodes[:max(1, math.ceil(len(episodes) * EARLY_EPISODE_SHARE))])
     counts: Counter = Counter()
-    for seg in corpus:
-        for num, unit_sym, unit_word in NUMERIC_FACT_RE.findall(seg):
-            unit = (unit_sym or unit_word or "").strip().lower()
-            phrase = f"{num}{'%' if unit in ('%', 'percent') else ''}"
-            if unit and unit not in ("%", "percent"):
-                phrase = f"{num} {unit}"
-            counts[phrase] += 1
-    return [NumericFact(phrase=p, mentions=n) for p, n in counts.most_common(MAX_HOOK_SHEET_NUMBERS)]
+    number_mentions: Counter = Counter()
+    early_numbers: set = set()
+    for ep in episodes:
+        for seg in by_episode[ep]:
+            for num in NUMBER_RE.findall(seg):
+                number_mentions[num.replace(",", "")] += 1
+                if ep in early:
+                    early_numbers.add(num.replace(",", ""))
+            for num, unit_sym, unit_word in NUMERIC_FACT_RE.findall(seg):
+                unit = (unit_sym or unit_word or "").strip().lower()
+                phrase = f"{num}{'%' if unit in ('%', 'percent') else ''}"
+                if unit and unit not in ("%", "percent"):
+                    phrase = f"{num} {unit}"
+                counts[phrase] += 1
+    official = {n.replace(",", "") for n in NUMBER_RE.findall(synopsis or "")}
+
+    def central(phrase: str) -> bool:
+        nums = [n.replace(",", "") for n in NUMBER_RE.findall(phrase)]
+        return any(
+            number_mentions[n] >= CENTRAL_NUMBER_MIN_MENTIONS or n in early_numbers or n in official for n in nums
+        )
+
+    return [
+        NumericFact(phrase=p, mentions=n, central=central(p))
+        for p, n in counts.most_common(MAX_HOOK_SHEET_NUMBERS)
+    ]
 
 
 def _sub_niches(corpus: Sequence[str]) -> List[str]:
@@ -204,13 +288,16 @@ def build_hook_sheet(
     language: str = "en",
 ) -> HookSheet:
     """Collects grounded facts for title drafting. `bible` is a series_bible.SeriesBible or None."""
-    corpus = load_narration(download_dir, from_ep, to_ep)
+    by_episode = load_narration_by_episode(download_dir, from_ep, to_ep)
+    corpus = [seg for ep in sorted(by_episode) for seg in by_episode[ep]]
     protagonist = ""
     names: List[str] = []
     setting = ""
+    synopsis = ""
     if bible is not None:
         protagonist = getattr(bible, "protagonist_name", "") or ""
         setting = getattr(bible, "setting", "") or ""
+        synopsis = getattr(bible, "synopsis", "") or ""
         names = [n for n in [protagonist] + [c.name for c in getattr(bible, "characters", [])] if n]
     if not protagonist and isinstance(story_memory, dict):
         protagonist = str(story_memory.get("protagonist_name", "") or "")
@@ -221,8 +308,9 @@ def build_hook_sheet(
         language=(language or "en").lower(),
         protagonist=protagonist,
         setting=setting,
+        synopsis=synopsis,
         sub_niches=_sub_niches(corpus),
-        numeric_facts=_numeric_facts(corpus),
+        numeric_facts=_numeric_facts(by_episode, synopsis),
         story_beats=_story_beats(story_memory, corpus, from_ep, to_ep),
         character_names=names,
         corpus=corpus,
@@ -231,15 +319,23 @@ def build_hook_sheet(
 
 def build_title_prompt(sheet: HookSheet, count: int = LLM_TITLE_COUNT) -> str:
     """Prompt for drafting title hooks (the part before ' | Manhwa Recap')."""
-    numbers = "\n".join(f"- {f.phrase} (mentioned {f.mentions}x)" for f in sheet.numeric_facts) or "- (none)"
+    numbers = "\n".join(f"- {f.phrase} (mentioned {f.mentions}x)" for f in sheet.central_facts) or "- (none)"
     beats = "\n".join(f"- {b}" for b in sheet.story_beats) or "- (none)"
     niches = ", ".join(sheet.sub_niches) or "apocalypse survival"
+    premise = ""
+    premise_rule = ""
+    if sheet.synopsis:
+        premise = f'- OFFICIAL PREMISE (publisher synopsis, the story\'s core hook): "{sheet.synopsis}"\n'
+        premise_rule = (
+            "\n8. At least half of the hooks must state the core premise from the OFFICIAL PREMISE (the protagonist's "
+            "defining power, situation or plan), not a side detail from one scene."
+        )
     return f"""You write YouTube titles for an English (US) apocalypse/survival manhwa recap channel.
 
 STORY FACTS (the ONLY facts you may use):
-- Setting: {sheet.setting or "(unknown)"}
+{premise}- Setting: {sheet.setting or "(unknown)"}
 - Sub-niche: {niches}
-- Numbers that literally appear in the narration:
+- Numbers central to the story (repeated, early, or official); the only numbers you may use:
 {numbers}
 - Story beats:
 {beats}
@@ -259,7 +355,8 @@ HARD RULES:
 4. No character names and no comic title. Refer to the protagonist as "He".
 5. At most {MAX_CAPS_WORDS} words in ALL CAPS.
 6. No power-rank or genre words the facts do not support (e.g. no "SSS-Rank", "System", "Trainee" unless in the facts).
-7. Cover three angles across the list: underdog contrast, concrete number/resource, threat/stakes.
+7. Cover three angles across the list: underdog contrast, concrete number/resource, threat/stakes. A number
+   is optional; never build a title on a number that is not in the list above.{premise_rule}
 
 Return ONLY a JSON array of {count} strings, no Markdown.
 """
@@ -349,9 +446,12 @@ class TitleValidator:
         self.name_patterns = [re.compile(rf"\b{re.escape(n)}\b") for n in sheet.character_names if len(n) >= 2]
         self.evidence_check = evidence_check
         corpus_text = " ".join(sheet.corpus)
-        self.corpus_numbers = {n.replace(",", "") for n in NUMBER_RE.findall(corpus_text)}
+        # The official synopsis is publisher text about this story, so it grounds titles like narration does.
+        self.corpus_numbers = {n.replace(",", "") for n in NUMBER_RE.findall(f"{corpus_text} {sheet.synopsis}")}
         corpus_words = WORD_RE.findall(corpus_text.lower())
-        self.corpus_prefixes = {self._prefix(w) for w in corpus_words}
+        self.corpus_prefixes = {self._prefix(w) for w in corpus_words + WORD_RE.findall(sheet.synopsis.lower())}
+        self.central_numbers = sheet.central_numbers
+        self.premise_prefixes = premise_prefixes(sheet)
         self.corpus_word_counts = Counter(corpus_words)
         # Lexical grounding only makes sense when narration and titles share a language.
         self.lexical_grounding = sheet.language in ("en", "english") and bool(sheet.corpus)
@@ -437,11 +537,14 @@ class TitleValidator:
             numbers=numbers,
         )
 
-    @staticmethod
-    def _score(hook: str, numbers: List[str], caps: List[str], source: TitleSource) -> float:
+    def _score(self, hook: str, numbers: List[str], caps: List[str], source: TitleSource) -> float:
         score = 0.0
-        if numbers:
-            score += 3.0  # concrete numbers are the strongest pattern in niche winners
+        # Concrete numbers are the strongest pattern in niche winners, but only story-central ones:
+        # a one-off number from one late scene promises something the video is not about.
+        if any(n in self.central_numbers for n in numbers):
+            score += NUMBER_SCORE
+        if premise_matches(hook, self.premise_prefixes) >= PREMISE_MIN_STEMS:
+            score += PREMISE_SCORE
         if any(re.search(rf"\b{re.escape(k)}\b", hook[:30].lower()) for k in NICHE_KEYWORDS):
             score += 2.0
         if 40 <= len(hook) <= HOOK_MAX_CHARS:

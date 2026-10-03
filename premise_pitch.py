@@ -25,6 +25,8 @@ from title_engine import (
     NUMBER_RE,
     WORD_RE,
     HookSheet,
+    premise_prefixes,
+    states_premise,
     strip_suffix,
 )
 
@@ -72,19 +74,27 @@ def _lang(language: str) -> str:
 
 def build_pitch_prompt(sheet: HookSheet, title: str, language: str = "en", feedback: Optional[List[str]] = None) -> str:
     lo, hi = WORD_BOUNDS.get(_lang(language), DEFAULT_WORD_BOUNDS)
-    numbers = "\n".join(f"- {f.phrase}" for f in sheet.numeric_facts) or "- (none)"
+    numbers = "\n".join(f"- {f.phrase}" for f in sheet.central_facts) or "- (none)"
     beats = "\n".join(f"- {b}" for b in sheet.story_beats) or "- (none)"
     mc = sheet.protagonist or "he"
     retry = ""
     if feedback:
         retry = "\nYOUR PREVIOUS DRAFT WAS REJECTED FOR: " + "; ".join(feedback) + ". Fix every point.\n"
+    premise = ""
+    premise_rule = ""
+    if sheet.synopsis:
+        premise = f'- OFFICIAL PREMISE (publisher synopsis): "{sheet.synopsis}"\n'
+        premise_rule = (
+            "- Build the stakes on the OFFICIAL PREMISE (his defining power, situation or plan). Never present a "
+            "side detail or a number as the one thing that keeps him alive.\n"
+        )
     return f"""You write the spoken cold-open for a long manhwa recap video.
 
 VIDEO TITLE (the promise viewers clicked on): "{strip_suffix(title)}"
 
 STORY FACTS (the ONLY facts you may use):
-- Setting: {sheet.setting or "(unknown)"}
-- Numbers that literally appear in the narration:
+{premise}- Setting: {sheet.setting or "(unknown)"}
+- Numbers central to the story (optional; use no other numbers):
 {numbers}
 - Story beats across the whole video:
 {beats}
@@ -93,12 +103,12 @@ Write ONE premise pitch in {LANGUAGE_NAMES.get(_lang(language), language)}, {lo}
 
 STRUCTURE (proven by the top channels in this niche):
 1. First sentence: state the title's promise concretely, reusing the title's key words.
-2. Next 2-3 sentences: the stakes, using at most two numbers from the list above.
+2. Next 2-3 sentences: the stakes, using at most two numbers from the list above (numbers are optional).
 3. One sentence on why the protagonist is different (his edge, choice or situation).
 4. Last sentence: hand off into the story ("It all begins..." / "And it starts...").
 
 RULES:
-- The protagonist is "{mc}"; never invent other names. Unnamed characters are described by role.
+{premise_rule}- The protagonist is "{mc}"; never invent other names. Unnamed characters are described by role.
 - No greetings, no "in this video", no channel mentions, no questions to the viewer.
 - Do not reveal the final outcome of the video.
 - Plain spoken prose only: no lists, no Markdown, no quotation marks.
@@ -169,6 +179,9 @@ def validate_pitch(
         promise = check_title_promise_in_opening(title, [text])
         if not promise.passed:
             reasons.append(f"does not echo the title: {promise.detail}")
+        # With an official synopsis, the pitch must carry its core premise, not only a side detail.
+        if premise_prefixes(sheet) and not states_premise(text, sheet):
+            reasons.append("does not state the official premise (the synopsis' core power or situation)")
 
     return PitchCheck(text=text, passed=not reasons, reasons=reasons, word_count=len(words))
 

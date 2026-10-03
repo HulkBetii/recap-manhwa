@@ -60,6 +60,53 @@ def test_hook_sheet_collects_numbers_niche_and_names(tmp_path):
     assert "300 cans" in prompt and "Max 60 characters" in prompt
 
 
+def _multi_episode_story(tmp_path, synopsis=""):
+    """8 episodes: '105 points' once in episode 6 (late), '300 cans' early, '40 survivors' twice late."""
+    episodes = {
+        1: ["Martial law hits Seoul as the zombie outbreak spreads.", "He drags 300 cans of food into the church basement."],
+        2: ["The zombie horde reaches the church gate at night."],
+        3: ["He opens a hidden gate to another realm and builds a hideout there."],
+        4: ["Infected swarm the stadium while soldiers retreat."],
+        5: ["By winter 40 survivors remain inside the church."],
+        6: ["His status window shows a stockpile of 105 points."],
+        7: ["The 40 survivors ration every can of food."],
+        8: ["A zombie horde surrounds the hideout gate."],
+    }
+    for ep, segs in episodes.items():
+        d = tmp_path / f"episode_{ep}"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "recap.json").write_text(json.dumps([{"speech": s, "images": [{"page": 1, "priority": 1.0}]} for s in segs]), encoding="utf-8")
+    bible = new_bible("Zombie Revelation 82-08")
+    bible.protagonist = CharacterEntry(name="Tae", gender="male")
+    bible.synopsis = synopsis
+    save_bible(bible, str(tmp_path))
+    from series_bible import load_bible
+    return build_hook_sheet("Zombie Revelation 82-08", str(tmp_path), 1, 8, bible=load_bible(str(tmp_path)))
+
+
+def test_one_off_late_numbers_are_not_central(tmp_path):
+    sheet = _multi_episode_story(tmp_path)
+    central = {f.phrase: f.central for f in sheet.numeric_facts}
+    assert central["105 points"] is False      # once, episode 6 of 8
+    assert central["300 cans"] is True         # early (first quarter of the episodes)
+    assert central["40 survivors"] is True     # repeated
+    prompt = build_title_prompt(sheet)
+    numbers_block = prompt.split("Numbers central to the story")[1].split("- Story beats")[0]
+    assert "105 points" not in numbers_block and "300 cans" in numbers_block
+
+
+def test_premise_title_outranks_a_side_detail_number(tmp_path):
+    synopsis = "When the zombie outbreak hits Seoul, Tae can open a hidden gate to another realm and build a hideout there."
+    sheet = _multi_episode_story(tmp_path, synopsis)
+    prompt = build_title_prompt(sheet)
+    assert "OFFICIAL PREMISE" in prompt and "hidden gate" in prompt
+    checks = {c.hook: c for c in select_titles(
+        ["In The Zombie Apocalypse His 105 Points KEEP Him Alive!", "Zombies Hit But He Opens A Gate To Another Realm!"],
+        [], TitleValidator(sheet),
+    ).checks}
+    assert checks["Zombies Hit But He Opens A Gate To Another Realm!"].score > checks["In The Zombie Apocalypse His 105 Points KEEP Him Alive!"].score
+
+
 def test_parse_title_candidates_handles_fences_numbering_and_suffix():
     raw = '```json\n["He Hoards 300 Cans While The Zombie Horde Waits | Manhwa Recap", "Second"]\n```'
     assert parse_title_candidates(raw) == ["He Hoards 300 Cans While The Zombie Horde Waits", "Second"]
