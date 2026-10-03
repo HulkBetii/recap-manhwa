@@ -302,3 +302,12 @@ def test_clip_subtitles_use_script_wording(tmp_path):
 def test_clip_subtitles_missing_file_is_a_no_op(tmp_path):
     from arc_intro_engine import align_clip_srt_to_script
     assert not align_clip_srt_to_script(str(tmp_path / "none.srt"), "Text.", 5.0)
+
+
+def test_clip_cues_are_at_most_two_lines():
+    from arc_intro_engine import MAX_CLIP_CUE_CHARS, _clip_cue_texts
+    script = ("Fortunately, Seongho awakened with the rare ability to open dimensional gates, allowing him to "
+              "safely level up his skills and prepare to save mankind from impending doom. It all begins today.")
+    cues = _clip_cue_texts(script)
+    assert all(len(c) <= MAX_CLIP_CUE_CHARS for c in cues[:-1]) and cues[-1] == "It all begins today."
+    assert " ".join(cues) == script

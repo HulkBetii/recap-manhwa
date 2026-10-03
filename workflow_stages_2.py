@@ -362,6 +362,10 @@ def align_subtitles_to_segments(subtitles: list, segments: list, audio_duration:
         # Prevents Whisper compression flicker (e.g. 0.11s segments)
         if (end_time - start_time) < min_seg_dur:
             end_time = start_time + min_seg_dur
+        # The floor must not push the last cue past the audio: it would overlap the next episode's
+        # first cue once the SRTs are merged (Veteran 1-33 had 5 such overlaps at segment seams).
+        if audio_duration > 0 and start_time < audio_duration < end_time:
+            end_time = audio_duration
 
         last_end_time = end_time
         normalized_entries.append({
@@ -2512,6 +2516,10 @@ def merge_srt_files(srt_paths: list, video_durations: list, output_srt_path: str
             start_str, end_str = time_match.groups()
             new_start = shift_srt_time(start_str, current_offset)
             new_end = shift_srt_time(end_str, current_offset)
+            # A cue never outlasts its own segment, or it overlaps the next segment's first cue.
+            segment_end = current_offset + video_durations[idx]
+            if parse_time_to_seconds_local(new_start) < segment_end < parse_time_to_seconds_local(new_end):
+                new_end = shift_srt_time("00:00:00,000", segment_end)
             
             sub_text = "\n".join(lines[time_line_idx+1:])
             

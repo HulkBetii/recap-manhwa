@@ -103,3 +103,23 @@ def test_display_guardrail_merges_sub_1_8s():
 def test_flash_forward_intro_disabled_by_default():
     """Verify that flash-forward intro is disabled by default (Cold Open policy)."""
     assert config.ENABLE_FLASH_FORWARD_INTRO is False
+
+
+def test_subtitle_floor_never_passes_audio_end():
+    """The 1.8s floor used to push the last cue past the audio, overlapping the next episode once merged."""
+    subtitles = [{"start": 0.0, "end": 4.0, "text": "First line here."}, {"start": 9.5, "end": 9.9, "text": "End."}]
+    segments = [{"speech": "First line here."}, {"speech": "End."}]
+    aligned = align_subtitles_to_segments(subtitles, segments, audio_duration=10.0)
+    assert aligned[-1]["end"] == 10.0
+
+
+def test_merged_cues_stay_inside_their_segment(tmp_path):
+    from workflow_stages_2 import merge_srt_files
+    first, second = tmp_path / "a.srt", tmp_path / "b.srt"
+    first.write_text("1\n00:00:00,000 --> 00:00:04,000\nOne.\n\n2\n00:00:08,000 --> 00:00:10,700\nTwo.\n", encoding="utf-8")
+    second.write_text("1\n00:00:00,000 --> 00:00:02,000\nThree.\n", encoding="utf-8")
+    out = tmp_path / "merged.srt"
+    merge_srt_files([str(first), str(second)], [10.0, 5.0], str(out))
+    text = out.read_text(encoding="utf-8")
+    assert "00:00:08,000 --> 00:00:10,000" in text
+    assert "00:00:10,000 --> 00:00:12,000" in text

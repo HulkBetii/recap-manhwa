@@ -34,6 +34,55 @@ SRT_CUE_RE = re.compile(
     r"\d+\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n(.*?)(?=\n\n|\Z)", re.DOTALL
 )
 SCRIPT_SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
+SCRIPT_CLAUSE_RE = re.compile(r"(?<=[,;:—])\s+")
+# Two subtitle lines (wrap_srt_text wraps at 42 chars); a whole pitch sentence made 4-5 line cues.
+MAX_CLIP_CUE_CHARS = 84
+
+
+def _split_words_evenly(text: str, max_chars: int) -> List[str]:
+    """Splits a comma-free run into the fewest roughly equal word groups that fit `max_chars`."""
+    words = text.split()
+    parts = math.ceil(len(text) / max_chars)
+    while True:
+        target = len(text) / parts
+        groups, current = [], ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if current and len(candidate) > target and len(groups) < parts - 1:
+                groups.append(current)
+                current = word
+            else:
+                current = candidate
+        groups.append(current)
+        if all(len(g) <= max_chars for g in groups):
+            return groups
+        parts += 1
+
+
+def _clip_cue_texts(script: str) -> List[str]:
+    """Script split into sentences, and long sentences into clause groups of at most two lines."""
+    cues: List[str] = []
+    for sentence in (s.strip() for s in SCRIPT_SENTENCE_RE.split(script.strip())):
+        if not sentence:
+            continue
+        if len(sentence) <= MAX_CLIP_CUE_CHARS:
+            cues.append(sentence)
+            continue
+        clauses = [
+            piece for clause in SCRIPT_CLAUSE_RE.split(sentence)
+            for piece in (_split_words_evenly(clause, MAX_CLIP_CUE_CHARS) if len(clause) > MAX_CLIP_CUE_CHARS else [clause])
+        ]
+        current = ""
+        for clause in clauses:
+            candidate = f"{current} {clause}".strip()
+            if current and len(candidate) > MAX_CLIP_CUE_CHARS:
+                cues.append(current)
+                current = clause
+            else:
+                current = candidate
+        if current:
+            cues.append(current)
+    return cues
 
 
 def _srt_timestamp(seconds: float) -> str:
@@ -59,7 +108,7 @@ def align_clip_srt_to_script(srt_path: str, script: str, audio_duration: float) 
          "text": " ".join(text.split())}
         for s, e, text in SRT_CUE_RE.findall(content)
     ]
-    segments = [{"speech": s.strip()} for s in SCRIPT_SENTENCE_RE.split(script.strip()) if s.strip()]
+    segments = [{"speech": text} for text in _clip_cue_texts(script)]
     if not subtitles or not segments:
         return False
     entries = align_subtitles_to_segments(subtitles, segments, audio_duration)
