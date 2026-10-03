@@ -60,6 +60,26 @@ def _looks_like_sentence_opener(token: str) -> bool:
     return len(token) >= OPENER_MIN_LENGTH and token.lower().endswith(OPENER_SUFFIXES)
 
 
+def invented_names(text: str, corpus_text: str, known_names: set, common_openers: frozenset = frozenset()) -> List[str]:
+    """Names in a short spoken text that appear neither in the Bible (`known_names`, name_key form) nor
+    anywhere in the narration. Also checks sentence-start words, which mid-sentence detection misses.
+    `common_openers` adds lowercase sentence starters specific to the caller's text type."""
+    candidates = set(extract_name_candidates([text]))
+    lowercase_words = {w.lower() for w in WORD_RE.findall(corpus_text)} | {
+        w for w in WORD_RE.findall(text) if w.islower()
+    } | common_openers
+    candidates |= {
+        tok for tok in SENTENCE_START_RE.findall(text)
+        if tok.lower() not in SENTENCE_START_COMMON and tok.lower() not in lowercase_words
+        and not _looks_like_sentence_opener(tok)
+    }
+    # Places and minor characters from the narration are fine; names found nowhere are invented.
+    return sorted(
+        n for n in candidates
+        if name_key(n) not in known_names and not re.search(rf"\b{re.escape(n)}\b", corpus_text)
+    )
+
+
 class PitchCheck(BaseModel):
     text: str
     passed: bool
@@ -156,24 +176,9 @@ def validate_pitch(
         if any(re.search(rf"\b{re.escape(p)}\b", text) for p in blocked):
             reasons.append("placeholder name")
         if getattr(bible, "protagonist_name", ""):
-            known = bible.known_names()
-            candidates = set(extract_name_candidates([text]))
-            # Short pitches often open a sentence with a name, which mid-sentence detection misses.
-            lowercase_words = {w.lower() for w in WORD_RE.findall(corpus_text)} | {
-                w for w in WORD_RE.findall(text) if w.islower()
-            }
-            candidates |= {
-                tok for tok in SENTENCE_START_RE.findall(text)
-                if tok.lower() not in SENTENCE_START_COMMON and tok.lower() not in lowercase_words
-                and not _looks_like_sentence_opener(tok)
-            }
-            # Places and minor characters from the narration are fine; names found nowhere are invented.
-            invented_names = sorted(
-                n for n in candidates
-                if name_key(n) not in known and not re.search(rf"\b{re.escape(n)}\b", corpus_text)
-            )
-            if invented_names:
-                reasons.append(f"names not in the story: {', '.join(invented_names)}")
+            names = invented_names(text, corpus_text, bible.known_names())
+            if names:
+                reasons.append(f"names not in the story: {', '.join(names)}")
 
     if _lang(language) == "en" and sheet.corpus:
         counts: dict = {}
