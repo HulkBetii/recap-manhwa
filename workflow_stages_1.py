@@ -487,7 +487,9 @@ class Stage1_ComicParsing(BaseStage):
                 info_texts = []
                 # webtoons ".day_info" ("UP EVERY SUNDAY" / "COMPLETED"); Naver: only the first meta block,
                 # later ones belong to recommended series.
-                for selector, limit in ((".day_info", None), ("[class*=ContentMetaInfo]", 1)):
+                # MagaPoke: the series' own update line; recommended series use .c-comic-item__* instead.
+                for selector, limit in ((".day_info", None), ("[class*=ContentMetaInfo]", 1),
+                                        (".p-episode__update-txt, .p-episode__new_update", None)):
                     texts = await page.locator(selector).all_inner_texts()
                     info_texts += texts[:limit] if limit else texts
                 page_text = await page.locator("body").inner_text()
@@ -495,6 +497,7 @@ class Stage1_ComicParsing(BaseStage):
                 # Sources that list every chapter on the series page (Asura, comix, toongod...).
                 full_list = [extract_chapter_number(s) for s in task.artifacts.get("chapter_slugs") or []]
                 full_list.append(task.artifacts.get("comix_max_chapter"))
+                full_list.append(len(task.artifacts.get("magapoke_episodes") or []))  # API lists every episode
                 full_list = [int(n) for n in full_list if n]
                 release_status = detect_release_status(
                     info_texts, page_text, latest_episode_from_hrefs(hrefs), max(full_list) if full_list else None
@@ -726,18 +729,18 @@ class Stage2_AsyncImageCrawling(BaseStage):
                 await context.start_episode(ep)
                 
                 if is_magapoke:
-                    from magapoke_crawler import crawl_magapoke_episode_images
+                    from magapoke_crawler import crawl_magapoke_episode_images, magapoke_episode_url
                     ep_url = url
                     magapoke_episodes = task.artifacts.get("magapoke_episodes", [])
                     user_ep_id = task.artifacts.get("magapoke_episode_id")
                     if user_ep_id and ep == from_ep:
                         title_id = task.artifacts.get("magapoke_title_id") or "01152"
-                        ep_url = f"https://pocket.shonenmagazine.com/title/{title_id}/episode/{user_ep_id}"
+                        ep_url = magapoke_episode_url(title_id, user_ep_id)
                     elif magapoke_episodes and 0 <= (ep - 1) < len(magapoke_episodes):
                         target_ep_obj = magapoke_episodes[ep - 1]
                         eid = target_ep_obj.get("episode_id")
-                        title_id = target_ep_obj.get("title_id") or task.artifacts.get("magapoke_title_id") or "01152"
-                        ep_url = f"https://pocket.shonenmagazine.com/title/{title_id}/episode/{eid}"
+                        title_id = task.artifacts.get("magapoke_title_id") or target_ep_obj.get("title_id") or "01152"
+                        ep_url = magapoke_episode_url(title_id, eid)
 
                     images_dir = os.path.join(ep_dir, "images")
                     downloaded_paths = await crawl_magapoke_episode_images(page, ep_url, images_dir, context_logger=context)

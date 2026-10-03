@@ -85,3 +85,9 @@ def test_load_prefers_artifacts_and_defaults_to_unknown(tmp_path):
     assert load_release_status(str(tmp_path / "missing")).state == "unknown"
     (tmp_path / "release_status.json").write_text("{broken", encoding="utf-8")
     assert load_release_status(str(tmp_path)).state == "unknown"
+
+
+@pytest.mark.parametrize("info", ["次回更新は10/23(金曜)予定です。", "最新話更新：隔週金曜", "最新話更新：不定期"])
+def test_magapoke_update_lines_mean_ongoing(info):
+    # Live 2026-10-03: pocket.shonenmagazine.com/title/01152 (.p-episode__update-txt / .p-episode__new_update).
+    assert detect_release_status([info]).state == "ongoing"

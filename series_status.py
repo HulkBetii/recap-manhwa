@@ -22,13 +22,14 @@ logger = logging.getLogger(__name__)
 ReleaseState = Literal["ongoing", "hiatus", "completed", "unknown"]
 RELEASE_STATUS_FILENAME = "release_status.json"
 
-# Info-area texts (webtoons ".day_info", Naver's first ContentMetaInfo block) are specific to the series,
+# Info-area texts (webtoons ".day_info", Naver's first ContentMetaInfo block, MagaPoke ".p-episode__update-txt" /
+# ".p-episode__new_update": "次回更新は10/23(金曜)予定です。") are specific to the series,
 # so every marker may be used there. Checked in priority order: a completed series may still show a schedule.
 INFO_AREA_PATTERNS: Sequence[tuple] = (
     ("completed", re.compile(r"^\s*COMPLETED\s*$|\bstatus\s*:?\s*(completed|finished)\b|완결|完結", re.IGNORECASE)),
     ("hiatus", re.compile(r"\bstatus\s*:?\s*(on\s+)?hiatus\b|\bhiatus\b|휴재|休載", re.IGNORECASE)),
     ("ongoing", re.compile(
-        r"\bUP\s+EVERY\s+\w+|\bEVERY\s+\w+DAY\b|\bstatus\s*:?\s*(ongoing|releasing)\b|[월화수목금토일]요웹툰|連載中",
+        r"\bUP\s+EVERY\s+\w+|\bEVERY\s+\w+DAY\b|\bstatus\s*:?\s*(ongoing|releasing)\b|[월화수목금토일]요웹툰|連載中|次回更新|最新話更新",
         re.IGNORECASE,
     )),
 )
