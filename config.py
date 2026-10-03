@@ -79,6 +79,10 @@ ENABLE_FLASH_FORWARD_INTRO = os.getenv("ENABLE_FLASH_FORWARD_INTRO", "false").lo
 ENABLE_PREMISE_PITCH = os.getenv("ENABLE_PREMISE_PITCH", "true").lower() in ("true", "1", "yes")
 PREMISE_PITCH_IMAGE_COUNT = 8
 
+# Outro: 20-25s closing appended after the last episode; its wording follows the comic's release
+# status (continues / hiatus / finale / neutral), read in Stage 1 (outro_engine.py).
+ENABLE_OUTRO = os.getenv("ENABLE_OUTRO", "true").lower() in ("true", "1", "yes")
+
 # Seam bridge: rewrites the first lines of an episode narrated without the previous episode's ending
 # (first episode of each parallel chunk) so back-to-back episodes flow (seam_bridge.py).
 ENABLE_SEAM_BRIDGE = os.getenv("ENABLE_SEAM_BRIDGE", "true").lower() in ("true", "1", "yes")

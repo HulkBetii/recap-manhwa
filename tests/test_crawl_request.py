@@ -68,6 +68,7 @@ def test_crawl_forwards_new_options_to_the_workflow(monkeypatch):
         "market_id": "us_apocalypse",
         "protagonist_name": "Kang Seongho",
         "enable_premise_pitch": False,
+        "enable_outro": False,
         "playlist_url": "https://www.youtube.com/playlist?list=PLabc",
     }
     result = asyncio.run(app_module.crawl(CrawlRequest(**body)))
@@ -76,10 +77,16 @@ def test_crawl_forwards_new_options_to_the_workflow(monkeypatch):
     assert captured["market_id"] == "us_apocalypse"
     assert captured["protagonist_name"] == "Kang Seongho"
     assert captured["enable_premise_pitch"] is False
+    assert captured["enable_outro"] is False
     assert captured["playlist_url"] == "https://www.youtube.com/playlist?list=PLabc"
 
 
 def test_remove_text_defaults_to_false():
     req = CrawlRequest(url="https://example.com/comic/list?title_no=123", from_episode=1, to_episode=1)
     assert req.remove_text is False
+
+
+def test_outro_defaults_to_on():
+    req = CrawlRequest(url="https://example.com/comic/list?title_no=123", from_episode=1, to_episode=1)
+    assert req.enable_outro is True
 

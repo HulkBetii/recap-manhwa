@@ -1043,6 +1043,7 @@ btnCrawl.addEventListener('click', async () => {
                 market_id: document.getElementById('market-preset') ? document.getElementById('market-preset').value.trim() || null : null,
                 enable_flash_forward_intro: document.getElementById('enable-flash-forward-intro') ? document.getElementById('enable-flash-forward-intro').checked : false,
                 enable_premise_pitch: document.getElementById('enable-premise-pitch') ? document.getElementById('enable-premise-pitch').checked : true,
+                enable_outro: document.getElementById('enable-outro') ? document.getElementById('enable-outro').checked : true,
                 protagonist_name: document.getElementById('protagonist-name') ? document.getElementById('protagonist-name').value.trim() || null : null,
                 playlist_url: document.getElementById('playlist-url') ? document.getElementById('playlist-url').value.trim() || null : null
             })

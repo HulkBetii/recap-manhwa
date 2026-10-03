@@ -882,6 +882,7 @@ class CrawlRequest(BaseModel):
     # Locks the Series Bible protagonist (Stage 5) when the comic only shows a handle early on.
     protagonist_name: Optional[str] = Field(default=None, max_length=80)
     enable_premise_pitch: bool = True
+    enable_outro: bool = True
     # Description navigation is printed only for real links supplied here (never synthesized).
     playlist_url: Optional[str] = None
     previous_part_url: Optional[str] = None
@@ -2858,6 +2859,7 @@ async def crawl(payload: CrawlRequest):
         "flash_forward_custom_hook": payload.flash_forward_custom_hook,
         "streaming_pipeline": payload.streaming_pipeline,
         "enable_premise_pitch": payload.enable_premise_pitch,
+        "enable_outro": payload.enable_outro,
         "playlist_url": payload.playlist_url,
         "previous_part_url": payload.previous_part_url,
         "next_part_url": payload.next_part_url,
