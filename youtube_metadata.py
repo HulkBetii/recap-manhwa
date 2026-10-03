@@ -3262,16 +3262,24 @@ def generate_community_posts(
     }
 
 
+def _format_seconds(seconds: float) -> str:
+    total = int(seconds)
+    hrs, mins, secs = total // 3600, (total % 3600) // 60, total % 60
+    return f"{hrs:02d}:{mins:02d}:{secs:02d}" if hrs else f"{mins:02d}:{secs:02d}"
+
+
 def recommend_card_and_endscreen_anchors(
     narrative_chapters: List[Dict[str, Any]],
     series_navigation: Optional[Dict[str, Optional[str]]] = None,
+    outro: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Recommends YouTube Card and End Screen placements to keep viewers on the channel.
 
     Series cards (playlist / next part) are only recommended when the user supplied the real link:
     the channel publishes one video per story, so there is usually no series playlist or next part.
-    Without them the cards point to another recap from the channel.
+    Without them the cards point to another recap from the channel. When Stage 11 appended an outro,
+    the end screen sits on it (YouTube allows at most the final 20 seconds).
     """
     nav = series_navigation or {}
     card_1_timestamp = "02:00"
@@ -3294,17 +3302,24 @@ def recommend_card_and_endscreen_anchors(
     else:
         card_2 = {"card_type": "Video / Best For Viewer", "teaser_text": "Watch This Next!", "link": None}
 
+    end_screen: Dict[str, Any] = {
+        "timing": "Final 20 seconds of video",
+        "recommended_elements": [
+            "1x Video (Best for Viewer)",
+            "1x Playlist (Full Series Arc)" if nav.get("playlist_url") else "1x Video (Most Recent Upload)",
+            "1x Subscribe Button",
+        ],
+    }
+    if outro and outro.get("appended") and outro.get("start_seconds") is not None:
+        start = _format_seconds(float(outro["start_seconds"]))
+        end_screen["outro_start"] = start
+        end_screen["timing"] = f"Final 20 seconds (over the outro, which starts at {start})"
+        if nav.get("next_part_url") and outro.get("type") != "finale":
+            end_screen["recommended_elements"][0] = "1x Video (Next Part)"
     return {
         "card_1_playlist": {"recommended_timestamp": card_1_timestamp, **card_1},
         "card_2_next_arc": {"recommended_timestamp": card_2_timestamp, **card_2},
-        "end_screen": {
-            "timing": "Final 20 seconds of video",
-            "recommended_elements": [
-                "1x Video (Best for Viewer)",
-                "1x Playlist (Full Series Arc)" if nav.get("playlist_url") else "1x Video (Most Recent Upload)",
-                "1x Subscribe Button",
-            ],
-        },
+        "end_screen": end_screen,
     }
 
 
@@ -3859,6 +3874,8 @@ def generate_us_apocalypse_metadata(
     registry_chapter_names: Optional[List[str]] = None,
     premise_pitch: Optional[Dict[str, Any]] = None,
     llm_overlay_options: Optional[Dict[str, List[Tuple[str, str]]]] = None,
+    outro: Optional[Dict[str, Any]] = None,
+    story_status: Optional[str] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -3976,7 +3993,7 @@ def generate_us_apocalypse_metadata(
         f"This manhwa recap covers {comic_title} ({ep_range}).",
     ]
     if nav_lines:
-        desc_lines.extend(["", "📺 SERIES NAVIGATION (Watch Full Story):", *nav_lines])
+        desc_lines.extend(["", "📺 SERIES NAVIGATION (Watch In Order):", *nav_lines])
 
     desc_lines.extend([
         "",
@@ -4189,7 +4206,7 @@ def generate_us_apocalypse_metadata(
     )
     card_anchors = recommend_card_and_endscreen_anchors(narrative_chapters, {
         "playlist_url": playlist_url, "previous_part_url": previous_part_url, "next_part_url": next_part_url,
-    })
+    }, outro)
 
     # ── 7.2. SEO FILENAMES & PRE-PUBLISH CHECKLIST ─────────────────────────
     seo_filenames = generate_seo_filenames(comic_title, from_ep, to_ep)
@@ -4267,6 +4284,7 @@ def generate_us_apocalypse_metadata(
         },
         opening_segments=opening_segments,
         thumbnail_concepts=thumbnail_concepts[:OVERLAY_CONCEPTS],
+        story_status=story_status,
     )
     passed_all = gate_report.status != "FAIL"
 

@@ -60,6 +60,17 @@ def load_story_memory(download_dir: str) -> Optional[Dict[str, Any]]:
 # Kit generation (Stage 12 core)
 # =============================================================================
 
+def resolve_story_status(download_dir: str, to_ep: int, artifacts: Dict[str, Any]) -> str:
+    """'finished' only when the comic is completed and the video reaches its last episode (FINALE)."""
+    from outro_engine import OutroType, classify_outro
+    from series_status import load_release_status
+
+    status = load_release_status(download_dir, artifacts)
+    if status.state == "unknown":
+        return "unknown"
+    return "finished" if classify_outro(status, to_ep) == OutroType.FINALE else "not_finished"
+
+
 def _count_passed(checks: List[Dict[str, Any]], source: str) -> Tuple[int, int]:
     mine = [c for c in checks if c.get("source") == source]
     return sum(1 for c in mine if c.get("passed")), len(mine)
@@ -96,6 +107,7 @@ async def generate_youtube_kit(
     story_memory = load_story_memory(download_dir)
     language = payload.get("language", "en")
     registry = TitleRegistry.load(payload.get("title_registry_path") or DEFAULT_REGISTRY_PATH)
+    story_status = resolve_story_status(download_dir, to_ep, artifacts)
     hook_sheet = build_hook_sheet(
         comic_title, download_dir, from_ep, to_ep,
         story_memory=story_memory, bible=load_bible(download_dir), language=language,
@@ -151,6 +163,8 @@ async def generate_youtube_kit(
         playlist_url=payload.get("playlist_url"),
         previous_part_url=payload.get("previous_part_url"),
         next_part_url=payload.get("next_part_url"),
+        outro=artifacts.get("outro"),
+        story_status=story_status,
     )
 
     title_engine_audit = yt_meta["prepublish_audit"]["claim_audit"].get("title_engine", {})
@@ -269,7 +283,8 @@ async def regenerate_kit(
             previous = json.load(f)
     # The pitch in the rendered video is whatever Stage 11 recorded; never invented here.
     pitch = previous.get("premise_pitch")
-    artifacts: Dict[str, Any] = {"premise_pitch": pitch}
+    # Same for the outro: its end-screen timestamp belongs to the rendered video.
+    artifacts: Dict[str, Any] = {"premise_pitch": pitch, "outro": previous.get("outro")}
     # Reuse the recorded drafts so the kit keeps the title the rendered pitch promises. Older folders
     # have no drafts: the pitch's own title is then the only candidate (it is still re-validated).
     if previous.get("llm_title_hooks"):
@@ -304,6 +319,7 @@ async def regenerate_kit(
         "generation_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "premise_pitch": artifacts.get("premise_pitch"),
         "llm_title_hooks": artifacts.get("llm_title_hooks"),
+        "outro": artifacts.get("outro"),
         "youtube_metadata": yt_meta,
         "compliance_audit": yt_meta.get("compliance_flags"),
     }

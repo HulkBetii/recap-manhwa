@@ -166,3 +166,27 @@ def test_kit_leads_with_gate_and_drops_prime_time(tmp_path):
     assert {"names_consistent", "chapters_valid"} <= failing
     assert kit.index("PRE-PUBLISH STATUS") < kit.index("[1. NATIVE A/B TEST")
     assert "Prime-Time" not in kit and "publishing_schedule" not in meta
+
+
+# --- Story status claims -----------------------------------------------------
+
+def test_story_status_check_is_skipped_without_status():
+    assert not any(c.id == "story_status_claims" for c in _gate().checks)
+
+
+def test_full_story_claim_warns_unless_finished():
+    title = "He Survived The Zombie Apocalypse: The Full Story | Manhwa Recap"
+    for status in ("not_finished", "unknown"):
+        report = _gate(primary_title=title, story_status=status)
+        check = _check(report, "story_status_claims")
+        assert not check.passed and check.severity == "warn" and "full story" in check.detail
+        assert check in report.warnings
+    assert _check(_gate(primary_title=title, story_status="finished"), "story_status_claims").passed
+
+
+def test_story_status_claim_patterns():
+    from prepublish_gate import check_story_status_claims
+    # "Complete" as an adjective and "never-ending" are not status claims.
+    assert check_story_status_claims("He Thrives With Complete Future Knowledge", "A never-ending horde.", "not_finished").passed
+    assert not check_story_status_claims("Title", "The finale of the series.", "not_finished").passed
+    assert not check_story_status_claims("Title", "Completed manhwa recap", "unknown").passed

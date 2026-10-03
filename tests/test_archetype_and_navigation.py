@@ -136,6 +136,21 @@ def test_cards_never_share_a_slot_and_skip_missing_series_links():
     assert anchors["card_2_next_arc"]["link"] == nav["next_part_url"]
 
 
+def test_end_screen_sits_on_the_outro():
+    plain = recommend_card_and_endscreen_anchors(CHAPTERS)
+    assert "outro_start" not in plain["end_screen"]
+
+    outro = {"appended": True, "start_seconds": 7740.4, "type": "continues"}
+    anchors = recommend_card_and_endscreen_anchors(CHAPTERS, {"next_part_url": "https://youtu.be/xyz"}, outro)
+    assert anchors["end_screen"]["outro_start"] == "02:09:00"
+    assert "02:09:00" in anchors["end_screen"]["timing"]
+    assert anchors["end_screen"]["recommended_elements"][0] == "1x Video (Next Part)"
+
+    # An outro that failed to render does not move the end screen.
+    failed = recommend_card_and_endscreen_anchors(CHAPTERS, None, {"appended": False, "type": "continues"})
+    assert "outro_start" not in failed["end_screen"]
+
+
 def test_real_links_are_kept(tmp_path):
     download_dir = _veteran_dir(tmp_path)
     playlist = "https://www.youtube.com/playlist?list=PLabc123"

@@ -29,6 +29,13 @@ TIMESTAMP_LINE_RE = re.compile(r"^\d{1,2}:\d{2}(?::\d{2})?\s")
 DESCRIPTION_PLACEHOLDER_RE = re.compile(
     r"\[(?:Coming Soon[^\]]*|Watch Ep [^\]]*)\]|https://www\.youtube\.com/playlist\?list=[a-z0-9\-]+-full-recap"
 )
+# Phrases telling viewers the whole story is covered. Bare "complete" is not one ("Complete Future Knowledge").
+STORY_END_CLAIM_RE = re.compile(
+    r"(?<![-\w])(completed|complete (?:story|series|manhwa)|full (?:story|series)|whole story|entire story|"
+    r"finale|final chapter|the ending|ending explained|story ends|hoàn thành|trọn bộ|hết truyện|đại kết cục)(?![-\w])",
+    re.IGNORECASE,
+)
+StoryStatus = Literal["finished", "not_finished", "unknown"]
 
 
 class GateCheck(BaseModel):
@@ -176,6 +183,19 @@ def check_description_placeholders(description: str) -> GateCheck:
     )
 
 
+def check_story_status_claims(title: str, description: str, story_status: StoryStatus) -> GateCheck:
+    """A title or description promising the whole story / its ending is only true when the comic is
+    completed and the video reaches its last episode ("finished")."""
+    hits = sorted({m.group(1).lower() for m in STORY_END_CLAIM_RE.finditer(f"{title}\n{description}")})
+    passed = not hits or story_status == "finished"
+    reason = "the comic is still running or the video stops before its last episode" \
+        if story_status == "not_finished" else "the comic's release status is unknown"
+    return GateCheck(
+        id="story_status_claims", severity="warn", passed=passed,
+        detail="" if passed else f"claims the full story/ending ({', '.join(hits)}) but {reason}",
+    )
+
+
 # =============================================================================
 # Gate
 # =============================================================================
@@ -192,6 +212,7 @@ def run_prepublish_gate(
     legacy_flags: Dict[str, bool],
     opening_segments: Sequence[str],
     thumbnail_concepts: Sequence[Dict[str, Any]] = (),
+    story_status: Optional[StoryStatus] = None,
 ) -> GateReport:
     checks: List[GateCheck] = []
     checks.extend(check_title(title_engine_audit, primary_title_reasons))
@@ -204,6 +225,8 @@ def run_prepublish_gate(
     checks.append(check_description_placeholders(description))
     if thumbnail_concepts:
         checks.append(check_thumbnail_overlays(thumbnail_concepts))
+    if story_status is not None:
+        checks.append(check_story_status_claims(primary_title, description, story_status))
 
     if any(not c.passed and c.severity == "fail" for c in checks):
         status: GateStatus = "FAIL"
