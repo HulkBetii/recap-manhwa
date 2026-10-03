@@ -177,7 +177,7 @@ class OutroCheck(BaseModel):
 class OutroResult(BaseModel):
     type: OutroType
     text: Optional[str] = None
-    source: str = ""  # "llm" | "template" | "" (no outro)
+    source: str = ""  # "llm" | "template" | "reused" | "" (no outro)
     attempts: List[OutroCheck] = Field(default_factory=list)
 
     @property
@@ -380,9 +380,20 @@ async def generate_outro(
     llm_text_call: Optional[Callable[[str], Awaitable[Optional[str]]]],
     bible: Any = None,
     language: str = "en",
+    previous_text: Optional[str] = None,
 ) -> OutroResult:
-    """Drafts and validates; retries once with the rejection reasons, then falls back to the template."""
+    """Drafts and validates; retries once with the rejection reasons, then falls back to the template.
+
+    `previous_text` (an earlier run's outro of the same type) is re-validated first and kept when it
+    still passes, so re-running Stage 11 does not change an approved video.
+    """
     result = OutroResult(type=outro_type)
+    if previous_text:
+        check = validate_outro(previous_text, outro_type, facts, language)
+        result.attempts.append(check)
+        if check.passed:
+            result.text, result.source = check.text, "reused"
+            return result
     feedback: Optional[List[str]] = None
     for _ in range(MAX_ATTEMPTS if llm_text_call else 0):
         try:

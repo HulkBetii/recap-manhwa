@@ -3,7 +3,7 @@ Re-generate youtube_upload_kit.txt and metadata.json for one finished download f
 engine as Stage 12 (LLM drafts, title registry, premise pitch, pre-publish gate).
 
 Usage:
-    python regenerate_youtube_kit.py <download_dir> [--no-llm] [--registry PATH] [--playlist-url URL]
+    python regenerate_youtube_kit.py <download_dir> [--no-llm] [--fresh] [--registry PATH] [--playlist-url URL]
 """
 import argparse
 import asyncio
@@ -17,6 +17,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("download_dir", help="Folder with episode_*/video.mp4 (e.g. downloads/<comic>_1_3_en_<id>)")
     parser.add_argument("--no-llm", action="store_true", help="Template titles/chapters/overlays only (no 9Router calls)")
+    parser.add_argument("--fresh", action="store_true", help="Draft chapter names/overlays anew instead of reusing metadata.json's")
     parser.add_argument("--registry", help="Title registry JSON (default: channel_registry.json)")
     parser.add_argument("--playlist-url", help="Real playlist URL to link in the description")
     args = parser.parse_args()
@@ -32,6 +33,7 @@ def main() -> int:
 
     metadata = asyncio.run(regenerate_kit(
         download_dir, use_llm=not args.no_llm, registry_path=args.registry, playlist_url=args.playlist_url,
+        fresh_drafts=args.fresh,
     ))
     return 0 if metadata["youtube_metadata"]["prepublish_audit"].get("gate_status") != "FAIL" else 1
 

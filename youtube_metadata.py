@@ -4393,7 +4393,8 @@ def generate_us_apocalypse_metadata(
         kit_lines.extend([
             "",
             f"▶ CONCEPT {i}: {c.get('name', f'Concept {i}').upper()}",
-            f"  • Text Overlay : {c.get('thumbnail_text', 'N/A')}",
+            f"  • Text Overlay : {c.get('thumbnail_text', 'N/A')}"
+            + ("  (⚠ chữ chưa khớp cảnh — sửa tay hoặc chọn concept khác)" if c.get("overlay_scene_fit") is False else ""),
             f"  • Text Style   : {c.get('text_style', 'N/A')}",
             f"  • Composition  : {c.get('composition', 'N/A')}",
             "",

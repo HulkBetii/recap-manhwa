@@ -55,7 +55,8 @@ def test_apply_prefers_valid_llm_option_and_rewrites_prompt_text():
     assert updated["thumbnail_text"] == "ASTEROID HITS! / OWL BEAR!"
     assert "'ASTEROID HITS!'" in updated["gpt_prompt"] and "IMMUNITY" not in updated["gpt_prompt"]
     assert updated["overlay_valid"] is True
-    assert [c.passed for c in checks] == [False, True]
+    # The valid option does not fit the generic "Scene" concept, so the template is checked too.
+    assert [c.passed for c in checks] == [False, True, False]
 
 
 def test_invalid_template_without_options_is_flagged_not_truncated():
@@ -112,3 +113,38 @@ def test_kit_flags_unfixable_overlays_in_gate(tmp_path):
     gate = {c["id"]: c for c in meta["prepublish_audit"]["gate"]["checks"]}
     top = meta["thumbnail_concepts"][:3]
     assert gate["thumbnail_overlays_valid"]["passed"] == all(c.get("overlay_valid") for c in top)
+
+
+def _scene_concept(cid, name, composition, main, sub):
+    concept = _concept(cid, main, sub)
+    concept.update({"name": name, "composition": composition})
+    return concept
+
+
+def test_fits_scene_needs_a_word_from_the_scene():
+    from thumbnail_text import fits_scene
+    companion = {"name": "Mutated Beast Companion Stand (His Loyal Pup Dingo)",
+                 "composition": "Seongho and His Loyal Pup Dingo side-by-side on rooftop vantage point"}
+    assert not fits_scene("SCAVENGERS", "CIRCLE OUTSIDE", companion)  # Veteran 1-33 kit
+    assert fits_scene("LOYAL BEAST", "NEVER LEAVES", companion)
+    assert fits_scene("ANYTHING", "AT ALL", {"name": "", "composition": ""})
+
+
+def test_apply_prefers_the_option_that_fits_the_scene():
+    concept = _scene_concept("c1", "Apex Monster Clash (The Colossal Owl Bear)", "Hero dodging, Owl Bear looming",
+                             "SKY IS FALLING!", "IMMUNITY AWAKENED!")
+    options = {"c1": [("ASTEROID HITS!", "COUNTDOWN"), ("OWL BEAR!", "MUTANTS SCATTER")]}
+    [updated], _ = apply_overlays([concept], options, OverlayValidator(_sheet(), TITLE))
+    assert updated["thumbnail_text"] == "OWL BEAR! / MUTANTS SCATTER" and updated["overlay_scene_fit"] is True
+
+
+def test_valid_but_off_scene_text_is_kept_and_flagged():
+    concept = _scene_concept("c1", "Hero And His Dog", "Petting the dog on a rooftop", "YOU'RE CORNERED!", "NOT EVEN CLOSE!")
+    [updated], _ = apply_overlays([concept], {"c1": [("ASTEROID HITS!", "COUNTDOWN")]}, OverlayValidator(_sheet(), TITLE))
+    assert updated["thumbnail_text"] == "ASTEROID HITS! / COUNTDOWN"
+    assert updated["overlay_valid"] is True and updated["overlay_scene_fit"] is False
+
+
+def test_prompt_asks_for_the_scene_subject():
+    from thumbnail_text import build_overlay_prompt
+    assert "subject" in build_overlay_prompt(_sheet(), TITLE, [_concept("c1", "A", "B")])

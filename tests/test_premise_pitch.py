@@ -304,10 +304,61 @@ def test_clip_subtitles_missing_file_is_a_no_op(tmp_path):
     assert not align_clip_srt_to_script(str(tmp_path / "none.srt"), "Text.", 5.0)
 
 
-def test_clip_cues_are_at_most_two_lines():
-    from arc_intro_engine import MAX_CLIP_CUE_CHARS, _clip_cue_texts
+def test_clip_cues_are_at_most_two_lines_and_end_with_the_audio(tmp_path):
+    """Long pitch/outro sentences made 4-5 line cues; aligning split pieces put the last cue after the clip."""
+    from arc_intro_engine import align_clip_srt_to_script
+    srt = tmp_path / "transcript.srt"
+    cues = [
+        ("00:00:00,000", "00:00:09,000", "Fortunately, Seongho awakened with the rare ability to open dimensional gates."),
+        ("00:00:09,000", "00:00:14,000", "allowing him to level up and prepare to save mankind from doom."),
+        ("00:00:14,500", "00:00:16,000", "Subscribe for more."),
+    ]
+    srt.write_text("\n\n".join(f"{i}\n{s} --> {e}\n{t}" for i, (s, e, t) in enumerate(cues, 1)), encoding="utf-8")
     script = ("Fortunately, Seongho awakened with the rare ability to open dimensional gates, allowing him to "
-              "safely level up his skills and prepare to save mankind from impending doom. It all begins today.")
-    cues = _clip_cue_texts(script)
-    assert all(len(c) <= MAX_CLIP_CUE_CHARS for c in cues[:-1]) and cues[-1] == "It all begins today."
-    assert " ".join(cues) == script
+              "safely level up his skills and prepare to save mankind from impending doom. Subscribe for more.")
+    assert align_clip_srt_to_script(str(srt), script, 16.0)
+    blocks = srt.read_text(encoding="utf-8").strip().split("\n\n")
+    assert all(len(b.split("\n")) <= 4 for b in blocks)  # index + time + at most two lines
+    last_end = blocks[-1].split("\n")[1].split(" --> ")[1]
+    assert last_end <= "00:00:16,000" and blocks[-1].endswith("Subscribe for more.")
+
+
+# --- Draft reuse on re-runs --------------------------------------------------
+
+
+def test_previous_pitch_is_kept_when_it_still_passes():
+    calls = []
+
+    async def llm(prompt):
+        calls.append(prompt)
+        return GOOD_PITCH
+    result = asyncio.run(generate_premise_pitch(_sheet(), TITLE, llm, _bible(), previous_text=GOOD_PITCH))
+    assert result.reused and result.text == GOOD_PITCH and not calls
+
+
+def test_stale_previous_pitch_is_redrafted():
+    calls = []
+
+    async def llm(prompt):
+        calls.append(prompt)
+        return GOOD_PITCH
+    result = asyncio.run(generate_premise_pitch(_sheet(), TITLE, llm, _bible(), previous_text="Too short."))
+    assert not result.reused and result.text == GOOD_PITCH and len(calls) == 1
+    assert not result.attempts[0].passed  # the rejected previous draft is part of the audit
+
+
+def test_clip_is_reused_only_for_same_script_and_voice(tmp_path):
+    clip_dir = tmp_path / "outro"
+    clip_dir.mkdir()
+    (clip_dir / "video.mp4").write_bytes(b"x")
+    (clip_dir / "transcript.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nHi.\n", encoding="utf-8")
+    payload = {"voice_id": "clone_andrew"}
+    clip = {"video_path": str(clip_dir / "video.mp4"), "srt_path": str(clip_dir / "transcript.srt"), "duration": 21.5}
+    assert Stage11_FinalVideoAssembly._reusable_clip(str(clip_dir), "Text.", payload) is None  # no record yet
+    Stage11_FinalVideoAssembly._remember_clip(str(clip_dir), "Text.", payload, clip)
+    assert Stage11_FinalVideoAssembly._reusable_clip(str(clip_dir), "Text.", payload)["duration"] == 21.5
+    assert Stage11_FinalVideoAssembly._reusable_clip(str(clip_dir), "Other text.", payload) is None
+    assert Stage11_FinalVideoAssembly._reusable_clip(str(clip_dir), "Text.", {"voice_id": "clone_jessa"}) is None
+    record = clip_dir / Stage11_FinalVideoAssembly.CLIP_RECORD_FILENAME
+    record.write_text(record.read_text(encoding="utf-8").replace('"format": 2', '"format": 1'), encoding="utf-8")
+    assert Stage11_FinalVideoAssembly._reusable_clip(str(clip_dir), "Text.", payload) is None  # older render format

@@ -60,6 +60,35 @@ def load_story_memory(download_dir: str) -> Optional[Dict[str, Any]]:
 # Kit generation (Stage 12 core)
 # =============================================================================
 
+# LLM drafts recorded in output/metadata.json. A re-run offers them to the validators first, so an
+# approved video and kit do not change on every run (Veteran 1-33 got a new pitch, outro and chapter
+# names on each Stage 11/12 re-run). Payload regenerate_drafts=True drafts everything anew.
+DRAFT_KEYS = ("premise_pitch", "llm_title_hooks", "outro", "llm_chapter_options", "llm_overlay_options")
+
+
+def load_previous_drafts(download_dir: str) -> Dict[str, Any]:
+    path = os.path.join(download_dir or "", "output", "metadata.json")
+    if not download_dir or not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as err:
+        logger.warning("Unreadable %s, drafting anew: %s", path, err)
+        return {}
+    return {k: data[k] for k in DRAFT_KEYS if isinstance(data, dict) and data.get(k)}
+
+
+def overlay_options_from_json(raw: Any) -> Dict[str, List[Tuple[str, str]]]:
+    """metadata.json stores (main, sub) pairs as lists."""
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(k): [(str(p[0]), str(p[1])) for p in v if isinstance(p, (list, tuple)) and len(p) == 2]
+        for k, v in raw.items() if isinstance(v, list)
+    }
+
+
 def resolve_story_status(download_dir: str, to_ep: int, artifacts: Dict[str, Any]) -> str:
     """'finished' only when the comic is completed and the video reaches its last episode (FINALE)."""
     from outro_engine import OutroType, classify_outro
@@ -96,7 +125,7 @@ async def generate_youtube_kit(
     """
     from chapter_engine import build_arc_inputs, generate_llm_chapter_options
     from series_bible import load_bible
-    from thumbnail_text import generate_llm_overlay_options
+    from thumbnail_text import OVERLAY_CONCEPTS, fits_scene, generate_llm_overlay_options
     from title_engine import (
         DEFAULT_REGISTRY_PATH, TitleRegistry, build_hook_sheet, generate_llm_hooks, load_narration_by_episode,
     )
@@ -121,18 +150,34 @@ async def generate_youtube_kit(
     if hook_sheet.has_story and not llm_hooks:
         await log("Title Engine: không có title từ LLM, dùng template dự phòng (vẫn qua bộ kiểm tra).", "warning")
 
-    llm_chapter_options: Dict[str, List[str]] = {}
-    llm_overlay_options: Dict[str, List[Tuple[str, str]]] = {}
-    if llm_call:
-        arcs = build_arc_inputs(
-            plan_chapter_arcs(chapters, comic_title, story_memory, download_dir, from_ep, to_ep),
-            load_narration_by_episode(download_dir, from_ep, to_ep),
-            story_memory,
-        )
+    # Earlier drafts (artifacts, from metadata.json) go through the same validators as fresh ones;
+    # they are only reused while they still cover every current arc / thumbnail concept.
+    arcs = build_arc_inputs(
+        plan_chapter_arcs(chapters, comic_title, story_memory, download_dir, from_ep, to_ep),
+        load_narration_by_episode(download_dir, from_ep, to_ep),
+        story_memory,
+    )
+    llm_chapter_options: Dict[str, List[str]] = artifacts.get("llm_chapter_options") or {}
+    if arcs and not {a.key for a in arcs} <= set(llm_chapter_options):
+        llm_chapter_options = {}
+    if llm_chapter_options:
+        await log("Chapter Engine: dùng lại tên chapter của lần chạy trước (vẫn qua bộ kiểm tra).", "info")
+    elif llm_call:
         llm_chapter_options = await generate_llm_chapter_options(arcs, hook_sheet.character_names, llm_call)
         if arcs and not llm_chapter_options:
             await log("Chapter Engine: LLM không trả về tên chapter, dùng tên Stage 11 / 'Part N' (vẫn qua bộ kiểm tra).", "warning")
+    artifacts["llm_chapter_options"] = llm_chapter_options
 
+    top_concepts = preview_thumbnail_concepts(comic_title, from_ep, to_ep, story_memory, download_dir)
+    llm_overlay_options = overlay_options_from_json(artifacts.get("llm_overlay_options"))
+    if not all(
+        any(fits_scene(main, sub, c) for main, sub in llm_overlay_options.get(str(c.get("id")), []))
+        for c in top_concepts[:OVERLAY_CONCEPTS]
+    ):
+        llm_overlay_options = {}
+    if llm_overlay_options:
+        await log("Thumbnail: dùng lại chữ overlay của lần chạy trước (vẫn qua bộ kiểm tra).", "info")
+    elif llm_call:
         # Overlay text must complement the shipped title: reuse the pitch's title or preview it.
         overlay_title = (artifacts.get("premise_pitch") or {}).get("title")
         if not overlay_title:
@@ -142,8 +187,8 @@ async def generate_youtube_kit(
                 registry_titles=registry.titles_for_dedup(comic_title),
                 language=language,
             )["primary_title"]
-        top_concepts = preview_thumbnail_concepts(comic_title, from_ep, to_ep, story_memory, download_dir)
         llm_overlay_options = await generate_llm_overlay_options(hook_sheet, overlay_title, top_concepts, llm_call)
+    artifacts["llm_overlay_options"] = llm_overlay_options
 
     yt_meta = generate_youtube_metadata(
         comic_title,
@@ -267,8 +312,10 @@ async def regenerate_kit(
     registry_path: Optional[str] = None,
     playlist_url: Optional[str] = None,
     log: LogFn = _print_log,
+    fresh_drafts: bool = False,
 ) -> Dict[str, Any]:
-    """Rebuilds youtube_upload_kit.txt + metadata.json for a finished folder. Returns metadata.json content."""
+    """Rebuilds youtube_upload_kit.txt + metadata.json for a finished folder. Returns metadata.json content.
+    Recorded chapter/overlay drafts are reused (and re-validated) unless `fresh_drafts`."""
     download_dir = os.path.abspath(download_dir)
     output_dir = os.path.join(download_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
@@ -292,6 +339,10 @@ async def regenerate_kit(
     elif pitch and pitch.get("prepended") and pitch.get("title"):
         from title_engine import strip_suffix
         artifacts["llm_title_hooks"] = [strip_suffix(pitch["title"])]
+    if not fresh_drafts:
+        for key in ("llm_chapter_options", "llm_overlay_options"):
+            if previous.get(key):
+                artifacts[key] = previous[key]
     payload: Dict[str, Any] = {"language": resolve_language(download_dir, story_memory)}
     if registry_path:
         payload["title_registry_path"] = registry_path
@@ -320,6 +371,8 @@ async def regenerate_kit(
         "premise_pitch": artifacts.get("premise_pitch"),
         "llm_title_hooks": artifacts.get("llm_title_hooks"),
         "outro": artifacts.get("outro"),
+        "llm_chapter_options": artifacts.get("llm_chapter_options"),
+        "llm_overlay_options": artifacts.get("llm_overlay_options"),
         "youtube_metadata": yt_meta,
         "compliance_audit": yt_meta.get("compliance_flags"),
     }

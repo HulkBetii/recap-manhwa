@@ -51,6 +51,17 @@ def _content_words(text: str) -> List[str]:
     ]
 
 
+def fits_scene(main: str, sub: str, concept: Dict[str, Any]) -> bool:
+    """True when the overlay names something the concept's scene shows.
+
+    Veteran 1-33 put "SCAVENGERS / CIRCLE OUTSIDE" (a threat from another moment) on a calm scene of
+    the hero petting his dog: grounded in the story, but not in the picture. A concept without a scene
+    description cannot be checked and counts as fitting.
+    """
+    vocab = {w[:5] for w in _content_words(f"{concept.get('name', '')} {concept.get('composition', '')}")}
+    return not vocab or any(w[:5] in vocab for w in _content_words(f"{main} {sub}"))
+
+
 # =============================================================================
 # Prompt
 # =============================================================================
@@ -85,6 +96,8 @@ For EACH scene write {OVERLAY_OPTIONS_PER_CONCEPT} options. Each option has:
 - "sub":  1-{OVERLAY_MAX_WORDS} words, at most {OVERLAY_MAX_CHARS} characters including punctuation, ALL CAPS.
 Rules: complete phrases only (never cut words), only facts from the list, no character names,
 no words already in the title, no power ranks or genre claims the facts do not show.
+Each option must be about what ITS scene shows: use at least one word naming the scene's subject
+(e.g. the creature, object or companion in the scene description), never a different story moment.
 
 Return ONLY a JSON object: {{"<scene id>": [{{"main": "...", "sub": "..."}}, ...], ...}}
 """
@@ -141,6 +154,7 @@ class OverlayCheck(BaseModel):
     source: str
     passed: bool
     reasons: List[str] = Field(default_factory=list)
+    scene_fit: bool = True
 
 
 class OverlayValidator:
@@ -225,7 +239,8 @@ def apply_overlays(
     validator: OverlayValidator,
 ) -> Tuple[List[Dict[str, Any]], List[OverlayCheck]]:
     """
-    Per concept: first valid option among the LLM drafts and the template's own text.
+    Per concept: the first valid option that fits the scene, else the first valid one (flagged
+    overlay_scene_fit=False for the kit), among the LLM drafts and the template's own text.
     A concept with no valid option keeps its template text and is flagged overlay_valid=False
     (surfaced by the pre-publish gate) — text is never truncated.
     """
@@ -235,18 +250,22 @@ def apply_overlays(
         current = _split_overlay(concept)
         candidates = [("llm", pair) for pair in options.get(str(concept.get("id")), [])]
         candidates.append(("template", current))
-        chosen: Optional[Tuple[str, str]] = None
+        valid: List[OverlayCheck] = []
         for source, pair in candidates:
             check = validator.check(pair[0], pair[1], source)
+            check.scene_fit = fits_scene(check.main, check.sub, concept)
             checks.append(check)
             if check.passed:
-                chosen = (check.main, check.sub)
-                break
-        if chosen is None:
+                valid.append(check)
+                if check.scene_fit:
+                    break
+        best = next((c for c in valid if c.scene_fit), valid[0] if valid else None)
+        if best is None:
             updated = dict(concept)
             updated["overlay_valid"] = False
         else:
-            updated = _replace_overlay(concept, current, chosen)
+            updated = _replace_overlay(concept, current, (best.main, best.sub))
             updated["overlay_valid"] = True
+            updated["overlay_scene_fit"] = best.scene_fit
         result.append(updated)
     return result, checks

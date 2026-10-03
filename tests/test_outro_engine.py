@@ -214,3 +214,16 @@ def test_build_outro_facts(tmp_path):
     assert facts.last_summary == "He fortifies the base."
     assert facts.has_playlist and not facts.has_next_part
     assert "Ep one line." in facts.corpus_text
+
+
+def test_previous_outro_is_kept_when_it_still_passes():
+    call, prompts = _llm(GOOD_CONTINUES)
+    result = asyncio.run(generate_outro(OutroType.CONTINUES, FACTS, call, previous_text=GOOD_CONTINUES))
+    assert result.source == "reused" and result.text == GOOD_CONTINUES and not prompts
+
+
+def test_previous_outro_of_wrong_kind_is_redrafted():
+    finale = template_outro(OutroType.FINALE, FACTS)  # "the end" is not allowed in a CONTINUES outro
+    call, prompts = _llm(GOOD_CONTINUES)
+    result = asyncio.run(generate_outro(OutroType.CONTINUES, FACTS, call, previous_text=finale))
+    assert result.source == "llm" and len(prompts) == 1

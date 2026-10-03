@@ -90,6 +90,7 @@ class PitchCheck(BaseModel):
 class PitchResult(BaseModel):
     text: Optional[str] = None           # validated pitch, None if every attempt failed
     attempts: List[PitchCheck] = Field(default_factory=list)
+    reused: bool = False                 # the previous run's pitch still passed, no new draft
 
     @property
     def ok(self) -> bool:
@@ -206,11 +207,22 @@ async def generate_premise_pitch(
     llm_text_call: Callable[[str], Awaitable[Optional[str]]],
     bible: Any = None,
     language: str = "en",
+    previous_text: Optional[str] = None,
 ) -> PitchResult:
-    """Drafts, normalizes names and validates; retries once with the rejection reasons."""
+    """Drafts, normalizes names and validates; retries once with the rejection reasons.
+
+    `previous_text` (the pitch of an earlier run for the same title) is re-validated first and kept
+    when it still passes, so re-running Stage 11 does not change an approved video.
+    """
     result = PitchResult()
     if not sheet.has_story:
         return result
+    if previous_text:
+        check = validate_pitch(previous_text, title, sheet, bible, language)
+        result.attempts.append(check)
+        if check.passed:
+            result.text, result.reused = check.text, True
+            return result
     feedback: Optional[List[str]] = None
     for _ in range(MAX_ATTEMPTS):
         try:

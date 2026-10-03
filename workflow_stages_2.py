@@ -362,10 +362,6 @@ def align_subtitles_to_segments(subtitles: list, segments: list, audio_duration:
         # Prevents Whisper compression flicker (e.g. 0.11s segments)
         if (end_time - start_time) < min_seg_dur:
             end_time = start_time + min_seg_dur
-        # The floor must not push the last cue past the audio: it would overlap the next episode's
-        # first cue once the SRTs are merged (Veteran 1-33 had 5 such overlaps at segment seams).
-        if audio_duration > 0 and start_time < audio_duration < end_time:
-            end_time = audio_duration
 
         last_end_time = end_time
         normalized_entries.append({
@@ -373,6 +369,15 @@ def align_subtitles_to_segments(subtitles: list, segments: list, audio_duration:
             "end": end_time,
             "text": seg.get("speech", "")
         })
+
+    # The duration floor and estimates for unmatched segments can push cues past the audio end, where
+    # they overlap the next segment once SRTs are merged (Veteran 1-33: 5 overlaps at seams, and an
+    # outro cue starting after its clip ended). Compress the whole timeline back inside the audio.
+    if audio_duration > 0 and normalized_entries and normalized_entries[-1]["end"] > audio_duration:
+        scale = audio_duration / normalized_entries[-1]["end"]
+        for entry in normalized_entries:
+            entry["start"] *= scale
+            entry["end"] *= scale
 
     return normalized_entries
 
@@ -386,6 +391,96 @@ def wrap_srt_text(text: str, max_chars: int = 42) -> str:
     import textwrap
     lines = textwrap.wrap(text.strip(), width=max_chars, break_long_words=False, break_on_hyphens=False)
     return "\n".join(lines)
+
+
+SUBTITLE_LINE_CHARS = 42
+SUBTITLE_MAX_LINES = 2   # YouTube CC standard; Veteran 1-33 shipped 580 three-line cues and a few 4-5 line ones
+SUBTITLE_CLAUSE_RE = re.compile(r"(?<=[,;:—])\s+")
+# A line should not end on a word that leads into the next one ("...defensive guard to" / "shield...").
+SUBTITLE_DANGLING_WORDS = {
+    "a", "an", "the", "to", "of", "in", "on", "at", "by", "for", "with", "from", "into", "and", "or", "but",
+    "his", "her", "their", "its", "this", "that", "these", "those", "as", "while", "when", "than",
+}
+
+
+def _move_dangling_words(groups: list[str]) -> list[str]:
+    for i in range(len(groups) - 1):
+        while True:
+            words = groups[i].split()
+            if len(words) < 2 or words[-1].lower() not in SUBTITLE_DANGLING_WORDS:
+                break
+            moved = f"{words[-1]} {groups[i + 1]}"
+            if not _fits_subtitle(moved):
+                break
+            groups[i], groups[i + 1] = " ".join(words[:-1]), moved
+    return groups
+
+
+def _fits_subtitle(text: str) -> bool:
+    return wrap_srt_text(text, SUBTITLE_LINE_CHARS).count("\n") < SUBTITLE_MAX_LINES
+
+
+def _split_words_evenly(text: str) -> list[str]:
+    """Fewest roughly equal word groups that each fit the subtitle limit."""
+    words = text.split()
+    parts = 2
+    while parts < len(words):
+        target = len(text) / parts
+        groups, current = [], ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if current and len(candidate) > target and len(groups) < parts - 1:
+                groups.append(current)
+                current = word
+            else:
+                current = candidate
+        groups.append(current)
+        if all(_fits_subtitle(g) for g in groups):
+            return _move_dangling_words(groups)
+        parts += 1
+    return words
+
+
+def split_subtitle_text(text: str) -> list[str]:
+    """Splits cue text that would wrap to more than two lines: at clause boundaries first, then into
+    even word groups. Text that already fits is returned unchanged."""
+    text = " ".join((text or "").split())
+    if not text or _fits_subtitle(text):
+        return [text] if text else []
+    pieces = [
+        piece for clause in SUBTITLE_CLAUSE_RE.split(text)
+        for piece in ([clause] if _fits_subtitle(clause) else _split_words_evenly(clause))
+    ]
+    cues: list[str] = []
+    current = ""
+    for piece in pieces:
+        candidate = f"{current} {piece}".strip()
+        if current and not _fits_subtitle(candidate):
+            cues.append(current)
+            current = piece
+        else:
+            current = candidate
+    if current:
+        cues.append(current)
+    return cues
+
+
+def split_long_cues(entries: list[dict]) -> list[dict]:
+    """Splits {"start", "end", "text"} cues longer than two lines; time is shared by text length."""
+    result: list[dict] = []
+    for entry in entries:
+        pieces = split_subtitle_text(entry["text"])
+        if len(pieces) <= 1:
+            result.append(entry)
+            continue
+        weights = [max(1, count_meaningful_units(p)) for p in pieces]
+        total, cursor = sum(weights), entry["start"]
+        span = max(0.0, entry["end"] - entry["start"])
+        for i, (piece, weight) in enumerate(zip(pieces, weights)):
+            end = entry["end"] if i == len(pieces) - 1 else cursor + span * weight / total
+            result.append({"start": cursor, "end": end, "text": piece})
+            cursor = end
+    return result
 
 
 class Stage9_SubtitleNormalization(BaseStage):
@@ -470,7 +565,7 @@ class Stage9_SubtitleNormalization(BaseStage):
                 except Exception:
                     pass
 
-            normalized_srt_entries = align_subtitles_to_segments(subtitles, segments, audio_dur)
+            normalized_srt_entries = split_long_cues(align_subtitles_to_segments(subtitles, segments, audio_dur))
 
             srt_temp_path = srt_path + ".tmp"
             with open(srt_temp_path, "w", encoding="utf-8") as sf:
@@ -2521,15 +2616,16 @@ def merge_srt_files(srt_paths: list, video_durations: list, output_srt_path: str
             if parse_time_to_seconds_local(new_start) < segment_end < parse_time_to_seconds_local(new_end):
                 new_end = shift_srt_time("00:00:00,000", segment_end)
             
-            sub_text = "\n".join(lines[time_line_idx+1:])
-            
-            merged_lines.append(f"{global_index}")
-            merged_lines.append(f"{new_start} --> {new_end}")
-            merged_lines.append(sub_text)
-            merged_lines.append("")
-            
-            global_index += 1
-            
+            sub_text = " ".join(lines[time_line_idx+1:])
+            cue = {"start": parse_time_to_seconds_local(new_start), "end": parse_time_to_seconds_local(new_end), "text": sub_text}
+            # Cues over two lines (episode SRTs made before Stage 9 split them) are split here.
+            for part in split_long_cues([cue]):
+                merged_lines.append(f"{global_index}")
+                merged_lines.append(f"{shift_srt_time('00:00:00,000', part['start'])} --> {shift_srt_time('00:00:00,000', part['end'])}")
+                merged_lines.append(wrap_srt_text(part["text"]))
+                merged_lines.append("")
+                global_index += 1
+
         current_offset += video_durations[idx]
         
     temp_output_path = output_srt_path + ".tmp"
@@ -2670,13 +2766,69 @@ class Stage11_FinalVideoAssembly(BaseStage):
             segments.append((outro_clip["video_path"], outro_clip["srt_path"]))
         return segments
 
+    CLIP_RECORD_FILENAME = "clip.json"
+    # Bump when the clip render or its subtitles change, so clips made the old way are rendered again.
+    CLIP_FORMAT_VERSION = 2
+
+    @classmethod
+    def _reusable_clip(cls, clip_dir, script, payload):
+        """The clip rendered earlier for exactly this script and voice, or None (TTS must run again)."""
+        paths = {name: os.path.join(clip_dir, name) for name in (cls.CLIP_RECORD_FILENAME, "video.mp4", "transcript.srt")}
+        if not all(os.path.isfile(p) for p in paths.values()) or os.path.getsize(paths["video.mp4"]) == 0:
+            return None
+        try:
+            with open(paths[cls.CLIP_RECORD_FILENAME], "r", encoding="utf-8") as f:
+                record = json.load(f)
+        except (OSError, json.JSONDecodeError) as err:
+            logger.warning(f"Unreadable clip record in {clip_dir}: {err}")
+            return None
+        same_render = (
+            record.get("format") == cls.CLIP_FORMAT_VERSION
+            and record.get("script") == script
+            and record.get("voice_id") == payload.get("voice_id", "ai33pro")
+            and record.get("ref_audio_path") == payload.get("ref_audio_path")
+        )
+        if not same_render or not record.get("duration"):
+            return None
+        return {"video_path": paths["video.mp4"], "srt_path": paths["transcript.srt"], "duration": float(record["duration"])}
+
+    @classmethod
+    def _remember_clip(cls, clip_dir, script, payload, clip):
+        with open(os.path.join(clip_dir, cls.CLIP_RECORD_FILENAME), "w", encoding="utf-8") as f:
+            json.dump({
+                "format": cls.CLIP_FORMAT_VERSION, "script": script, "voice_id": payload.get("voice_id", "ai33pro"),
+                "ref_audio_path": payload.get("ref_audio_path"), "duration": clip["duration"],
+            }, f, ensure_ascii=False, indent=2)
+
+    async def _render_clip(self, clip_dir, script, image_paths_fn, payload, language):
+        """Reuses the clip of an unchanged script, otherwise renders it. Returns (clip, reused), or
+        (None, False) when no panels are available. `image_paths_fn` only runs when rendering (panel
+        scoring is slow)."""
+        from arc_intro_engine import MicroIntroRenderer
+        clip = self._reusable_clip(clip_dir, script, payload)
+        if clip:
+            return clip, True
+        image_paths = image_paths_fn()
+        if not image_paths:
+            return None, False
+        clip = await MicroIntroRenderer.render_intro_clip(
+            intro_dir=clip_dir,
+            hook_script=script,
+            image_paths=image_paths,
+            language=language,
+            voice_id=payload.get("voice_id", "ai33pro"),
+            ref_audio_path=payload.get("ref_audio_path"),
+            enable_sfx=False,
+        )
+        self._remember_clip(clip_dir, script, payload, clip)
+        return clip, False
+
     async def _render_outro(self, context, download_dir, folder_name):
         """Drafts the status-aware outro and renders it with the narration voice. Returns the clip
         ({video_path, srt_path, duration}) or None; never raises, the video simply ships without it."""
         task = context.task
         from_ep, to_ep = task.from_episode, task.to_episode
         try:
-            from arc_intro_engine import MicroIntroRenderer
             from metadata_kit import load_story_memory
             from outro_engine import build_outro_facts, classify_outro, generate_outro
             from series_bible import load_bible
@@ -2687,7 +2839,11 @@ class Stage11_FinalVideoAssembly(BaseStage):
             outro_type = classify_outro(status, to_ep)
             bible = load_bible(download_dir)
             facts = build_outro_facts(download_dir, from_ep, to_ep, load_story_memory(download_dir), bible, task.payload)
-            result = await generate_outro(outro_type, facts, Stage12_MetadataReports._text_llm_call(task), bible, language)
+            previous = (task.artifacts.get("previous_drafts") or {}).get("outro") or {}
+            previous_text = previous.get("text") if previous.get("type") == outro_type.value else None
+            result = await generate_outro(
+                outro_type, facts, Stage12_MetadataReports._text_llm_call(task), bible, language, previous_text=previous_text,
+            )
             task.artifacts["outro"] = {
                 "type": outro_type.value,
                 "text": result.text,
@@ -2702,21 +2858,18 @@ class Stage11_FinalVideoAssembly(BaseStage):
             if result.source == "template":
                 last = result.attempts[-1].reasons if result.attempts else ["no LLM"]
                 await context.log(f"Outro: bản LLM không đạt ({'; '.join(last)}), dùng câu mẫu.", "warning")
-            await context.log(f"Outro [{outro_type.value}, {status.state}]: \"{result.text}\"", "info")
+            reuse_note = " (dùng lại bản trước)" if result.source == "reused" else ""
+            await context.log(f"Outro [{outro_type.value}, {status.state}]{reuse_note}: \"{result.text}\"", "info")
 
-            image_paths = self._outro_images(download_dir, to_ep, self.OUTRO_IMAGE_COUNT)
-            if not image_paths:
-                await context.log(f"Outro: không tìm được ảnh ở tập {to_ep}, bỏ qua.", "warning")
-                return None
-            return await MicroIntroRenderer.render_intro_clip(
-                intro_dir=os.path.join(download_dir, "outro"),
-                hook_script=result.text,
-                image_paths=image_paths,
-                language=language,
-                voice_id=task.payload.get("voice_id", "ai33pro"),
-                ref_audio_path=task.payload.get("ref_audio_path"),
-                enable_sfx=False,
+            clip, reused_clip = await self._render_clip(
+                os.path.join(download_dir, "outro"), result.text,
+                lambda: self._outro_images(download_dir, to_ep, self.OUTRO_IMAGE_COUNT), task.payload, language,
             )
+            if clip is None:
+                await context.log(f"Outro: không tìm được ảnh ở tập {to_ep}, bỏ qua.", "warning")
+            elif reused_clip:
+                await context.log("Outro: lời kết không đổi, dùng lại clip đã render.", "info")
+            return clip
         except Exception as err:
             logger.warning(f"Outro skipped: {err}")
             await context.log(f"Outro: lỗi, bỏ qua ({err}).", "warning")
@@ -2729,7 +2882,6 @@ class Stage11_FinalVideoAssembly(BaseStage):
         from_ep, to_ep = task.from_episode, task.to_episode
         try:
             import config
-            from arc_intro_engine import MicroIntroRenderer
             from premise_pitch import generate_premise_pitch
             from series_bible import load_bible
             from title_engine import DEFAULT_REGISTRY_PATH, TitleRegistry, build_hook_sheet, generate_llm_hooks
@@ -2763,34 +2915,35 @@ class Stage11_FinalVideoAssembly(BaseStage):
                 return False
 
             title = preview["primary_title"]
-            pitch = await generate_premise_pitch(preview["hook_sheet"], title, llm_call, bible, language)
+            previous = (task.artifacts.get("previous_drafts") or {}).get("premise_pitch") or {}
+            previous_text = previous.get("text") if previous.get("title") == title else None
+            pitch = await generate_premise_pitch(
+                preview["hook_sheet"], title, llm_call, bible, language, previous_text=previous_text,
+            )
             task.artifacts["premise_pitch"] = {
                 "title": title,
                 "text": pitch.text,
                 "attempts": [a.model_dump() for a in pitch.attempts],
+                "reused": pitch.reused,
                 "prepended": False,
             }
             if not pitch.ok:
                 last = pitch.attempts[-1].reasons if pitch.attempts else ["no attempt"]
                 await context.log(f"Premise Pitch: không đạt kiểm tra sau {len(pitch.attempts)} lần ({'; '.join(last)}).", "warning")
                 return False
-            await context.log(f"Premise Pitch cho title \"{title}\": \"{pitch.text}\"", "info")
+            reuse_note = " (dùng lại bản trước)" if pitch.reused else ""
+            await context.log(f"Premise Pitch cho title \"{title}\"{reuse_note}: \"{pitch.text}\"", "info")
 
-            image_paths = self._pitch_images(
-                download_dir, from_ep, to_ep, getattr(config, "PREMISE_PITCH_IMAGE_COUNT", 8)
+            intro_artifacts, reused_clip = await self._render_clip(
+                os.path.join(download_dir, "intro_pitch"), pitch.text,
+                lambda: self._pitch_images(download_dir, from_ep, to_ep, getattr(config, "PREMISE_PITCH_IMAGE_COUNT", 8)),
+                task.payload, language,
             )
-            if not image_paths:
+            if intro_artifacts is None:
                 await context.log("Premise Pitch: không tìm được ảnh phù hợp ở các tập đầu, bỏ qua.", "warning")
                 return False
-            intro_artifacts = await MicroIntroRenderer.render_intro_clip(
-                intro_dir=os.path.join(download_dir, "intro_pitch"),
-                hook_script=pitch.text,
-                image_paths=image_paths,
-                language=language,
-                voice_id=task.payload.get("voice_id", "ai33pro"),
-                ref_audio_path=task.payload.get("ref_audio_path"),
-                enable_sfx=False,
-            )
+            if reused_clip:
+                await context.log("Premise Pitch: lời pitch không đổi, dùng lại clip đã render.", "info")
             if not self._prepend_intro_to_first_episode(intro_artifacts, download_dir, from_ep):
                 await context.log("Premise Pitch: render xong nhưng không ghép được vào tập đầu.", "warning")
                 return False
@@ -2832,6 +2985,19 @@ class Stage11_FinalVideoAssembly(BaseStage):
                 os.remove(temp_path)
 
         episodes_processed = list(range(from_ep, to_ep + 1))
+
+        # Drafts of an earlier run (output/metadata.json) are offered to the validators first, so a
+        # re-run does not change an approved video and kit. regenerate_drafts=True drafts anew.
+        task.artifacts["previous_drafts"] = {}
+        if not task.payload.get("regenerate_drafts", False):
+            from metadata_kit import load_previous_drafts
+            previous_drafts = load_previous_drafts(download_dir)
+            task.artifacts["previous_drafts"] = previous_drafts
+            for key in ("llm_title_hooks", "llm_chapter_options", "llm_overlay_options"):
+                if previous_drafts.get(key) and task.artifacts.get(key) is None:
+                    task.artifacts[key] = previous_drafts[key]
+            if previous_drafts:
+                await context.log(f"Dùng lại bản nháp của lần chạy trước nếu còn qua kiểm tra: {', '.join(sorted(previous_drafts))}.", "info")
 
         # Premise Pitch: title-aligned cold open. Takes precedence over the template flash-forward.
         pitch_prepended = False
@@ -3128,6 +3294,8 @@ class Stage12_MetadataReports(BaseStage):
             metadata["premise_pitch"] = task.artifacts.get("premise_pitch")
             metadata["llm_title_hooks"] = task.artifacts.get("llm_title_hooks")
             metadata["outro"] = task.artifacts.get("outro")
+            metadata["llm_chapter_options"] = task.artifacts.get("llm_chapter_options")
+            metadata["llm_overlay_options"] = task.artifacts.get("llm_overlay_options")
         except Exception as e:
             logger.warning(f"Failed to generate YouTube metadata: {e}")
             await context.log(f"Không tạo được YouTube metadata: {e}", "error")

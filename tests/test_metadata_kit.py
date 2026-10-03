@@ -120,3 +120,20 @@ def test_processing_report_counts_rendered_episode_videos(tmp_path):
     (tmp_path / "episode_3" / "video.mp4").write_bytes(b"")  # failed render
     assert count_rendered_episodes(str(tmp_path), 1, 3) == (2, 1)
     assert count_rendered_episodes(str(tmp_path), 1, 3, "final.mp4") == (0, 3)
+
+
+def test_previous_drafts_are_loaded_from_metadata_json(tmp_path):
+    import json as _json
+    from metadata_kit import load_previous_drafts, overlay_options_from_json
+    assert load_previous_drafts(str(tmp_path)) == {}
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output" / "metadata.json").write_text(_json.dumps({
+        "premise_pitch": {"title": "T", "text": "P"}, "outro": {"type": "continues", "text": "O"},
+        "llm_chapter_options": {"1-4": ["Name"]}, "llm_overlay_options": {"c1": [["MAIN", "SUB"]]},
+        "llm_title_hooks": [], "youtube_metadata": {"title": "ignored"},
+    }), encoding="utf-8")
+    drafts = load_previous_drafts(str(tmp_path))
+    assert set(drafts) == {"premise_pitch", "outro", "llm_chapter_options", "llm_overlay_options"}
+    assert overlay_options_from_json(drafts["llm_overlay_options"]) == {"c1": [("MAIN", "SUB")]}
+    (tmp_path / "output" / "metadata.json").write_text("{broken", encoding="utf-8")
+    assert load_previous_drafts(str(tmp_path)) == {}

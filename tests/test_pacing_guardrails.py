@@ -123,3 +123,52 @@ def test_merged_cues_stay_inside_their_segment(tmp_path):
     text = out.read_text(encoding="utf-8")
     assert "00:00:08,000 --> 00:00:10,000" in text
     assert "00:00:10,000 --> 00:00:12,000" in text
+
+
+def test_split_subtitle_text_keeps_two_lines():
+    from workflow_stages_2 import split_subtitle_text, wrap_srt_text
+    short = "Seongho checks his gear."
+    assert split_subtitle_text(short) == [short]
+    long = ("That emergency hotline instantly kicks President Wontaek Jang into gear, mobilizing national "
+            "defense forces without hesitation while the city burns around them.")
+    pieces = split_subtitle_text(long)
+    assert len(pieces) >= 2 and " ".join(pieces) == long
+    assert all(wrap_srt_text(p).count("\n") <= 1 for p in pieces)
+
+
+def test_split_long_cues_shares_time_by_length():
+    from workflow_stages_2 import split_long_cues
+    text = "A first long clause that clearly fills one subtitle line, and a second clause that fills another, then more words."
+    parts = split_long_cues([{"start": 10.0, "end": 16.0, "text": text}])
+    assert len(parts) >= 2
+    assert parts[0]["start"] == 10.0 and parts[-1]["end"] == 16.0
+    assert all(a["end"] == b["start"] for a, b in zip(parts, parts[1:]))
+
+
+def test_merge_splits_three_line_cues(tmp_path):
+    from workflow_stages_2 import merge_srt_files
+    src = tmp_path / "a.srt"
+    src.write_text("1\n00:00:00,000 --> 00:00:06,000\nThat emergency hotline instantly kicks\nPresident Wontaek Jang into gear,\n"
+                   "mobilizing national defense forces without\nhesitation.\n", encoding="utf-8")
+    out = tmp_path / "m.srt"
+    merge_srt_files([str(src)], [6.0], str(out))
+    blocks = [b for b in out.read_text(encoding="utf-8").strip().split("\n\n") if b]
+    assert len(blocks) >= 2 and all(len(b.split("\n")) <= 4 for b in blocks)  # index + time + <=2 lines
+
+
+def test_lines_do_not_end_on_a_leading_word():
+    from workflow_stages_2 import split_subtitle_text
+    text = ("Seongho firmly maintains his defensive guard to shield the injured woman coughing crimson on the "
+            "pavement while the killer closes in")
+    pieces = split_subtitle_text(text)
+    assert len(pieces) >= 2 and " ".join(pieces) == text
+    assert all(p.split()[-1].lower() not in {"to", "the", "his", "while"} for p in pieces[:-1])
+
+
+def test_timeline_is_compressed_inside_the_audio():
+    """Unmatched segments are estimated after the last cue; they must not run past the audio."""
+    subtitles = [{"start": 0.0, "end": 8.0, "text": "One long sentence spoken here."}]
+    segments = [{"speech": "One long sentence spoken here."}, {"speech": "Second."}, {"speech": "Third one."}]
+    aligned = align_subtitles_to_segments(subtitles, segments, audio_duration=10.0)
+    assert aligned[-1]["end"] <= 10.0 + 1e-9
+    assert all(a["end"] <= b["start"] + 1e-9 for a, b in zip(aligned, aligned[1:]))
