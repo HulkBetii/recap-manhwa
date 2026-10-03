@@ -480,6 +480,35 @@ class Stage1_ComicParsing(BaseStage):
             except Exception as synopsis_err:
                 await context.log(f"Không lấy được phần giới thiệu truyện: {synopsis_err}", "warning")
 
+            # Release status (ongoing / hiatus / completed) + latest episode: decides the outro type (Stage 11).
+            release_status = None
+            try:
+                from series_status import detect_release_status, latest_episode_from_hrefs
+                info_texts = []
+                # webtoons ".day_info" ("UP EVERY SUNDAY" / "COMPLETED"); Naver: only the first meta block,
+                # later ones belong to recommended series.
+                for selector, limit in ((".day_info", None), ("[class*=ContentMetaInfo]", 1)):
+                    texts = await page.locator(selector).all_inner_texts()
+                    info_texts += texts[:limit] if limit else texts
+                page_text = await page.locator("body").inner_text()
+                hrefs = await page.locator("a").evaluate_all("elements => elements.map(el => el.getAttribute('href'))")
+                # Sources that list every chapter on the series page (Asura, comix, toongod...).
+                full_list = [extract_chapter_number(s) for s in task.artifacts.get("chapter_slugs") or []]
+                full_list.append(task.artifacts.get("comix_max_chapter"))
+                full_list = [int(n) for n in full_list if n]
+                release_status = detect_release_status(
+                    info_texts, page_text, latest_episode_from_hrefs(hrefs), max(full_list) if full_list else None
+                )
+                task.artifacts["release_status"] = release_status.model_dump()
+                await context.log(
+                    f"Tình trạng truyện: {release_status.state}"
+                    f"{f', mới nhất tập {release_status.latest_episode}' if release_status.latest_episode else ''}"
+                    f"{f' ({release_status.evidence})' if release_status.evidence else ''}.",
+                    "info",
+                )
+            except Exception as status_err:
+                await context.log(f"Không xác định được tình trạng truyện: {status_err}", "warning")
+
             from chapter_resolver import resolve_english_comic_title
             en_title = resolve_english_comic_title(title_text, url=task.comic_url)
             if en_title and en_title != title_text:
@@ -531,7 +560,13 @@ class Stage1_ComicParsing(BaseStage):
             task.artifacts["download_folder_name"] = new_folder_name
             task.artifacts["download_dir"] = new_download_dir
             task.artifacts["comic_title"] = title_text
-            
+            if release_status is not None and os.path.isdir(new_download_dir):
+                try:
+                    from series_status import save_release_status
+                    save_release_status(new_download_dir, release_status)
+                except OSError as save_err:
+                    await context.log(f"Không lưu được release_status.json: {save_err}", "warning")
+
             await context.update_stage_progress(self.name, 100.0)
             return True
         finally:
