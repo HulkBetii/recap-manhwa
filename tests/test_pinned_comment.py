@@ -93,3 +93,25 @@ def test_rejected_premise_line_is_dropped():
     block = format_mini_status_block("zombie_apocalypse", {"story_arc": "Episodes 1–3"}, series_bible=bible,
                                      accept=lambda text: False)
     assert "Premise" not in block and "Episodes 1–3" in block
+
+
+def test_weapon_beat_is_the_most_mentioned_weapon(tmp_path):
+    """Tyrant 1-10: two arrows fired at him outranked 18 "blade" mentions (first-match order)."""
+    from youtube_metadata import _extract_story_beats
+    ep = tmp_path / "episode_1"
+    ep.mkdir()
+    lines = ["Arrows pin his arm.", "Goblins with arrows fall."] + ["He swings his blade at the demon."] * 5
+    (ep / "recap.json").write_text(json.dumps([{"speech": s} for s in lines]), encoding="utf-8")
+    beats = _extract_story_beats("Tyrant", "regression_prep", None, str(tmp_path), 1, 1)
+    assert beats["primary_weapon"] == "A Survival Blade"
+
+
+def test_abandoned_places_are_not_betrayal(tmp_path):
+    from youtube_metadata import generate_youtube_metadata
+    ep = tmp_path / "episode_1"
+    ep.mkdir()
+    lines = ["He searches an abandoned building.", "The abandoned car blocks the road.", "Demons roam the abandoned city."]
+    (ep / "recap.json").write_text(json.dumps([{"speech": s, "images": [{"page": 1, "priority": 1.0}]} for s in lines]), encoding="utf-8")
+    save_bible(_bible(), str(tmp_path))
+    meta = generate_youtube_metadata("Veteran of the Apocalypse", 1, 1, download_dir=str(tmp_path))
+    assert not any(c["id"] == "concept_betrayal_retribution" for c in meta["thumbnail_concepts"])

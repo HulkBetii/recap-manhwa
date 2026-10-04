@@ -1779,9 +1779,22 @@ class SafeFormatDict(dict):
 BEAT_MIN_MENTIONS = 2
 
 
+def _beat_mentions(text: str, keywords: Sequence[str]) -> int:
+    return sum(len(re.findall(rf"\b{re.escape(k)}{ARCHETYPE_WORD_ENDINGS}\b", text)) for k in keywords)
+
+
 def _beat_evidence(text: str, keywords: Sequence[str]) -> bool:
-    hits = sum(len(re.findall(rf"\b{re.escape(k)}{ARCHETYPE_WORD_ENDINGS}\b", text)) for k in keywords)
-    return hits >= BEAT_MIN_MENTIONS
+    return _beat_mentions(text, keywords) >= BEAT_MIN_MENTIONS
+
+
+# Weapon display labels and their keywords, in tie-break order.
+WEAPON_BEATS: Sequence[Tuple[str, Sequence[str]]] = (
+    ("His Recurve Bow", ("recurve bow", "bow and arrow", "arrow")),
+    ("A Spiked Club", ("spiked club", "baseball bat", "club")),
+    ("A Reinforced Spear", ("spear",)),
+    ("Dual Chainsaws", ("chainsaw", "chain saw")),
+    ("A Survival Blade", ("blade", "sword", "dagger")),
+)
 
 
 def _extract_story_beats(
@@ -1976,19 +1989,13 @@ def _extract_story_beats(
         beats["villain_type"] = "Hostile Survivors"
         beats["betrayer"] = "Corrupt Survivors"
 
-    # 9. Dynamic Primary Weapon
-    if _beat_evidence(full_text, ["recurve bow", "bow and arrow", "arrow"]):
-        beats["primary_weapon"] = "His Recurve Bow"
-    elif _beat_evidence(full_text, ["spiked club", "baseball bat", "club"]):
-        beats["primary_weapon"] = "A Spiked Club"
-    elif _beat_evidence(full_text, ["spear"]):
-        beats["primary_weapon"] = "A Reinforced Spear"
-    elif _beat_evidence(full_text, ["chainsaw", "chain saw"]):
-        beats["primary_weapon"] = "Dual Chainsaws"
-    elif _beat_evidence(full_text, ["blade", "sword", "dagger"]):
-        beats["primary_weapon"] = "A Survival Blade"
-    else:
-        beats["primary_weapon"] = "Tactical Survival Gear"
+    # 9. Dynamic Primary Weapon: the most-mentioned weapon, not the first group with two mentions
+    # (Tyrant 1-10: two "arrows" fired at him beat 18 "blade" mentions and his thumbnail got a bow).
+    weapon_counts = {label: _beat_mentions(full_text, keywords) for label, keywords in WEAPON_BEATS}
+    best_weapon = max(weapon_counts, key=lambda label: weapon_counts[label])
+    beats["primary_weapon"] = (
+        best_weapon if weapon_counts[best_weapon] >= BEAT_MIN_MENTIONS else "Tactical Survival Gear"
+    )
 
     # 10. Additional Supporting Slots
     m_prep = re.search(r"\b(\d+)\s*(years?|months?|days?)\s+(?:of\s+)?training\b|\bprepared\s+for\s+(\d+)\s*(years?|months?|days?)\b", full_text)
@@ -2798,7 +2805,9 @@ def _mine_dynamic_story_concepts(
     # CONCEPT TYPE 4: Hostile Standoff / Raider Clash (Đối Đầu Băng Cướp / Kẻ Thù)
     # ─────────────────────────────────────────────────────────────────────────
     has_raiders = _beat_evidence(text_lower, ["raider", "thug", "bandit", "outlaw", "hyeongjun", "gang", "scavenger", "enemy"])
-    has_betrayal = _beat_evidence(text_lower, ["betray", "abandon", "traitor", "left for dead", "backstab"])
+    # Bare "abandon" is mostly places ("an abandoned building": 4x in Tyrant 1-10, no traitor at all).
+    has_betrayal = _beat_evidence(text_lower, ["betray", "traitor", "left for dead", "backstab", "abandoned him",
+                                               "abandoned by", "left him to die"])
     rival_display = beats.get("rival_name") or "Corrupt Awakened Leader"
 
     # Only when the story shows real antagonists: the unconditional "Rival Face-Off" invented a
