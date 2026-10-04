@@ -1428,22 +1428,56 @@ def validate_text_surface(
 # ARCHETYPE DETECTION
 # =============================================================================
 
+# Keyword groups per archetype, in tie-break priority order. Matching is whole-word (plural/verb
+# endings allowed): "gate" no longer matches "Hellgates", "bow" no longer matches "elbow".
+ARCHETYPE_KEYWORDS: Dict[str, List[str]] = {
+    "zombie_apocalypse": ["zombie", "infected", "undead", "ghoul", "plague", "virus", "outbreak", "82-08", "8208", "walking dead"],
+    "bunker_prepper": ["bunker", "shelter", "prepper", "shut-in", "shutin", "warehouse", "hoard",
+                       "freeze", "freezing", "frozen", "frost", "ice age", "eternal winter", "blizzard"],
+    "tower_anti_regression": ["return stone", "regression stone", "floor 100", "chaos wasteland", "anti-regression",
+                              "world after the fall"],
+    "game_system_reality": ["game become", "vr game", "game reality", "virtual reality", "player", "npc", "game world",
+                            "logged in", "tutorial"],
+    "regression_prep": ["regression", "regress", "second chance", "time travel", "rewind", "went back", "returned to",
+                        "before the apocalypse", "turn back time", "back in time", "timeline"],
+    # "build" removed — too broad, matches bunker/base-building stories; remaining keywords are farming-specific
+    "farming_kingdom": ["farming", "kingdom", "territory", "village", "agriculture", "lord", "baron", "domain", "settlement"],
+    # Bare "shadow" counted every shadow in the narration (18x in Veteran 1-33): only the power-system phrases.
+    "hunter_gate": ["hunter", "gate", "dungeon", "awakening", "rank", "necromancer", "shadow monarch", "shadow army"],
+    "murim_apocalypse": ["murim", "martial", "cultivation", "heavenly demon", "mount hua"],
+}
+# The Bible's setting and the official synopsis state the genre of the whole series, while story memory
+# only covers the rendered episodes, so one mention there outweighs one memory mention. Bible terms are
+# proper nouns ("Personal Dimensional Gate" is an ability, not a hunter/gate genre) and count once.
+ARCHETYPE_CONTEXT_WEIGHT = 3
+ARCHETYPE_WORD_ENDINGS = r"(?:s|es|ed|ing)?"
+
+
+def _archetype_scores(text: str) -> Dict[str, int]:
+    return {
+        archetype: sum(len(re.findall(rf"\b{re.escape(k)}{ARCHETYPE_WORD_ENDINGS}\b", text)) for k in keywords)
+        for archetype, keywords in ARCHETYPE_KEYWORDS.items()
+    }
+
+
 def detect_archetype(
     comic_title: str,
     story_memory: Optional[Dict[str, Any]] = None,
     extra_context: str = "",
+    extra_terms: str = "",
 ) -> str:
     """
     Detects the manhwa archetype/subgenre for tailored metadata generation.
-    `extra_context` carries the Series Bible setting/terms: early episode summaries can miss the
-    genre entirely (Veteran of the Apocalypse ep 1-3 never said "zombie" and was tagged hunter_gate).
+    `extra_context` carries the Series Bible setting + official synopsis and `extra_terms` its terms:
+    early episode summaries can miss the genre entirely (Veteran of the Apocalypse ep 1-3 never said
+    "zombie" and was tagged hunter_gate).
+
+    The archetype with the most keyword evidence wins (ties keep the ARCHETYPE_KEYWORDS order). It used
+    to be the first group with any match: one "Ghouls" term made The Tyrant of the Apocalypse Returns,
+    a demon/regression story, a zombie_apocalypse kit tagged "zombie manhwa".
     """
     title_lower = (comic_title or "").lower()
-    mem_text = ""
-    if story_memory:
-        mem_text = str(story_memory).lower()
-
-    combined = f"{title_lower} {mem_text} {(extra_context or '').lower()}"
+    mem_text = str(story_memory).lower() if story_memory else ""
 
     # Priority 1: Direct comic title & explicit theme matching
     if "world after the fall" in title_lower:
@@ -1451,27 +1485,12 @@ def detect_archetype(
     if "surviving the apocalypse" in title_lower or "bunker" in title_lower or "apocalypse from the start" in title_lower:
         return "bunker_prepper"
 
-    # Priority 2: Specific token groups
-    if any(k in combined for k in ["zombie", "infected", "undead", "ghoul", "plague", "virus", "outbreak", "82-08", "8208", "walking dead"]):
-        return "zombie_apocalypse"
-    elif any(k in combined for k in ["bunker", "shelter", "prepper", "shut-in", "shutin", "warehouse", "hoard"]):
-        return "bunker_prepper"
-    elif any(k in combined for k in ["freeze", "freezing", "frozen", "frost", "ice age", "eternal winter", "blizzard"]):
-        return "bunker_prepper"
-    elif any(k in combined for k in ["return stone", "regression stone", "floor 100", "chaos wasteland", "anti-regression", "world after the fall"]):
-        return "tower_anti_regression"
-    elif any(k in combined for k in ["game become", "vr game", "game reality", "virtual reality", "player", "npc", "game world", "logged in", "tutorial"]):
-        return "game_system_reality"
-    elif any(k in combined for k in ["regression", "regress", "second chance", "time travel", "rewind", "went back", "returned to", "before the apocalypse"]):
-        return "regression_prep"
-    # "build" removed — too broad, matches bunker/base-building stories; remaining keywords are farming-specific
-    elif any(k in combined for k in ["farming", "kingdom", "territory", "village", "agriculture", "lord", "baron", "domain", "settlement"]):
-        return "farming_kingdom"
-    elif any(k in combined for k in ["hunter", "gate", "dungeon", "awakening", "rank", "necromancer", "shadow"]):
-        return "hunter_gate"
-    elif any(k in combined for k in ["murim", "martial", "cultivation", "heavenly demon", "mount hua"]):
-        return "murim_apocalypse"
-    return "general_apocalypse"
+    # Priority 2: keyword evidence across the title, story memory and the Bible
+    scores = _archetype_scores(f"{title_lower} {mem_text} {(extra_terms or '').lower()}")
+    for archetype, count in _archetype_scores((extra_context or "").lower()).items():
+        scores[archetype] += ARCHETYPE_CONTEXT_WEIGHT * count
+    best = max(scores, key=lambda a: scores[a])  # max() keeps the first of equal scores
+    return best if scores[best] > 0 else "general_apocalypse"
 
 
 # =============================================================================
@@ -1479,11 +1498,15 @@ def detect_archetype(
 # =============================================================================
 
 def _bible_archetype_context(series_bible: Any) -> str:
-    """Setting + recurring terms read by the LLM from the comic pages; used for genre detection only,
-    never as title evidence."""
+    """Setting (read by the LLM from the pages) + official synopsis: the series' own genre statement.
+    Used for genre detection only, never as title evidence."""
     if series_bible is None:
         return ""
-    return " ".join([getattr(series_bible, "setting", "") or "", *getattr(series_bible, "terms", [])])
+    return " ".join([getattr(series_bible, "setting", "") or "", getattr(series_bible, "synopsis", "") or ""])
+
+
+def _bible_archetype_terms(series_bible: Any) -> str:
+    return " ".join(getattr(series_bible, "terms", []) or []) if series_bible is not None else ""
 
 
 def _merge_series_bible(story_memory: Optional[Dict[str, Any]], download_dir: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -2395,13 +2418,13 @@ def build_minimal_tags(
 # story-state = weapon type, gear, bunker, specific location mentioned in prompt
 # style = lighting, color grading, cinematic — these need no evidence
 THUMBNAIL_STORY_STATE_PATTERNS = {
-    r'tactical\s+gear': "tactical_gear",
-    r'reinforced\s+(?:bunker|shelter|compound|base)': "reinforced_shelter",
-    r'(?:military|army)\s+(?:uniform|fatigues|outfit)': "military_uniform",
-    r'(?:sniper|shotgun|assault\s+rifle)': "specific_weapon",
-    r'biohazard\s+(?:suit|mask|gear)': "biohazard_gear",
-    r'doomsday\s+bunker': "doomsday_bunker",
-    r'16\s+years\s+(?:of\s+)?preparing': "preparation_duration_claim",
+    r'\btactical\s+gear\b': "tactical_gear",
+    r'\breinforced\s+(?:bunker|shelter|compound|base)\b': "reinforced_shelter",
+    r'\b(?:military|army)\s+(?:uniform|fatigues|outfit)\b': "military_uniform",
+    r'\b(?:sniper|shotgun|assault\s+rifle)\b': "specific_weapon",
+    r'\bbiohazard\s+(?:suit|mask|gear)\b': "biohazard_gear",
+    r'\bdoomsday\s+bunker\b': "doomsday_bunker",
+    r'\b16\s+years\s+(?:of\s+)?preparing\b': "preparation_duration_claim",
 }
 
 
@@ -3710,7 +3733,10 @@ def _resolve_archetype(
     """Single archetype decision shared by Stage 11 previews and the Stage 12 kit."""
     if series_bible is None and load_bible is not None:
         series_bible = load_bible(download_dir)
-    return detect_archetype(comic_title, merged_memory, extra_context=_bible_archetype_context(series_bible))
+    return detect_archetype(
+        comic_title, merged_memory,
+        extra_context=_bible_archetype_context(series_bible), extra_terms=_bible_archetype_terms(series_bible),
+    )
 
 
 def _select_video_titles(

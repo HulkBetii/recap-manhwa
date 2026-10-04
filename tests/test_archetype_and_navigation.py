@@ -162,3 +162,28 @@ def test_real_links_are_kept(tmp_path):
     assert f"• Full Playlist: {playlist}" in desc
     assert "• ⏩ Next Part: https://youtu.be/xyz" in desc
     assert "Previous Part" not in desc
+
+
+TYRANT_SETTING = ("In an apocalyptic world overrun by demon-spawning Hellgates since 2047, sole survivor Goong Nam "
+                  "achieves timeline regression through a legendary demon-slaying quest to return to the past.")
+TYRANT_TERMS = "Hellgates Timeline Regression Legendary Quest High-Ranking Demons Ghouls"
+
+
+def test_most_evidence_wins_not_first_keyword():
+    """Tyrant 1-3 was tagged zombie_apocalypse from a single "Ghouls" term (first-match cascade)."""
+    memory = {"episodes": {"1": {"summary": "Goong Nam slays a horned demon and a ghoul in the abyss."}}}
+    assert detect_archetype("The Tyrant of the Apocalypse Returns", memory,
+                            extra_context=TYRANT_SETTING, extra_terms=TYRANT_TERMS) == "regression_prep"
+
+
+def test_keywords_match_whole_words():
+    # "Hellgates" is not a hunter "gate"; shadows in the narration are not a "shadow army".
+    assert detect_archetype("X", {"s": "Hellgates open. Shadows fall."}) == "general_apocalypse"
+    assert detect_archetype("X", {"s": "The hunters enter the gate."}) == "hunter_gate"
+
+
+def test_terms_count_less_than_the_genre_statement():
+    # Veteran: an ability named "Personal Dimensional Gate" must not outweigh "zombie" in the setting.
+    setting = "An asteroid turns the apocalyptic zombie scenario of the game Survival Life into reality."
+    assert detect_archetype("Veteran of the Apocalypse", EARLY_MEMORY, extra_context=setting,
+                            extra_terms="Survival Life Personal Dimensional Gate") == "zombie_apocalypse"
