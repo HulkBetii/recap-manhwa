@@ -6,7 +6,7 @@ import re
 import glob
 import hashlib
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional, Sequence, Tuple, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 # V5: StoryFactGraph for evidence-first structured fact generation
 try:
@@ -1773,6 +1773,17 @@ class SafeFormatDict(dict):
 # STORY BEATS EXTRACTION — ZERO FACTUAL ARCHETYPE DEFAULTS
 # =============================================================================
 
+# A story beat (disaster, weapon, boss, companion...) feeds titles, thumbnails and the pinned comment,
+# so it needs this many whole-word mentions. One substring hit used to be enough: a single "freeze"
+# made The Tyrant of the Apocalypse Returns a "Global Freeze" story with a heated-bunker question.
+BEAT_MIN_MENTIONS = 2
+
+
+def _beat_evidence(text: str, keywords: Sequence[str]) -> bool:
+    hits = sum(len(re.findall(rf"\b{re.escape(k)}{ARCHETYPE_WORD_ENDINGS}\b", text)) for k in keywords)
+    return hits >= BEAT_MIN_MENTIONS
+
+
 def _extract_story_beats(
     comic_title: str,
     archetype: str,
@@ -1843,22 +1854,25 @@ def _extract_story_beats(
     full_text = f"{title_lower} {' '.join(aggregated_text_list)}".lower()
 
     # 3. Dynamic Disaster Name Detection
-    if any(k in full_text for k in ["asteroid", "meteorite", "meteor", "eunjambi"]):
+    if _beat_evidence(full_text, ["asteroid", "meteorite", "meteor", "eunjambi"]):
         beats["disaster"] = "The Asteroid Impact"
         beats["disaster_event"] = "Asteroid Impact"
-    elif any(k in full_text for k in ["freeze", "frozen", "frost", "blizzard", "ice age", "sub-zero", "subzero"]):
+    elif _beat_evidence(full_text, ["freeze", "frozen", "frost", "blizzard", "ice age", "sub-zero", "subzero"]):
         beats["disaster"] = "The Global Freeze"
         beats["disaster_event"] = "Global Freeze"
-    elif any(k in full_text for k in ["zombie", "infected", "undead", "plague", "82-08", "8208", "quarantine"]):
+    elif _beat_evidence(full_text, ["zombie", "infected", "undead", "plague", "82-08", "8208", "quarantine"]):
         beats["disaster"] = "The Zombie Outbreak"
         beats["disaster_event"] = "Zombie Outbreak"
-    elif any(k in full_text for k in ["dungeon", "gate", "abyss", "rift", "hunter"]):
+    elif _beat_evidence(full_text, ["hellgate", "hell gate", "demon"]):
+        beats["disaster"] = "The Hellgate Invasion"
+        beats["disaster_event"] = "Hellgate Invasion"
+    elif _beat_evidence(full_text, ["dungeon", "gate", "abyss", "rift", "hunter"]):
         beats["disaster"] = "The Dungeon Break"
         beats["disaster_event"] = "Dungeon Break"
-    elif any(k in full_text for k in ["tower", "floor 100", "anti-regression"]):
+    elif _beat_evidence(full_text, ["tower", "floor 100", "anti-regression"]):
         beats["disaster"] = "The Tower Collapse"
         beats["disaster_event"] = "Tower Collapse"
-    elif any(k in full_text for k in ["murim", "martial arts", "sect", "cultivation"]):
+    elif _beat_evidence(full_text, ["murim", "martial arts", "sect", "cultivation"]):
         beats["disaster"] = "The Sect Betrayal"
         beats["disaster_event"] = "Sect Betrayal"
     else:
@@ -1866,33 +1880,33 @@ def _extract_story_beats(
         beats["disaster_event"] = "The Apocalypse"
 
     # 4. Dynamic MC Role / Title
-    if any(k in full_text for k in ["veteran", "military", "combat veteran"]):
+    if _beat_evidence(full_text, ["veteran", "military", "combat veteran"]):
         beats["mc_role"] = "Veteran"
-    elif any(k in full_text for k in ["hunter", "awakener", "rank 1", "s-rank", "sss-rank"]):
+    elif _beat_evidence(full_text, ["hunter", "awakener", "rank 1", "s-rank", "sss-rank"]):
         beats["mc_role"] = "SSS-Rank Hunter"
-    elif any(k in full_text for k in ["prepper", "hoarder", "stockpile"]):
+    elif _beat_evidence(full_text, ["prepper", "hoarder", "stockpile"]):
         beats["mc_role"] = "SSS-Rank Prepper"
-    elif any(k in full_text for k in ["exile", "farming", "kingdom", "lord"]):
+    elif _beat_evidence(full_text, ["exile", "farming", "kingdom", "lord"]):
         beats["mc_role"] = "Exiled Lord"
-    elif any(k in full_text for k in ["necromancer", "shadow monarch"]):
+    elif _beat_evidence(full_text, ["necromancer", "shadow monarch"]):
         beats["mc_role"] = "Shadow Monarch"
     else:
         beats["mc_role"] = "Lone Survivor"
 
     # 5. Dynamic Shelter / Base / Fortress
-    if "bunker" in full_text:
+    if _beat_evidence(full_text, ["bunker"]):
         beats["shelter"] = "High-Tech Bunker"
         beats["fortress"] = "a Fortified Bunker"
         beats["prep_action"] = "Building a High-Tech Bunker"
-    elif any(k in full_text for k in ["mountain", "jiri", "sanctuary"]):
+    elif _beat_evidence(full_text, ["mountain", "jiri", "sanctuary"]):
         beats["shelter"] = "Mountain Sanctuary"
         beats["fortress"] = "a Mountain Sanctuary"
         beats["prep_action"] = "Fortifying His Mountain Sanctuary"
-    elif any(k in full_text for k in ["rooftop", "safehouse", "penthouse"]):
+    elif _beat_evidence(full_text, ["rooftop", "safehouse", "penthouse"]):
         beats["shelter"] = "Fortified Safehouse"
         beats["fortress"] = "a Fortified Safehouse"
         beats["prep_action"] = "Fortifying His Safehouse"
-    elif any(k in full_text for k in ["domain", "kingdom", "village"]):
+    elif _beat_evidence(full_text, ["domain", "kingdom", "village"]):
         beats["shelter"] = "Kingdom Domain"
         beats["fortress"] = "an Unstoppable Kingdom"
         beats["prep_action"] = "Building an Unstoppable Kingdom"
@@ -1902,16 +1916,16 @@ def _extract_story_beats(
         beats["prep_action"] = "Preparing for The Apocalypse"
 
     # 6. Dynamic Companion / Pet Name
-    if "dingo" in full_text:
+    if _beat_evidence(full_text, ["dingo"]):
         beats["pet_name"] = "Dingo"
         beats["companion_name"] = "His Loyal Pup Dingo"
-    elif any(k in full_text for k in ["wolf", "hound", "pup", "dog"]):
+    elif _beat_evidence(full_text, ["wolf", "hound", "pup", "puppy", "dog"]):
         beats["pet_name"] = "Mutated Hound"
         beats["companion_name"] = "His Mutated Companion"
-    elif "migyeong" in full_text:
+    elif _beat_evidence(full_text, ["migyeong"]):
         beats["pet_name"] = ""
         beats["companion_name"] = "Migyeong"
-    elif "elena" in full_text:
+    elif _beat_evidence(full_text, ["elena"]):
         beats["pet_name"] = ""
         beats["companion_name"] = "Elena"
     else:
@@ -1921,19 +1935,19 @@ def _extract_story_beats(
     # 7. Dynamic Boss / Monster / Threat
     # NOTE: bare "owl" excluded — too broad (matches "owl creek", NPC names etc.)
     # Only match compound noun "owl bear" or hyphenated "owl-bear"
-    if any(k in full_text for k in ["owl bear", "owl-bear"]):
+    if _beat_evidence(full_text, ["owl bear", "owl-bear"]):
         beats["boss_name"] = "The Colossal Owl Bear"
         beats["monster_type"] = "Colossal Apex Beast"
-    elif any(k in full_text for k in ["skeleton", "skull", "undead king"]):
+    elif _beat_evidence(full_text, ["skeleton", "skull", "undead king"]):
         beats["boss_name"] = "The Skeleton Chieftain"
         beats["monster_type"] = "Undead Boss"
-    elif any(k in full_text for k in ["red alpha", "alpha beast"]):
+    elif _beat_evidence(full_text, ["red alpha", "alpha beast"]):
         beats["boss_name"] = "The Red Alpha"
         beats["monster_type"] = "Apex Alpha Beast"
-    elif any(k in full_text for k in ["orc", "goblin", "chieftain"]):
+    elif _beat_evidence(full_text, ["orc", "goblin", "chieftain"]):
         beats["boss_name"] = "The Mutant Chieftain"
         beats["monster_type"] = "Mutant Horde"
-    elif any(k in full_text for k in ["zombie", "infected titan"]):
+    elif _beat_evidence(full_text, ["zombie", "infected titan"]):
         beats["boss_name"] = "The Mutated Titan"
         beats["monster_type"] = "Infected Swarm"
     else:
@@ -1941,19 +1955,19 @@ def _extract_story_beats(
         beats["monster_type"] = "Apex Predator"
 
     # 8. Dynamic Rival / Human Conflict / Betrayer
-    if "hyeongjun" in full_text:
+    if _beat_evidence(full_text, ["hyeongjun"]):
         beats["rival_name"] = "Hyeongjun's Thugs"
         beats["villain_type"] = "Awakened Thugs"
         beats["betrayer"] = "Hyeongjun's Gang"
-    elif any(k in full_text for k in ["politician", "corrupt suit", "shady suit"]):
+    elif _beat_evidence(full_text, ["politician", "corrupt suit", "shady suit"]):
         beats["rival_name"] = "Corrupt Politicians"
         beats["villain_type"] = "Corrupt Leaders"
         beats["betrayer"] = "Corrupt Officials"
-    elif any(k in full_text for k in ["raider", "bandit", "scavenger"]):
+    elif _beat_evidence(full_text, ["raider", "bandit", "scavenger"]):
         beats["rival_name"] = "Awakened Raiders"
         beats["villain_type"] = "Armed Raiders"
         beats["betrayer"] = "Ruthless Raiders"
-    elif any(k in full_text for k in ["betray", "traitor", "backstab", "left for dead"]):
+    elif _beat_evidence(full_text, ["betray", "traitor", "backstab", "left for dead"]):
         beats["rival_name"] = "Treacherous Allies"
         beats["villain_type"] = "Traitors"
         beats["betrayer"] = "His Own Allies"
@@ -1963,15 +1977,15 @@ def _extract_story_beats(
         beats["betrayer"] = "Corrupt Survivors"
 
     # 9. Dynamic Primary Weapon
-    if any(k in full_text for k in ["recurve bow", "bow", "arrow"]):
+    if _beat_evidence(full_text, ["recurve bow", "bow and arrow", "arrow"]):
         beats["primary_weapon"] = "His Recurve Bow"
-    elif any(k in full_text for k in ["spiked club", "baseball bat", "club"]):
+    elif _beat_evidence(full_text, ["spiked club", "baseball bat", "club"]):
         beats["primary_weapon"] = "A Spiked Club"
-    elif "spear" in full_text:
+    elif _beat_evidence(full_text, ["spear"]):
         beats["primary_weapon"] = "A Reinforced Spear"
-    elif any(k in full_text for k in ["chainsaw", "chain saw"]):
+    elif _beat_evidence(full_text, ["chainsaw", "chain saw"]):
         beats["primary_weapon"] = "Dual Chainsaws"
-    elif any(k in full_text for k in ["blade", "sword", "dagger"]):
+    elif _beat_evidence(full_text, ["blade", "sword", "dagger"]):
         beats["primary_weapon"] = "A Survival Blade"
     else:
         beats["primary_weapon"] = "Tactical Survival Gear"
@@ -2571,7 +2585,9 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     # CONCEPT TYPE 1: The Catalyst / Inciting Incident (Khởi Đầu / Bùng Nổ Thảm Họa)
     # ─────────────────────────────────────────────────────────────────────────
-    if "asteroid" in text_lower or "asteroid" in title_lower:
+    # Concept 1 follows the story's disaster beat (narration + memory evidence), so it cannot disagree
+    # with it: counting keywords again on memory alone turned Veteran's asteroid into a "freeze".
+    if beats.get("disaster_event") == "Asteroid Impact" or "asteroid" in title_lower:
         c1_id = "concept_asteroid_awakening"
         c1_name = "Asteroid Impact & Public Revelation (Công Bố Thiên Thạch & Thức Tỉnh)"
         c1_main_text = "SKY IS FALLING!"
@@ -2595,7 +2611,7 @@ def _mine_dynamic_story_concepts(
             f"Lower center-right: text '{c1_sub_text}' in bright amber/gold, bold condensed uppercase, heavy black outline.\n\n"
             f"{negative_prompt_block}"
         )
-    elif "freeze" in text_lower or "blizzard" in text_lower:
+    elif beats.get("disaster_event") == "Global Freeze":
         c1_id = "concept_subzero_cataclysm"
         c1_name = "Sub-Zero Freeze Collapse (Đại Hàn Băng Giá Đột Ngột)"
         c1_main_text = "FROZEN WORLD!"
@@ -2618,10 +2634,12 @@ def _mine_dynamic_story_concepts(
             f"{negative_prompt_block}"
         )
     else:
+        # Named after the story's own disaster: "Outbreak" (a zombie label) and "VETERAN" (copied from
+        # the Veteran of the Apocalypse template) used to ship on every other story.
         c1_id = "concept_outbreak_zero_hour"
-        c1_name = "Zero Hour Apocalypse Outbreak (Bùng Nổ Đại Dịch Giờ Số 0)"
+        c1_name = f"{beats.get('disaster_event') or 'Apocalypse'} Zero Hour (Khởi Đầu Thảm Họa)"
         c1_main_text = "ZERO HOUR!"
-        c1_sub_text = _cap_overlay_text("VETERAN STANDS READY!")
+        c1_sub_text = _cap_overlay_text("HE STANDS READY!")
         c1_comp = "Extreme close-up: MC frontline stance with weapon, chaos behind"
         c1_prompt = (
             f"Create a high-impact 16:9 anime YouTube thumbnail, landscape composition, 1280×720 or higher.\n\n"
@@ -2652,8 +2670,13 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     # CONCEPT TYPE 2: Apex Predator / Colossal Beast Clash (Săn Quái Thú / Boss)
     # ─────────────────────────────────────────────────────────────────────────
-    has_beast = any(k in text_lower for k in ["owl bear", "bear", "goblin", "beast", "monster", "mutant", "skeletal", "predator", "boss", "swarm"])
-    c2_beast_name = beats.get("boss_name") or ("Colossal Apex Predator" if ("bear" in text_lower or "owl" in text_lower) else "Mutant Swarm Beast")
+    has_beast = _beat_evidence(text_lower, ["owl bear", "bear", "goblin", "beast", "monster", "mutant", "skeletal", "predator", "boss", "swarm", "demon", "fiend"])
+    # Template boss names ("The Skeleton Chieftain") are only used when the story itself uses them.
+    c2_beast_name = beats.get("boss_name") or ""
+    # The head noun must be in the story: "Owl Bear" yes (Veteran), "Chieftain" no (Tyrant).
+    _c2_head = c2_beast_name.split()[-1].lower() if c2_beast_name else ""
+    if not _c2_head or not re.search(rf"(?<![a-z]){re.escape(_c2_head)}", text_lower):
+        c2_beast_name = "A Towering Demon" if _beat_evidence(text_lower, ["demon", "fiend"]) else "A Towering Monster"
     c2_weapon = beats.get("primary_weapon", "a glowing tactical weapon")
 
     if has_beast:
@@ -2694,8 +2717,8 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     # CONCEPT TYPE 3: Companion / Base Fortification (Linh Thú Sát Cánh / Căn Cứ Bất Khả Xâm Phạm)
     # ─────────────────────────────────────────────────────────────────────────
-    has_companion = any(k in text_lower for k in ["dingo", "pup", "hound", "wolf", "pet", "dog", "partner", "cub"])
-    has_fortress = any(k in text_lower for k in ["shelter", "bunker", "sanctuary", "fortress", "jiri mountain", "safehouse"])
+    has_companion = _beat_evidence(text_lower, ["dingo", "pup", "hound", "wolf", "pet", "dog", "partner", "cub"])
+    has_fortress = _beat_evidence(text_lower, ["shelter", "bunker", "sanctuary", "fortress", "jiri mountain", "safehouse"])
     pet_display = beats.get("pet_name") or "Mutated Companion"
 
     if has_companion:
@@ -2774,8 +2797,8 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     # CONCEPT TYPE 4: Hostile Standoff / Raider Clash (Đối Đầu Băng Cướp / Kẻ Thù)
     # ─────────────────────────────────────────────────────────────────────────
-    has_raiders = any(k in text_lower for k in ["raider", "thug", "bandit", "outlaw", "hyeongjun", "gang", "scavenger", "enemy"])
-    has_betrayal = any(k in text_lower for k in ["betray", "abandon", "traitor", "left for dead", "backstab"])
+    has_raiders = _beat_evidence(text_lower, ["raider", "thug", "bandit", "outlaw", "hyeongjun", "gang", "scavenger", "enemy"])
+    has_betrayal = _beat_evidence(text_lower, ["betray", "abandon", "traitor", "left for dead", "backstab"])
     rival_display = beats.get("rival_name") or "Corrupt Awakened Leader"
 
     # Only when the story shows real antagonists: the unconditional "Rival Face-Off" invented a
@@ -2830,7 +2853,7 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     # CONCEPT TYPE 5: Climax Firestorm / Solo Annihilation (Cơn Bão Chiến Trận / Hủy Diệt)
     # ─────────────────────────────────────────────────────────────────────────
-    has_firestorm = any(k in text_lower for k in ["firestorm", "blast", "explosion", "chainsaw", "detonate", "dual-wielding", "spiked clubs", "horde"])
+    has_firestorm = _beat_evidence(text_lower, ["firestorm", "blast", "explosion", "chainsaw", "detonate", "dual-wielding", "spiked clubs", "horde"])
     if has_firestorm:
         c5_id = "concept_apocalypse_firestorm"
         c5_name = "Apocalyptic Firestorm Annihilation (Cơn Bão Lửa Quét Sạch Biển Quái)"
@@ -3180,9 +3203,12 @@ def format_mini_status_block(
     survival_dashboard: Dict[str, Any],
     beats: Optional[Dict[str, str]] = None,
     series_bible: Any = None,
+    accept: Optional[Callable[[str], bool]] = None,
 ) -> str:
     """
     Pinned-comment status block built only from verifiable facts.
+    The premise line is the Bible setting written by the LLM; `accept` (the pinned-comment validator)
+    drops it when it asserts more than the story shows (Tyrant 1-3: "sole survivor" failed the gate).
 
     The former "SURVIVAL LOG" printed keyword-guessed beats ("Mountain Sanctuary", "His Mutated
     Companion") and archetype boilerplate labels that merely required any fact of the same type —
@@ -3195,20 +3221,39 @@ def format_mini_status_block(
         f"• 📖 Story Arc: {survival_dashboard.get('story_arc', 'Story Arc')}",
     ]
     setting = (getattr(series_bible, "setting", "") or "").strip()
-    if setting:
+    if setting and (accept is None or accept(setting)):
         lines.append(f"• 🌍 Premise: {setting}")
     return "\n".join(lines)
+
+
+GENERIC_ENGAGEMENT_QUESTION = "What was your favorite moment? Drop your thoughts below! 👇"
+# Multi-word capitalized names ("The Skeleton Chieftain"): beat templates invent them from keywords.
+STORY_NAME_RE = re.compile(r"\b(?:The\s+)?([A-Z][a-z]+(?:[ -][A-Z][a-z]+)+)")
+
+
+def _names_in_story(text: str, corpus_lower: str) -> bool:
+    """Every multi-word name in `text` literally occurs in the narration (no narration: nothing to check)."""
+    return not corpus_lower or all(name.lower() in corpus_lower for name in STORY_NAME_RE.findall(text))
 
 
 def generate_engagement_question(
     archetype: str,
     beats: Optional[Dict[str, str]] = None,
     seed: str = "",
+    accept: Optional[Callable[[str], bool]] = None,
 ) -> str:
     """
     Selects a contextual engagement question for the pinned comment.
     Deterministic for a given `seed` (the comic title) so re-running Stage 12 yields the same kit.
+    `accept` (the pinned-comment validator) rejects questions the story does not support; the
+    beat question, then the archetype pool and finally a fact-free question are tried in order.
     """
+    candidates = _engagement_candidates(archetype, beats, seed)
+    return next((q for q in candidates if accept is None or accept(q)), GENERIC_ENGAGEMENT_QUESTION)
+
+
+def _engagement_candidates(archetype: str, beats: Optional[Dict[str, str]], seed: str) -> List[str]:
+    candidates: List[str] = []
     if beats:
         disaster = beats.get("disaster", "").lower()
         boss = beats.get("boss_name")
@@ -3216,20 +3261,21 @@ def generate_engagement_question(
             # time_before falls back to a bare unit ("Days") when the story gives no number.
             _tb = beats.get("time_before", "")
             when = f" in {_tb}" if re.search(r"\d", _tb or "") else ""
-            return f"If an asteroid was about to hit Earth{when}, what's the #1 supply you'd stockpile FIRST? Drop your answer below! 👇"
-        if "freeze" in disaster or "blizzard" in disaster:
+            candidates.append(f"If an asteroid was about to hit Earth{when}, what's the #1 supply you'd stockpile FIRST? Drop your answer below! 👇")
+        elif "freeze" in disaster or "blizzard" in disaster:
             _temp = beats.get("extreme_temp", "Extreme Cold")
-            return f"The temperature drops to {_temp} — would you let shivering survivors into your heated bunker? Be honest 👀👇"
-        if "zombie" in disaster or "outbreak" in disaster:
-            return "What's the FIRST weapon you'd grab if an outbreak hit your city right now? 🧟👇"
-        if boss and "The " in boss:
-            return f"How would YOU survive against {boss}? Drop your battle strategy below! ⚔️👇"
+            candidates.append(f"The temperature drops to {_temp} — would you let shivering survivors into your heated bunker? Be honest 👀👇")
+        elif "zombie" in disaster or "outbreak" in disaster:
+            candidates.append("What's the FIRST weapon you'd grab if an outbreak hit your city right now? 🧟👇")
+        elif boss and "The " in boss:
+            candidates.append(f"How would YOU survive against {boss}? Drop your battle strategy below! ⚔️👇")
 
     questions = ENGAGEMENT_QUESTIONS.get(archetype, ENGAGEMENT_QUESTIONS["general_apocalypse"])
-    if not questions:
-        return "What was your favorite moment? Drop your thoughts below! 👇"
-    digest = hashlib.sha256(f"{seed}|{archetype}".encode("utf-8")).hexdigest()
-    return questions[int(digest, 16) % len(questions)]
+    if questions:
+        start = int(hashlib.sha256(f"{seed}|{archetype}".encode("utf-8")).hexdigest(), 16) % len(questions)
+        candidates.extend(questions[start:] + questions[:start])
+    candidates.append(GENERIC_ENGAGEMENT_QUESTION)
+    return candidates
 
 
 def generate_community_posts(
@@ -4198,8 +4244,20 @@ def generate_us_apocalypse_metadata(
             concept["visual_facts_used"] = fallback_facts
 
     # ── 7. PINNED COMMENT with mini status block ───────────────────────────
-    status_block = format_mini_status_block(archetype, survival_dashboard, beats=beats, series_bible=series_bible)
-    engagement_q = generate_engagement_question(archetype, beats=beats, seed=comic_title)
+    corpus_lower = " ".join(seg for segs in narration_by_episode.values() for seg in segs).lower()
+
+    def pinned_line_ok(text: str) -> bool:
+        return validate_text_surface(text, evidence_index, archetype, surface_type="pinned_comment")["passed"]
+
+    # The premise is the Bible setting (names come from the Bible); the question comes from templates,
+    # whose beat names ("The Skeleton Chieftain") must also occur in the story.
+    status_block = format_mini_status_block(
+        archetype, survival_dashboard, beats=beats, series_bible=series_bible, accept=pinned_line_ok,
+    )
+    engagement_q = generate_engagement_question(
+        archetype, beats=beats, seed=comic_title,
+        accept=lambda q: pinned_line_ok(q) and _names_in_story(q, corpus_lower),
+    )
 
     ep_climax_hook = beats.get("ep_climax_hook", "")
     climax_line = ""

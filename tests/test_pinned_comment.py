@@ -67,3 +67,29 @@ def test_where_we_left_off_uses_the_last_episode_not_the_last_saved():
     pinned = generate_youtube_metadata("Veteran of the Apocalypse", 1, 3, story_memory=memory)["pinned_comment"]
     assert "The final gate cracks open" in pinned
     assert "demonic entity looms" not in pinned
+
+
+def test_one_mention_is_not_a_story_beat():
+    """Tyrant 1-3: a single "freeze" made it a Global Freeze story with a heated-bunker question."""
+    from youtube_metadata import _beat_evidence
+    assert not _beat_evidence("he could freeze in fear for a second", ["freeze", "frozen"])
+    assert _beat_evidence("the freeze spreads; frozen streets everywhere", ["freeze", "frozen"])
+    assert not _beat_evidence("he bowed his head", ["recurve bow", "bow and arrow", "arrow"])
+
+
+def test_engagement_question_skips_invented_names():
+    from youtube_metadata import _names_in_story
+    corpus = "goong nam slays a demon in the abyss"
+    beats = {"disaster": "The Hellgate Invasion", "boss_name": "The Skeleton Chieftain"}
+    q = generate_engagement_question(
+        "regression_prep", beats, seed="Tyrant", accept=lambda text: _names_in_story(text, corpus),
+    )
+    assert "Skeleton Chieftain" not in q
+
+
+def test_rejected_premise_line_is_dropped():
+    from youtube_metadata import format_mini_status_block
+    bible = _bible()
+    block = format_mini_status_block("zombie_apocalypse", {"story_arc": "Episodes 1–3"}, series_bible=bible,
+                                     accept=lambda text: False)
+    assert "Premise" not in block and "Episodes 1–3" in block

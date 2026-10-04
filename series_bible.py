@@ -50,6 +50,10 @@ SYNOPSIS_MIN_CHARS = 40
 SYNOPSIS_MAX_CHARS = 1200
 SYNOPSIS_NAME_MIN_MENTIONS = 2
 MAX_PROMPT_OBSERVED_NAMES = 10
+# Role words that disqualify a character from being the story's female lead (ally) in thumbnails.
+ANTAGONIST_ROLE_WORDS = {
+    "demon", "villain", "boss", "enemy", "monster", "antagonist", "fiend", "beast", "overlord", "rival",
+}
 
 # Capitalized words that commonly appear mid-sentence but are not character names.
 NON_NAME_TOKENS = {
@@ -158,7 +162,17 @@ class SeriesBible(BaseModel):
         return names
 
     def first_female_character(self) -> Optional[CharacterEntry]:
-        return next((c for c in self.characters if c.gender == "female"), None)
+        """The female lead used by heroine/romance thumbnail concepts: an ally, never an antagonist.
+
+        Tyrant 1-3 made "The Master of the Seven Serpents" (role "demon lord") the blushing partner of a
+        seduction concept. Antagonist roles and title-style names ("The Master of ...") are skipped.
+        """
+        return next(
+            (c for c in self.characters
+             if c.gender == "female" and not c.name.startswith("The ")
+             and not ANTAGONIST_ROLE_WORDS & set(re.findall(r"[a-z]+", (c.role or "").lower()))),
+            None,
+        )
 
     def _all_entries(self) -> List[CharacterEntry]:
         return ([self.protagonist] if self.protagonist else []) + list(self.characters)

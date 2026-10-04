@@ -363,3 +363,17 @@ def test_metadata_uses_bible_over_story_memory(tmp_path):
     names = get_character_names("Zombie Revelation 82-08", merged)
     assert names["mc"] == "Tae"
     assert names["female_lead"] == "Sora"
+
+
+def test_female_lead_is_never_an_antagonist():
+    """Tyrant 1-3: the demon lord "The Master of the Seven Serpents" became a seduction-concept partner."""
+    from series_bible import CharacterEntry, new_bible
+    bible = new_bible("The Tyrant of the Apocalypse Returns")
+    bible.characters = [
+        CharacterEntry(name="The Master of the Seven Serpents", role="demon lord", gender="female"),
+        CharacterEntry(name="Yuri", role="rival hunter", gender="female"),
+        CharacterEntry(name="Haneul", role="ally healer", gender="female"),
+    ]
+    assert bible.first_female_character().name == "Haneul"
+    bible.characters = bible.characters[:2]
+    assert bible.first_female_character() is None
