@@ -187,3 +187,22 @@ def test_terms_count_less_than_the_genre_statement():
     setting = "An asteroid turns the apocalyptic zombie scenario of the game Survival Life into reality."
     assert detect_archetype("Veteran of the Apocalypse", EARLY_MEMORY, extra_context=setting,
                             extra_terms="Survival Life Personal Dimensional Gate") == "zombie_apocalypse"
+
+
+def test_long_memory_does_not_drown_the_genre_statement():
+    """Tyrant 1-50: 50 episodes of "frozen in fear" turned a demon/regression story into bunker_prepper."""
+    # Fear is not a cold disaster, and a shelter in 20 of 50 episodes would win without memory scaling.
+    episodes = {str(i): {"summary": "He stands frozen in place." + (" He hides in a shelter." if i <= 20 else "")}
+                for i in range(1, 51)}
+    assert detect_archetype("The Tyrant of the Apocalypse Returns", {"episodes": episodes},
+                            extra_context=TYRANT_SETTING, extra_terms=TYRANT_TERMS) == "regression_prep"
+
+
+def test_fear_is_not_a_cold_disaster(tmp_path):
+    from youtube_metadata import _extract_story_beats
+    ep = tmp_path / "episode_1"
+    ep.mkdir()
+    lines = ["He freezes in fear.", "Everyone is frozen in place.", "The demon laughs.", "A second demon roars."]
+    (ep / "recap.json").write_text(json.dumps([{"speech": s} for s in lines]), encoding="utf-8")
+    beats = _extract_story_beats("Tyrant", "regression_prep", None, str(tmp_path), 1, 1)
+    assert beats["disaster_event"] == "Hellgate Invasion"

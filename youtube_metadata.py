@@ -5,6 +5,7 @@ import os
 import re
 import glob
 import hashlib
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
@@ -1432,8 +1433,10 @@ def validate_text_surface(
 # endings allowed): "gate" no longer matches "Hellgates", "bow" no longer matches "elbow".
 ARCHETYPE_KEYWORDS: Dict[str, List[str]] = {
     "zombie_apocalypse": ["zombie", "infected", "undead", "ghoul", "plague", "virus", "outbreak", "82-08", "8208", "walking dead"],
+    # Cold disasters by their phrases only: "freeze"/"frozen" are mostly fear ("frozen in place", 16x in
+    # Tyrant 1-50, which made a demon story a bunker_prepper kit).
     "bunker_prepper": ["bunker", "shelter", "prepper", "shut-in", "shutin", "warehouse", "hoard",
-                       "freeze", "freezing", "frozen", "frost", "ice age", "eternal winter", "blizzard"],
+                       "ice age", "eternal winter", "blizzard", "sub-zero", "subzero", "deep freeze", "global freeze", "cold wave"],
     "tower_anti_regression": ["return stone", "regression stone", "floor 100", "chaos wasteland", "anti-regression",
                               "world after the fall"],
     "game_system_reality": ["game become", "vr game", "game reality", "virtual reality", "player", "npc", "game world",
@@ -1450,10 +1453,13 @@ ARCHETYPE_KEYWORDS: Dict[str, List[str]] = {
 # only covers the rendered episodes, so one mention there outweighs one memory mention. Bible terms are
 # proper nouns ("Personal Dimensional Gate" is an ability, not a hunter/gate genre) and count once.
 ARCHETYPE_CONTEXT_WEIGHT = 3
+# Story memory grows with the episode range while the genre statement does not; its counts are scaled to
+# this many episodes so a 50-episode memory cannot drown the official premise (Tyrant 1-50).
+ARCHETYPE_MEMORY_EPISODE_UNIT = 10
 ARCHETYPE_WORD_ENDINGS = r"(?:s|es|ed|ing)?"
 
 
-def _archetype_scores(text: str) -> Dict[str, int]:
+def _archetype_scores(text: str) -> Dict[str, float]:
     return {
         archetype: sum(len(re.findall(rf"\b{re.escape(k)}{ARCHETYPE_WORD_ENDINGS}\b", text)) for k in keywords)
         for archetype, keywords in ARCHETYPE_KEYWORDS.items()
@@ -1486,7 +1492,13 @@ def detect_archetype(
         return "bunker_prepper"
 
     # Priority 2: keyword evidence across the title, story memory and the Bible
-    scores = _archetype_scores(f"{title_lower} {mem_text} {(extra_terms or '').lower()}")
+    episodes = story_memory.get("episodes") if isinstance(story_memory, dict) else None
+    episode_count = len(episodes) if isinstance(episodes, dict) else 0
+    memory_scale = ARCHETYPE_MEMORY_EPISODE_UNIT / max(ARCHETYPE_MEMORY_EPISODE_UNIT, episode_count)
+    scores = {
+        archetype: count * memory_scale
+        for archetype, count in _archetype_scores(f"{title_lower} {mem_text} {(extra_terms or '').lower()}").items()
+    }
     for archetype, count in _archetype_scores((extra_context or "").lower()).items():
         scores[archetype] += ARCHETYPE_CONTEXT_WEIGHT * count
     best = max(scores, key=lambda a: scores[a])  # max() keeps the first of equal scores
@@ -1777,15 +1789,34 @@ class SafeFormatDict(dict):
 # so it needs this many whole-word mentions. One substring hit used to be enough: a single "freeze"
 # made The Tyrant of the Apocalypse Returns a "Global Freeze" story with a heated-bunker question.
 BEAT_MIN_MENTIONS = 2
+# Over long ranges a few passing mentions are noise: Tyrant 1-50 (3h) got a "High-Tech Bunker" concept from
+# 4 "bunker" mentions. The threshold grows with the range (1 per 10 episodes: concept gates read the
+# compact story memory, where 2 per 10 dropped real beats such as Veteran's Owl Bear), never below
+# BEAT_MIN_MENTIONS.
+BEAT_MENTIONS_PER_EPISODE = 0.1
+
+
+def _beat_min_mentions(episodes: int) -> int:
+    return max(BEAT_MIN_MENTIONS, math.ceil(max(1, episodes) * BEAT_MENTIONS_PER_EPISODE))
 
 
 def _beat_mentions(text: str, keywords: Sequence[str]) -> int:
     return sum(len(re.findall(rf"\b{re.escape(k)}{ARCHETYPE_WORD_ENDINGS}\b", text)) for k in keywords)
 
 
-def _beat_evidence(text: str, keywords: Sequence[str]) -> bool:
-    return _beat_mentions(text, keywords) >= BEAT_MIN_MENTIONS
+def _beat_evidence(text: str, keywords: Sequence[str], episodes: int = 1) -> bool:
+    return _beat_mentions(text, keywords) >= _beat_min_mentions(episodes)
 
+
+# Disaster events and their keywords, in tie-break order (the asteroid is checked first, separately).
+DISASTER_BEATS: Sequence[Tuple[str, Sequence[str]]] = (
+    ("Global Freeze", ("ice age", "eternal winter", "blizzard", "sub-zero", "subzero", "deep freeze", "global freeze", "cold wave")),
+    ("Zombie Outbreak", ("zombie", "infected", "undead", "plague", "82-08", "8208", "quarantine")),
+    ("Hellgate Invasion", ("hellgate", "hell gate", "demon")),
+    ("Dungeon Break", ("dungeon", "gate", "abyss", "rift", "hunter")),
+    ("Tower Collapse", ("tower", "floor 100", "anti-regression")),
+    ("Sect Betrayal", ("murim", "martial arts", "sect", "cultivation")),
+)
 
 # Weapon display labels and their keywords, in tie-break order.
 WEAPON_BEATS: Sequence[Tuple[str, Sequence[str]]] = (
@@ -1810,6 +1841,7 @@ def _extract_story_beats(
     CRITICAL RULE: Dynamic Story Grounding without hardcoded assumptions.
     Flexes attributes per manhwa series and episode range.
     """
+    episodes = max(1, to_ep - from_ep + 1)
     beats: Dict[str, str] = {}
     title_lower = (comic_title or "").lower()
 
@@ -1867,59 +1899,45 @@ def _extract_story_beats(
     full_text = f"{title_lower} {' '.join(aggregated_text_list)}".lower()
 
     # 3. Dynamic Disaster Name Detection
-    if _beat_evidence(full_text, ["asteroid", "meteorite", "meteor", "eunjambi"]):
+    if _beat_evidence(full_text, ["asteroid", "meteorite", "meteor", "eunjambi"], episodes):
         beats["disaster"] = "The Asteroid Impact"
         beats["disaster_event"] = "Asteroid Impact"
-    elif _beat_evidence(full_text, ["freeze", "frozen", "frost", "blizzard", "ice age", "sub-zero", "subzero"]):
-        beats["disaster"] = "The Global Freeze"
-        beats["disaster_event"] = "Global Freeze"
-    elif _beat_evidence(full_text, ["zombie", "infected", "undead", "plague", "82-08", "8208", "quarantine"]):
-        beats["disaster"] = "The Zombie Outbreak"
-        beats["disaster_event"] = "Zombie Outbreak"
-    elif _beat_evidence(full_text, ["hellgate", "hell gate", "demon"]):
-        beats["disaster"] = "The Hellgate Invasion"
-        beats["disaster_event"] = "Hellgate Invasion"
-    elif _beat_evidence(full_text, ["dungeon", "gate", "abyss", "rift", "hunter"]):
-        beats["disaster"] = "The Dungeon Break"
-        beats["disaster_event"] = "Dungeon Break"
-    elif _beat_evidence(full_text, ["tower", "floor 100", "anti-regression"]):
-        beats["disaster"] = "The Tower Collapse"
-        beats["disaster_event"] = "Tower Collapse"
-    elif _beat_evidence(full_text, ["murim", "martial arts", "sect", "cultivation"]):
-        beats["disaster"] = "The Sect Betrayal"
-        beats["disaster_event"] = "Sect Betrayal"
     else:
-        beats["disaster"] = "The Apocalypse"
-        beats["disaster_event"] = "The Apocalypse"
+        # Most evidence wins: as a cascade, 16 "frozen in fear" beat 15 Hellgate/demon mentions (Tyrant 1-50).
+        disaster_counts = {event: _beat_mentions(full_text, keywords) for event, keywords in DISASTER_BEATS}
+        best_disaster = max(disaster_counts, key=lambda event: disaster_counts[event])
+        event = best_disaster if disaster_counts[best_disaster] >= _beat_min_mentions(episodes) else "The Apocalypse"
+        beats["disaster"] = event if event == "The Apocalypse" else f"The {event}"
+        beats["disaster_event"] = event
 
     # 4. Dynamic MC Role / Title
-    if _beat_evidence(full_text, ["veteran", "military", "combat veteran"]):
+    if _beat_evidence(full_text, ["veteran", "military", "combat veteran"], episodes):
         beats["mc_role"] = "Veteran"
-    elif _beat_evidence(full_text, ["hunter", "awakener", "rank 1", "s-rank", "sss-rank"]):
+    elif _beat_evidence(full_text, ["hunter", "awakener", "rank 1", "s-rank", "sss-rank"], episodes):
         beats["mc_role"] = "SSS-Rank Hunter"
-    elif _beat_evidence(full_text, ["prepper", "hoarder", "stockpile"]):
+    elif _beat_evidence(full_text, ["prepper", "hoarder", "stockpile"], episodes):
         beats["mc_role"] = "SSS-Rank Prepper"
-    elif _beat_evidence(full_text, ["exile", "farming", "kingdom", "lord"]):
+    elif _beat_evidence(full_text, ["exile", "farming", "kingdom", "lord"], episodes):
         beats["mc_role"] = "Exiled Lord"
-    elif _beat_evidence(full_text, ["necromancer", "shadow monarch"]):
+    elif _beat_evidence(full_text, ["necromancer", "shadow monarch"], episodes):
         beats["mc_role"] = "Shadow Monarch"
     else:
         beats["mc_role"] = "Lone Survivor"
 
     # 5. Dynamic Shelter / Base / Fortress
-    if _beat_evidence(full_text, ["bunker"]):
+    if _beat_evidence(full_text, ["bunker"], episodes):
         beats["shelter"] = "High-Tech Bunker"
         beats["fortress"] = "a Fortified Bunker"
         beats["prep_action"] = "Building a High-Tech Bunker"
-    elif _beat_evidence(full_text, ["mountain", "jiri", "sanctuary"]):
+    elif _beat_evidence(full_text, ["mountain", "jiri", "sanctuary"], episodes):
         beats["shelter"] = "Mountain Sanctuary"
         beats["fortress"] = "a Mountain Sanctuary"
         beats["prep_action"] = "Fortifying His Mountain Sanctuary"
-    elif _beat_evidence(full_text, ["rooftop", "safehouse", "penthouse"]):
+    elif _beat_evidence(full_text, ["rooftop", "safehouse", "penthouse"], episodes):
         beats["shelter"] = "Fortified Safehouse"
         beats["fortress"] = "a Fortified Safehouse"
         beats["prep_action"] = "Fortifying His Safehouse"
-    elif _beat_evidence(full_text, ["domain", "kingdom", "village"]):
+    elif _beat_evidence(full_text, ["domain", "kingdom", "village"], episodes):
         beats["shelter"] = "Kingdom Domain"
         beats["fortress"] = "an Unstoppable Kingdom"
         beats["prep_action"] = "Building an Unstoppable Kingdom"
@@ -1929,16 +1947,16 @@ def _extract_story_beats(
         beats["prep_action"] = "Preparing for The Apocalypse"
 
     # 6. Dynamic Companion / Pet Name
-    if _beat_evidence(full_text, ["dingo"]):
+    if _beat_evidence(full_text, ["dingo"], episodes):
         beats["pet_name"] = "Dingo"
         beats["companion_name"] = "His Loyal Pup Dingo"
-    elif _beat_evidence(full_text, ["wolf", "hound", "pup", "puppy", "dog"]):
+    elif _beat_evidence(full_text, ["wolf", "hound", "pup", "puppy", "dog"], episodes):
         beats["pet_name"] = "Mutated Hound"
         beats["companion_name"] = "His Mutated Companion"
-    elif _beat_evidence(full_text, ["migyeong"]):
+    elif _beat_evidence(full_text, ["migyeong"], episodes):
         beats["pet_name"] = ""
         beats["companion_name"] = "Migyeong"
-    elif _beat_evidence(full_text, ["elena"]):
+    elif _beat_evidence(full_text, ["elena"], episodes):
         beats["pet_name"] = ""
         beats["companion_name"] = "Elena"
     else:
@@ -1948,19 +1966,19 @@ def _extract_story_beats(
     # 7. Dynamic Boss / Monster / Threat
     # NOTE: bare "owl" excluded — too broad (matches "owl creek", NPC names etc.)
     # Only match compound noun "owl bear" or hyphenated "owl-bear"
-    if _beat_evidence(full_text, ["owl bear", "owl-bear"]):
+    if _beat_evidence(full_text, ["owl bear", "owl-bear"], episodes):
         beats["boss_name"] = "The Colossal Owl Bear"
         beats["monster_type"] = "Colossal Apex Beast"
-    elif _beat_evidence(full_text, ["skeleton", "skull", "undead king"]):
+    elif _beat_evidence(full_text, ["skeleton", "skull", "undead king"], episodes):
         beats["boss_name"] = "The Skeleton Chieftain"
         beats["monster_type"] = "Undead Boss"
-    elif _beat_evidence(full_text, ["red alpha", "alpha beast"]):
+    elif _beat_evidence(full_text, ["red alpha", "alpha beast"], episodes):
         beats["boss_name"] = "The Red Alpha"
         beats["monster_type"] = "Apex Alpha Beast"
-    elif _beat_evidence(full_text, ["orc", "goblin", "chieftain"]):
+    elif _beat_evidence(full_text, ["orc", "goblin", "chieftain"], episodes):
         beats["boss_name"] = "The Mutant Chieftain"
         beats["monster_type"] = "Mutant Horde"
-    elif _beat_evidence(full_text, ["zombie", "infected titan"]):
+    elif _beat_evidence(full_text, ["zombie", "infected titan"], episodes):
         beats["boss_name"] = "The Mutated Titan"
         beats["monster_type"] = "Infected Swarm"
     else:
@@ -1968,19 +1986,19 @@ def _extract_story_beats(
         beats["monster_type"] = "Apex Predator"
 
     # 8. Dynamic Rival / Human Conflict / Betrayer
-    if _beat_evidence(full_text, ["hyeongjun"]):
+    if _beat_evidence(full_text, ["hyeongjun"], episodes):
         beats["rival_name"] = "Hyeongjun's Thugs"
         beats["villain_type"] = "Awakened Thugs"
         beats["betrayer"] = "Hyeongjun's Gang"
-    elif _beat_evidence(full_text, ["politician", "corrupt suit", "shady suit"]):
+    elif _beat_evidence(full_text, ["politician", "corrupt suit", "shady suit"], episodes):
         beats["rival_name"] = "Corrupt Politicians"
         beats["villain_type"] = "Corrupt Leaders"
         beats["betrayer"] = "Corrupt Officials"
-    elif _beat_evidence(full_text, ["raider", "bandit", "scavenger"]):
+    elif _beat_evidence(full_text, ["raider", "bandit", "scavenger"], episodes):
         beats["rival_name"] = "Awakened Raiders"
         beats["villain_type"] = "Armed Raiders"
         beats["betrayer"] = "Ruthless Raiders"
-    elif _beat_evidence(full_text, ["betray", "traitor", "backstab", "left for dead"]):
+    elif _beat_evidence(full_text, ["betray", "traitor", "backstab", "left for dead"], episodes):
         beats["rival_name"] = "Treacherous Allies"
         beats["villain_type"] = "Traitors"
         beats["betrayer"] = "His Own Allies"
@@ -1994,7 +2012,7 @@ def _extract_story_beats(
     weapon_counts = {label: _beat_mentions(full_text, keywords) for label, keywords in WEAPON_BEATS}
     best_weapon = max(weapon_counts, key=lambda label: weapon_counts[label])
     beats["primary_weapon"] = (
-        best_weapon if weapon_counts[best_weapon] >= BEAT_MIN_MENTIONS else "Tactical Survival Gear"
+        best_weapon if weapon_counts[best_weapon] >= _beat_min_mentions(episodes) else "Tactical Survival Gear"
     )
 
     # 10. Additional Supporting Slots
@@ -2543,6 +2561,7 @@ def _mine_dynamic_story_concepts(
     and story_memory — not pure hardcoded molds, but typed templates with
     story-adaptive fill-ins (mc_name, female_name, beast_name, rival_desc, etc.).
     """
+    episodes = max(1, to_ep - from_ep + 1)
     # 1. Aggregate story text & individual episode peaks
     all_episodes_data = []
     aggregated_text = ""
@@ -2677,13 +2696,13 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     # CONCEPT TYPE 2: Apex Predator / Colossal Beast Clash (Săn Quái Thú / Boss)
     # ─────────────────────────────────────────────────────────────────────────
-    has_beast = _beat_evidence(text_lower, ["owl bear", "bear", "goblin", "beast", "monster", "mutant", "skeletal", "predator", "boss", "swarm", "demon", "fiend"])
+    has_beast = _beat_evidence(text_lower, ["owl bear", "bear", "goblin", "beast", "monster", "mutant", "skeletal", "predator", "boss", "swarm", "demon", "fiend"], episodes)
     # Template boss names ("The Skeleton Chieftain") are only used when the story itself uses them.
     c2_beast_name = beats.get("boss_name") or ""
     # The head noun must be in the story: "Owl Bear" yes (Veteran), "Chieftain" no (Tyrant).
     _c2_head = c2_beast_name.split()[-1].lower() if c2_beast_name else ""
     if not _c2_head or not re.search(rf"(?<![a-z]){re.escape(_c2_head)}", text_lower):
-        c2_beast_name = "A Towering Demon" if _beat_evidence(text_lower, ["demon", "fiend"]) else "A Towering Monster"
+        c2_beast_name = "A Towering Demon" if beats.get("disaster_event") == "Hellgate Invasion" else "A Towering Monster"
     c2_weapon = beats.get("primary_weapon", "a glowing tactical weapon")
 
     if has_beast:
@@ -2724,8 +2743,8 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     # CONCEPT TYPE 3: Companion / Base Fortification (Linh Thú Sát Cánh / Căn Cứ Bất Khả Xâm Phạm)
     # ─────────────────────────────────────────────────────────────────────────
-    has_companion = _beat_evidence(text_lower, ["dingo", "pup", "hound", "wolf", "pet", "dog", "partner", "cub"])
-    has_fortress = _beat_evidence(text_lower, ["shelter", "bunker", "sanctuary", "fortress", "jiri mountain", "safehouse"])
+    has_companion = _beat_evidence(text_lower, ["dingo", "pup", "hound", "wolf", "pet", "dog", "partner", "cub"], episodes)
+    has_fortress = _beat_evidence(text_lower, ["shelter", "bunker", "sanctuary", "fortress", "jiri mountain", "safehouse"], episodes)
     pet_display = beats.get("pet_name") or "Mutated Companion"
 
     if has_companion:
@@ -2804,10 +2823,10 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     # CONCEPT TYPE 4: Hostile Standoff / Raider Clash (Đối Đầu Băng Cướp / Kẻ Thù)
     # ─────────────────────────────────────────────────────────────────────────
-    has_raiders = _beat_evidence(text_lower, ["raider", "thug", "bandit", "outlaw", "hyeongjun", "gang", "scavenger", "enemy"])
+    has_raiders = _beat_evidence(text_lower, ["raider", "thug", "bandit", "outlaw", "hyeongjun", "gang", "scavenger", "enemy"], episodes)
     # Bare "abandon" is mostly places ("an abandoned building": 4x in Tyrant 1-10, no traitor at all).
     has_betrayal = _beat_evidence(text_lower, ["betray", "traitor", "left for dead", "backstab", "abandoned him",
-                                               "abandoned by", "left him to die"])
+                                               "abandoned by", "left him to die"], episodes)
     rival_display = beats.get("rival_name") or "Corrupt Awakened Leader"
 
     # Only when the story shows real antagonists: the unconditional "Rival Face-Off" invented a
@@ -2862,7 +2881,7 @@ def _mine_dynamic_story_concepts(
     # ─────────────────────────────────────────────────────────────────────────
     # CONCEPT TYPE 5: Climax Firestorm / Solo Annihilation (Cơn Bão Chiến Trận / Hủy Diệt)
     # ─────────────────────────────────────────────────────────────────────────
-    has_firestorm = _beat_evidence(text_lower, ["firestorm", "blast", "explosion", "chainsaw", "detonate", "dual-wielding", "spiked clubs", "horde"])
+    has_firestorm = _beat_evidence(text_lower, ["firestorm", "blast", "explosion", "chainsaw", "detonate", "dual-wielding", "spiked clubs", "horde"], episodes)
     if has_firestorm:
         c5_id = "concept_apocalypse_firestorm"
         c5_name = "Apocalyptic Firestorm Annihilation (Cơn Bão Lửa Quét Sạch Biển Quái)"
