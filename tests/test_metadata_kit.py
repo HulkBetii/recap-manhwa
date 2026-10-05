@@ -137,3 +137,28 @@ def test_previous_drafts_are_loaded_from_metadata_json(tmp_path):
     assert overlay_options_from_json(drafts["llm_overlay_options"]) == {"c1": [("MAIN", "SUB")]}
     (tmp_path / "output" / "metadata.json").write_text("{broken", encoding="utf-8")
     assert load_previous_drafts(str(tmp_path)) == {}
+
+
+def test_upload_folder_links_video_under_seo_names(tmp_path):
+    import os
+    from metadata_kit import prepare_upload_folder
+    out = tmp_path / "output"
+    out.mkdir()
+    (out / "comic_1_50_en_abc.mp4").write_bytes(b"video")
+    (out / "comic_1_50_en_abc.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nHi\n", encoding="utf-8")
+    (out / "youtube_upload_kit.txt").write_text("kit", encoding="utf-8")
+    upload = out / "upload"
+    upload.mkdir()
+    (upload / "old-title-ep-1-3-manhwa-recap.mp4").write_bytes(b"stale")  # earlier range: must go
+    meta = {"seo_filenames": {"video_filename": "comic-ep-1-50-manhwa-recap.mp4",
+                              "srt_filename": "comic-ep-1-50-manhwa-recap.srt",
+                              "kit_filename": "comic-ep-1-50-manhwa-recap-upload-kit.txt"}}
+    placed = prepare_upload_folder(str(out), "comic_1_50_en_abc", meta)
+    assert sorted(os.listdir(upload)) == sorted(placed) == sorted(meta["seo_filenames"].values())
+    assert os.path.samefile(upload / "comic-ep-1-50-manhwa-recap.mp4", out / "comic_1_50_en_abc.mp4")  # hard link
+    assert (out / "comic_1_50_en_abc.mp4").exists()  # internal name kept
+
+
+def test_upload_folder_needs_the_final_video(tmp_path):
+    from metadata_kit import prepare_upload_folder
+    assert prepare_upload_folder(str(tmp_path), "missing", {"seo_filenames": {"video_filename": "x.mp4"}}) == {}

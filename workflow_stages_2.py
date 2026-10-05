@@ -3377,6 +3377,18 @@ class Stage12_MetadataReports(BaseStage):
                 task.artifacts["youtube_upload_kit_url"] = f"/downloads/{folder_name}/output/youtube_upload_kit.txt"
             await context.log("Đã tạo bộ công cụ YouTube Upload Kit (youtube_upload_kit.txt).", "success")
 
+            # Video/subtitles under the kit's SEO names + the kit, ready to drag into YouTube Studio.
+            try:
+                from metadata_kit import UPLOAD_DIRNAME, prepare_upload_folder
+                placed = prepare_upload_folder(output_dir, folder_name or os.path.basename(download_dir), yt_meta)
+                if placed:
+                    task.artifacts["upload_dir"] = os.path.join(output_dir, UPLOAD_DIRNAME)
+                    await context.log(f"Thư mục upload sẵn sàng: output/{UPLOAD_DIRNAME}/ ({', '.join(placed)})", "success")
+                else:
+                    await context.log("Chưa tạo thư mục upload: không thấy video cuối trong output/.", "warning")
+            except OSError as upload_err:
+                await context.log(f"Không tạo được thư mục upload: {upload_err}", "warning")
+
         metadata_path = os.path.join(output_dir, "metadata.json")
         metadata_temp_path = metadata_path + ".tmp"
         with open(metadata_temp_path, "w", encoding="utf-8") as mf:

@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
@@ -247,11 +248,58 @@ def write_json_atomic(path: str, data: Dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+KIT_FILENAME = "youtube_upload_kit.txt"
+UPLOAD_DIRNAME = "upload"
+UPLOAD_MANAGED_SUFFIXES = (".mp4", ".srt", ".txt")
+
+
 def write_kit_text(output_dir: str, yt_meta: Dict[str, Any]) -> str:
-    kit_path = os.path.join(output_dir, "youtube_upload_kit.txt")
+    kit_path = os.path.join(output_dir, KIT_FILENAME)
     with open(kit_path, "w", encoding="utf-8") as f:
         f.write(yt_meta.get("formatted_kit", ""))
     return kit_path
+
+
+def prepare_upload_folder(output_dir: str, folder_name: str, yt_meta: Dict[str, Any]) -> Dict[str, str]:
+    """
+    output/upload/: the final video and subtitles under the kit's SEO file names, plus the kit, ready
+    to drag into YouTube Studio. Video/subtitles are hard links (no extra disk for a 1 GB video), copies
+    when the filesystem refuses links. The internal names stay: UI links and re-runs rely on them.
+    Returns {upload name: path}; {} when the final video is missing.
+    """
+    names = yt_meta.get("seo_filenames") or {}
+    video_src = os.path.join(output_dir, f"{folder_name}.mp4")
+    if not names.get("video_filename") or not os.path.isfile(video_src):
+        return {}
+    sources = {
+        names["video_filename"]: video_src,
+        names.get("srt_filename"): os.path.join(output_dir, f"{folder_name}.srt"),
+        names.get("kit_filename"): os.path.join(output_dir, KIT_FILENAME),
+    }
+    sources = {name: path for name, path in sources.items() if name and os.path.isfile(path)}
+
+    upload_dir = os.path.join(output_dir, UPLOAD_DIRNAME)
+    os.makedirs(upload_dir, exist_ok=True)
+    # Tool-managed folder: files of an earlier title or range would be uploaded by mistake.
+    for name in os.listdir(upload_dir):
+        if name.endswith(UPLOAD_MANAGED_SUFFIXES) and name not in sources:
+            os.remove(os.path.join(upload_dir, name))
+
+    placed: Dict[str, str] = {}
+    for name, src in sources.items():
+        dst = os.path.join(upload_dir, name)
+        if os.path.exists(dst):
+            os.remove(dst)  # always relink: a re-render replaces the source file
+        if src.endswith(".txt"):
+            shutil.copy2(src, dst)  # the kit is small and rewritten in place by later runs
+        else:
+            try:
+                os.link(src, dst)
+            except OSError as err:
+                logger.warning("Hard link %s -> %s failed (%s); copying instead", src, dst, err)
+                shutil.copy2(src, dst)
+        placed[name] = dst
+    return placed
 
 
 # =============================================================================
@@ -379,4 +427,7 @@ async def regenerate_kit(
     kit_path = write_kit_text(output_dir, yt_meta)
     write_json_atomic(metadata_path, metadata)
     await log(f"Wrote {kit_path} and {metadata_path} (gate: {yt_meta['prepublish_audit'].get('gate_status')}).", "success")
+    placed = prepare_upload_folder(output_dir, os.path.basename(download_dir), yt_meta)
+    if placed:
+        await log(f"Upload folder: {os.path.join(output_dir, UPLOAD_DIRNAME)} ({', '.join(placed)})", "success")
     return metadata
