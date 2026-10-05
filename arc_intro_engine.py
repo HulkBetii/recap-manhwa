@@ -654,7 +654,8 @@ class MicroIntroRenderer:
         ref_audio_path: Optional[str] = None,
         enable_sfx: bool = False,
         target_resolution: Tuple[int, int] = (1920, 1080),
-        fps: int = 30
+        fps: int = 30,
+        crop_speech_bubbles: bool = False,
     ) -> Dict[str, Any]:
         os.makedirs(intro_dir, exist_ok=True)
         raw_audio_path = os.path.join(intro_dir, "raw_narration.mp3")
@@ -781,6 +782,18 @@ class MicroIntroRenderer:
                 # Smart panel isolation (cuts off speech bubbles & solid gutters)
                 _res = detect_clean_panel_and_focal_point(im)
                 bounds, focal, skin_ratio = _res[0], _res[1], _res[2]
+                if crop_speech_bubbles:
+                    # Same framing rules as the episodes (bubble_crop.py); the pitch showed raw bubbles.
+                    try:
+                        import cv2
+                        from bubble_crop import bubble_free_crop
+                        from workflow_stages_2 import apply_bubble_crop
+                        crop = bubble_free_crop(cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR), bounds)
+                        if crop:
+                            bounds, focal = apply_bubble_crop(crop, bounds, focal)
+                            bounds = tuple(int(round(v)) for v in bounds)
+                    except Exception as crop_err:
+                        logger.warning(f"Clip panel {p}: bubble framing skipped ({crop_err})")
                 image_meta[p] = (bounds, focal, skin_ratio)
 
                 # Precompute blurred ambient background from CLEAN panel only

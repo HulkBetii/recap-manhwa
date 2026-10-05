@@ -255,6 +255,17 @@ def test_run_without_intro_removes_previous_intro(tmp_path, fake_prepender):
     assert not (tmp_path / "episode_1" / "intro_state.json").exists()
 
 
+def test_restored_then_rerendered_episode_is_not_replaced_by_old_backup(tmp_path, fake_prepender):
+    """Stage 10 removes the intro, re-renders episode 1, Stage 11 adds the intro back (Tyrant 1-3 bug)."""
+    video = _ep1(tmp_path, b"OLD-EPISODE")
+    intro = {"video_path": "i.mp4", "srt_path": "i.srt", "duration": 40.0}
+    Stage11_FinalVideoAssembly._prepend_intro_to_first_episode(intro, str(tmp_path), 1)
+    Stage11_FinalVideoAssembly._restore_first_episode_without_intro(str(tmp_path), 1)
+    video.write_bytes(b"NEW-EPISODE-RENDER")
+    assert Stage11_FinalVideoAssembly._prepend_intro_to_first_episode(intro, str(tmp_path), 1)
+    assert video.read_bytes() == b"INTRO|NEW-EPISODE-RENDER"
+
+
 # --- Outro assembly helpers (Stage 11) ---------------------------------------
 
 def test_outro_images_keep_latest_pages_in_order():
@@ -360,5 +371,19 @@ def test_clip_is_reused_only_for_same_script_and_voice(tmp_path):
     assert Stage11_FinalVideoAssembly._reusable_clip(str(clip_dir), "Other text.", payload) is None
     assert Stage11_FinalVideoAssembly._reusable_clip(str(clip_dir), "Text.", {"voice_id": "clone_jessa"}) is None
     record = clip_dir / Stage11_FinalVideoAssembly.CLIP_RECORD_FILENAME
-    record.write_text(record.read_text(encoding="utf-8").replace('"format": 2', '"format": 1'), encoding="utf-8")
+    current = f'"format": {Stage11_FinalVideoAssembly.CLIP_FORMAT_VERSION}'
+    record.write_text(record.read_text(encoding="utf-8").replace(current, '"format": 1'), encoding="utf-8")
     assert Stage11_FinalVideoAssembly._reusable_clip(str(clip_dir), "Text.", payload) is None  # older render format
+
+
+def test_clip_is_re_rendered_when_bubble_framing_changes(tmp_path):
+    clip_dir = tmp_path / "pitch"
+    clip_dir.mkdir()
+    (clip_dir / "video.mp4").write_bytes(b"x")
+    (clip_dir / "transcript.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nHi.\n", encoding="utf-8")
+    clip = {"video_path": str(clip_dir / "video.mp4"), "srt_path": str(clip_dir / "transcript.srt"), "duration": 30.0}
+    raw = {"voice_id": "clone_andrew", "crop_speech_bubbles": False}
+    cropped = {"voice_id": "clone_andrew", "crop_speech_bubbles": True}
+    Stage11_FinalVideoAssembly._remember_clip(str(clip_dir), "Text.", raw, clip)
+    assert Stage11_FinalVideoAssembly._reusable_clip(str(clip_dir), "Text.", raw) is not None
+    assert Stage11_FinalVideoAssembly._reusable_clip(str(clip_dir), "Text.", cropped) is None

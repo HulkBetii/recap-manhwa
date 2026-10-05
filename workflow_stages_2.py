@@ -750,6 +750,11 @@ def draw_subtitles_on_frame(image, text, font_size=42):
         y_cursor += line_height
 
 
+# Camera framing around bubbles when crop_speech_bubbles is on (part of the video fingerprint).
+# v2: panels kept whole are shown whole (no legacy avoidance of bright bubble rows).
+BUBBLE_FRAMING_VERSION = 2
+
+
 def resolve_bubble_crop(cache_entry, img_path: str, bounds) -> tuple:
     """The panel's bubble-free crop (bubble_crop.py), computed once and kept in content_bounds_cache.json.
     Returns (crop or None, computed_now)."""
@@ -1876,6 +1881,11 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         top_bubble_bottom_y = None
                 
                 # Bubble-free framing: the crop replaces the panel bounds for both the camera plan and the card.
+                # A panel kept whole is shown whole: the legacy camera avoidance of bright rows (bubbles) cut
+                # off the subject (Tyrant 1-3: the Hellgate monster lost its head to dodge a caption).
+                if crop_bubbles:
+                    top_bubble_bottom_y = bottom_bubble_top_y = None
+                    bubble_centroid = None  # no repulsion of the camera away from kept bubbles
                 if crop_bubbles and isinstance(bounds_cache.get(img_file), dict):
                     bubble_crop, computed = resolve_bubble_crop(bounds_cache[img_file], img_path, bounds)
                     if computed:
@@ -1885,9 +1895,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         dirty_cache = True
                     if bubble_crop:
                         bounds, focal_point = apply_bubble_crop(bubble_crop, bounds, focal_point)
-                        bubble_centroid = (bounds[2] / 2.0, bounds[3] / 2.0)
                         bubble_coverage_ratio *= float(bubble_crop.get("bubble_left", 0.0))
-                        top_bubble_bottom_y = bottom_bubble_top_y = None
 
                 is_last_page = (idx == len(page_displays) - 1)
                 trans = "dip_to_black" if is_last_page else "cross_fade"
@@ -2451,7 +2459,10 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                 "video",
                 ep,
                 input_paths=[images_blur_dir, recap_json_path, srt_path, audio_path, logo_path, overlay_path],
-                extra={"bubble_crop_version": BUBBLE_CROP_VERSION if crop_bubbles else None},
+                extra={
+                    "bubble_crop_version": BUBBLE_CROP_VERSION if crop_bubbles else None,
+                    "bubble_framing_version": BUBBLE_FRAMING_VERSION if crop_bubbles else None,
+                },
             )
             force_render = bool(task.payload.get("force_render", False))
             if not force_render and cache.is_current(
@@ -2715,7 +2726,10 @@ class Stage11_FinalVideoAssembly(BaseStage):
         if not os.path.exists(p["video"]):
             return False
 
-        rerendered = False
+        # The state file exists exactly while video.mp4 carries an intro. Without it (Stage 10 removed the
+        # intro before re-rendering) video.mp4 is intro-free and must become the backup: reusing the old
+        # backup shipped the previous render of the episode (Tyrant 1-3 kept uncropped bubbles in ep 1).
+        rerendered = True
         if os.path.exists(p["state"]):
             with open(p["state"], "r", encoding="utf-8") as f:
                 rerendered = json.load(f).get("output_signature") != cls._file_signature(p["video"])
@@ -2815,7 +2829,15 @@ class Stage11_FinalVideoAssembly(BaseStage):
 
     CLIP_RECORD_FILENAME = "clip.json"
     # Bump when the clip render or its subtitles change, so clips made the old way are rendered again.
-    CLIP_FORMAT_VERSION = 2
+    CLIP_FORMAT_VERSION = 3  # v3: panels framed without speech bubbles (bubble_crop.py)
+
+    @staticmethod
+    def _clip_bubble_crop(payload):
+        """BUBBLE_CROP_VERSION when clip panels are framed without bubbles, else None."""
+        if not payload.get("crop_speech_bubbles", getattr(config, "CROP_SPEECH_BUBBLES", True)):
+            return None
+        from bubble_crop import BUBBLE_CROP_VERSION
+        return BUBBLE_CROP_VERSION
 
     @classmethod
     def _reusable_clip(cls, clip_dir, script, payload):
@@ -2831,6 +2853,7 @@ class Stage11_FinalVideoAssembly(BaseStage):
             return None
         same_render = (
             record.get("format") == cls.CLIP_FORMAT_VERSION
+            and record.get("bubble_crop") == cls._clip_bubble_crop(payload)
             and record.get("script") == script
             and record.get("voice_id") == payload.get("voice_id", "ai33pro")
             and record.get("ref_audio_path") == payload.get("ref_audio_path")
@@ -2843,7 +2866,8 @@ class Stage11_FinalVideoAssembly(BaseStage):
     def _remember_clip(cls, clip_dir, script, payload, clip):
         with open(os.path.join(clip_dir, cls.CLIP_RECORD_FILENAME), "w", encoding="utf-8") as f:
             json.dump({
-                "format": cls.CLIP_FORMAT_VERSION, "script": script, "voice_id": payload.get("voice_id", "ai33pro"),
+                "format": cls.CLIP_FORMAT_VERSION, "bubble_crop": cls._clip_bubble_crop(payload),
+                "script": script, "voice_id": payload.get("voice_id", "ai33pro"),
                 "ref_audio_path": payload.get("ref_audio_path"), "duration": clip["duration"],
             }, f, ensure_ascii=False, indent=2)
 
@@ -2866,6 +2890,7 @@ class Stage11_FinalVideoAssembly(BaseStage):
             voice_id=payload.get("voice_id", "ai33pro"),
             ref_audio_path=payload.get("ref_audio_path"),
             enable_sfx=False,
+            crop_speech_bubbles=self._clip_bubble_crop(payload) is not None,
         )
         self._remember_clip(clip_dir, script, payload, clip)
         return clip, False

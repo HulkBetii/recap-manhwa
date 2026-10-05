@@ -41,7 +41,9 @@ Box = Tuple[int, int, int, int]  # x1, y1, x2, y2
 #     the frame is searched inside the drawn panel; open bubbles need uncoloured lettering (user's hand
 #     crops, cat-anh.docx).
 # v5: dark void gutters, edge bubble fragments, large inside bubbles cut when characters stay whole.
-BUBBLE_CROP_VERSION = 5
+# v6: closed bubbles cover every text line overlapping them.
+# v7: dark bubble pieces at the image edge are cut, with a weaker OCR read for lines cut by the edge.
+BUBBLE_CROP_VERSION = 7
 
 OCR_MIN_CONF = 0.3
 BUBBLE_MAX_AREA = 0.35          # an enclosed plain area larger than this share of the image is background
@@ -70,7 +72,8 @@ VOID_MIN_SHARE = 0.05          # an edge-touching ink-black area this large is e
 FRAGMENT_MIN_SHARE = 0.003      # white blob at the image edge: a bubble cut by the page split...
 FRAGMENT_MAX_SHARE = 0.25
 FRAGMENT_MAX_SPAN = 0.9         # ...unless it spans the whole image side (that is a gutter strip)
-FRAGMENT_MIN_OUTLINE = 0.5      # share of its inner border drawn in dark outline
+FRAGMENT_MIN_OUTLINE = 0.5
+FRAGMENT_OCR_MIN_CONF = 0.2     # OCR confidence enough for a text line cut by the image edge      # share of its inner border drawn in dark outline
 OUTLINE_MAX_GRAY = 90
 INSIDE_BUBBLE_MIN_SHARE = 0.10  # inside bubbles below this share of the panel always stay (user: 2-7% kept)
 PEOPLE_MODEL_ID = "IDEA-Research/grounding-dino-base"  # already cached locally (Safe Mode)
@@ -136,11 +139,17 @@ def detect_bubbles(img_bgr: np.ndarray) -> Bubbles:
     with ocr_lock:
         results = reader.readtext(img_bgr)
     bubbles = Bubbles(open_mask=np.zeros((h, w), np.uint8))
+    text_boxes: List[Box] = []
     for bbox, _text, conf in results:
-        if conf < OCR_MIN_CONF:
-            continue
         xs, ys = [p[0] for p in bbox], [p[1] for p in bbox]
         box = (max(0, int(min(xs))), max(0, int(min(ys))), min(w, int(max(xs))), min(h, int(max(ys))))
+        # Lines cut by the page split read poorly ("YOUR GOAL?!" at 0.27): weaker reads at the image
+        # edge only count for bubble pieces there.
+        cut_line = box[0] == 0 or box[1] == 0 or box[2] == w or box[3] == h
+        if conf < (FRAGMENT_OCR_MIN_CONF if cut_line else OCR_MIN_CONF):
+            continue
+        weak = conf < OCR_MIN_CONF
+        text_boxes.append(box)
         min_fill = BUBBLE_MIN_TEXT_RATIO * max(1, (box[2] - box[0]) * (box[3] - box[1]))
         for index, (labels, edge_labels) in enumerate(layers):
             label = _region_around(labels, box)
@@ -155,8 +164,13 @@ def detect_bubbles(img_bgr: np.ndarray) -> Bubbles:
                     bubbles.open_mask[region] = 1
                     bubbles.open_mask[max(0, box[1] - BUBBLE_PAD):box[3] + BUBBLE_PAD,
                                       max(0, box[0] - BUBBLE_PAD):box[2] + BUBBLE_PAD] = 1
+                elif index == 1 and _is_edge_fragment(region, area):
+                    # Dark bubble cut by the page split (Tyrant "YOUR GOAL?!" over the skull).
+                    bubbles.open_mask[region] = 1
+                    bubbles.open_mask[max(0, box[1] - BUBBLE_PAD):box[3] + BUBBLE_PAD,
+                                      max(0, box[0] - BUBBLE_PAD):box[2] + BUBBLE_PAD] = 1
                 break
-            if area > BUBBLE_MAX_AREA * h * w:
+            if weak or area > BUBBLE_MAX_AREA * h * w:
                 break  # a huge enclosed plain area is a background, not a bubble
             ry, rx = np.nonzero(region)
             closed = (
@@ -167,23 +181,45 @@ def detect_bubbles(img_bgr: np.ndarray) -> Bubbles:
             if index == 1:
                 bubbles.dark.append(closed)
             break
+    _cover_text_lines(bubbles, text_boxes, (h, w))
     _mark_edge_fragments(gray, layers[0], bubbles.open_mask)
     return bubbles
+
+
+def _cover_text_lines(bubbles: Bubbles, text_boxes: List[Box], shape: Tuple[int, int]) -> None:
+    """Grows each closed bubble over the text lines that overlap it. Glowing letters can split a dark
+    bubble's interior, leaving its last line outside the box (Tyrant "GLUG": "DEMONS." stayed in the crop)."""
+    h, w = shape
+
+    def grown(bubble: Box) -> Box:
+        x1, y1, x2, y2 = bubble
+        for tx1, ty1, tx2, ty2 in text_boxes:
+            if tx1 < x2 and tx2 > x1 and ty1 < y2 and ty2 > y1:
+                x1, y1 = min(x1, max(0, tx1 - BUBBLE_PAD)), min(y1, max(0, ty1 - BUBBLE_PAD))
+                x2, y2 = max(x2, min(w, tx2 + BUBBLE_PAD)), max(y2, min(h, ty2 + BUBBLE_PAD))
+        return (x1, y1, x2, y2)
+
+    bubbles.enclosed = [grown(b) for b in bubbles.enclosed]
+    bubbles.dark = [grown(b) for b in bubbles.dark]
+
+
+def _is_edge_fragment(region: np.ndarray, area: int) -> bool:
+    """Size and span of a bubble piece at the image edge: not a speck, not a gutter strip along a whole side."""
+    h, w = region.shape
+    if not FRAGMENT_MIN_SHARE * h * w <= area <= FRAGMENT_MAX_SHARE * h * w:
+        return False
+    ys, xs = np.nonzero(region)
+    return xs.max() - xs.min() < FRAGMENT_MAX_SPAN * w and ys.max() - ys.min() < FRAGMENT_MAX_SPAN * h
 
 
 def _mark_edge_fragments(gray: np.ndarray, paper_layer: Tuple[np.ndarray, set], open_mask: np.ndarray) -> None:
     """Marks white bubble pieces cut by the page split: edge-touching paper blobs outlined in dark ink.
     They often carry no readable text, so OCR alone misses them."""
     labels, edge_labels = paper_layer
-    h, w = gray.shape
     kernel = np.ones((5, 5), np.uint8)
     for label in edge_labels:
         region = labels == label
-        area = int(np.count_nonzero(region))
-        if not FRAGMENT_MIN_SHARE * h * w <= area <= FRAGMENT_MAX_SHARE * h * w:
-            continue
-        ys, xs = np.nonzero(region)
-        if xs.max() - xs.min() >= FRAGMENT_MAX_SPAN * w or ys.max() - ys.min() >= FRAGMENT_MAX_SPAN * h:
+        if not _is_edge_fragment(region, int(np.count_nonzero(region))):
             continue
         ring = cv2.dilate(region.astype(np.uint8), kernel).astype(bool) & ~region
         ring[0, :] = ring[-1, :] = ring[:, 0] = ring[:, -1] = False

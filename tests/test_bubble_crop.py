@@ -117,6 +117,15 @@ def test_bubble_fragment_cut_by_the_page_split_is_marked():
     assert mask[5, 300] == 1 and mask[500, 300] == 0
 
 
+def test_bubble_box_covers_its_last_text_line():
+    """Tyrant "GLUG": glowing letters split the dark interior, so the last line fell outside the box."""
+    from bubble_crop import BUBBLE_PAD, _cover_text_lines
+    bubble = (32, 432, 483, 681)
+    bubbles = Bubbles(open_mask=np.zeros((H, W), np.uint8), enclosed=[bubble], dark=[bubble])
+    _cover_text_lines(bubbles, [(175, 665, 335, 705), (130, 934, 246, 1031)], (H, W))
+    assert bubbles.enclosed == bubbles.dark == [(32, 432, 483, 705 + BUBBLE_PAD)]  # SFX far below untouched
+
+
 def test_full_width_gutter_is_not_a_fragment():
     from bubble_crop import _components, _mark_edge_fragments
     gray = np.full((H, W), 120, np.uint8)
