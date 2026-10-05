@@ -750,6 +750,26 @@ def draw_subtitles_on_frame(image, text, font_size=42):
         y_cursor += line_height
 
 
+def resolve_bubble_crop(cache_entry, img_path: str, bounds) -> tuple:
+    """The panel's bubble-free crop (bubble_crop.py), computed once and kept in content_bounds_cache.json.
+    Returns (crop or None, computed_now)."""
+    from bubble_crop import BUBBLE_CROP_VERSION, bubble_free_crop
+    if isinstance(cache_entry, dict) and cache_entry.get("bubble_crop_version") == BUBBLE_CROP_VERSION:
+        return cache_entry.get("bubble_crop"), False
+    import cv2
+    import numpy as np
+    img = cv2.imdecode(np.fromfile(img_path, dtype=np.uint8), cv2.IMREAD_COLOR) if os.path.exists(img_path) else None
+    return (bubble_free_crop(img, bounds) if img is not None else None), True
+
+
+def apply_bubble_crop(crop: dict, bounds, focal_point) -> tuple:
+    """New panel bounds and the focal point re-expressed relative to them (it was relative to `bounds`)."""
+    nx, ny, nw, nh = [float(v) for v in crop["bounds"]]
+    fx = float(focal_point[0]) + float(bounds[0]) - nx
+    fy = float(focal_point[1]) + float(bounds[1]) - ny
+    return (nx, ny, nw, nh), (min(max(fx, 0.15 * nw), 0.85 * nw), min(max(fy, 0.15 * nh), 0.85 * nh))
+
+
 def detect_clean_panel_and_focal_point(img_pil) -> tuple[tuple, tuple, float, tuple, float]:
     """
     Detects the character focal point (with speech bubble suppression and skin tone boost)
@@ -1423,9 +1443,14 @@ class Stage10_EpisodeVideoRendering(BaseStage):
         from_ep = task.from_episode
         to_ep = task.to_episode
         download_dir = task.artifacts.get("download_dir")
-        
+
         ffmpeg_exe = find_ffmpeg()
         project_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # In a finished folder the first episode carries the premise pitch (Stage 11). Re-rendering it from
+        # that transcript would shift every panel by the pitch length; Stage 11 prepends the pitch again.
+        if download_dir and Stage11_FinalVideoAssembly._restore_first_episode_without_intro(download_dir, from_ep):
+            await context.log(f"Tập {from_ep}: gỡ intro cũ trước khi render lại (Stage 11 sẽ ghép lại).", "info")
 
         def ensure_transparent_image(path: str, size: tuple):
             if not os.path.exists(path):
@@ -1812,6 +1837,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
 
             plans = []
             dirty_cache = False
+            crop_bubbles = bool(kwargs.get("crop_speech_bubbles", False))
             for idx, pd in enumerate(page_displays):
                 img_file = pd["image_file"]
                 img_path = os.path.join(images_blur_dir, img_file)
@@ -1849,6 +1875,20 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                         bottom_bubble_top_y = None
                         top_bubble_bottom_y = None
                 
+                # Bubble-free framing: the crop replaces the panel bounds for both the camera plan and the card.
+                if crop_bubbles and isinstance(bounds_cache.get(img_file), dict):
+                    bubble_crop, computed = resolve_bubble_crop(bounds_cache[img_file], img_path, bounds)
+                    if computed:
+                        from bubble_crop import BUBBLE_CROP_VERSION
+                        bounds_cache[img_file]["bubble_crop"] = bubble_crop
+                        bounds_cache[img_file]["bubble_crop_version"] = BUBBLE_CROP_VERSION
+                        dirty_cache = True
+                    if bubble_crop:
+                        bounds, focal_point = apply_bubble_crop(bubble_crop, bounds, focal_point)
+                        bubble_centroid = (bounds[2] / 2.0, bounds[3] / 2.0)
+                        bubble_coverage_ratio *= float(bubble_crop.get("bubble_left", 0.0))
+                        top_bubble_bottom_y = bottom_bubble_top_y = None
+
                 is_last_page = (idx == len(page_displays) - 1)
                 trans = "dip_to_black" if is_last_page else "cross_fade"
 
@@ -1994,6 +2034,8 @@ class Stage10_EpisodeVideoRendering(BaseStage):
 
             def get_cached_bounds(file_name):
                 val = bounds_cache.get(file_name)
+                if crop_bubbles and isinstance(val, dict) and val.get("bubble_crop"):
+                    return tuple(val["bubble_crop"]["bounds"])
                 if isinstance(val, dict) and "bounds" in val:
                     return tuple(val["bounds"])
                 elif isinstance(val, (list, tuple)) and len(val) == 4:
@@ -2401,11 +2443,15 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     outputs=[images_blur_dir],
                 )
 
+            # The crop rules are code, not payload: their version re-renders episodes when they change.
+            from bubble_crop import BUBBLE_CROP_VERSION
+            crop_bubbles = bool(task.payload.get("crop_speech_bubbles", getattr(config, "CROP_SPEECH_BUBBLES", True)))
             fingerprint = stage_fingerprint(
                 task,
                 "video",
                 ep,
                 input_paths=[images_blur_dir, recap_json_path, srt_path, audio_path, logo_path, overlay_path],
+                extra={"bubble_crop_version": BUBBLE_CROP_VERSION if crop_bubbles else None},
             )
             force_render = bool(task.payload.get("force_render", False))
             if not force_render and cache.is_current(
@@ -2459,6 +2505,7 @@ class Stage10_EpisodeVideoRendering(BaseStage):
                     force_render=force_render,
                     comic_title=task.comic_title,
                     episode_num=ep,
+                    crop_speech_bubbles=crop_bubbles,
                 )
             except Exception as render_error:
                 if not can_recover_ffmpeg_pipe_output(render_error, temp_video_path):

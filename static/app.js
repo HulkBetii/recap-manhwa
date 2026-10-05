@@ -1045,6 +1045,7 @@ btnCrawl.addEventListener('click', async () => {
                 enable_premise_pitch: document.getElementById('enable-premise-pitch') ? document.getElementById('enable-premise-pitch').checked : true,
                 enable_outro: document.getElementById('enable-outro') ? document.getElementById('enable-outro').checked : true,
                 regenerate_drafts: document.getElementById('regenerate-drafts') ? document.getElementById('regenerate-drafts').checked : false,
+                crop_speech_bubbles: document.getElementById('crop-speech-bubbles') ? document.getElementById('crop-speech-bubbles').checked : true,
                 protagonist_name: document.getElementById('protagonist-name') ? document.getElementById('protagonist-name').value.trim() || null : null,
                 playlist_url: document.getElementById('playlist-url') ? document.getElementById('playlist-url').value.trim() || null : null
             })

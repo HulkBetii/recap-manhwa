@@ -83,6 +83,10 @@ PREMISE_PITCH_IMAGE_COUNT = 8
 # status (continues / hiatus / finale / neutral), read in Stage 1 (outro_engine.py).
 ENABLE_OUTRO = os.getenv("ENABLE_OUTRO", "true").lower() in ("true", "1", "yes")
 
+# Frame episode panels without their speech bubbles when a crop keeps the faces and most of the art
+# (bubble_crop.py); panels whose bubbles cannot be cut away stay whole. Text removal stays separate.
+CROP_SPEECH_BUBBLES = os.getenv("CROP_SPEECH_BUBBLES", "true").lower() in ("true", "1", "yes")
+
 # Seam bridge: rewrites the first lines of an episode narrated without the previous episode's ending
 # (first episode of each parallel chunk) so back-to-back episodes flow (seam_bridge.py).
 ENABLE_SEAM_BRIDGE = os.getenv("ENABLE_SEAM_BRIDGE", "true").lower() in ("true", "1", "yes")

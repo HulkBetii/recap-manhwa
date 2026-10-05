@@ -39,7 +39,8 @@ STAGE_CONFIG_KEYS = {
     "tts": ("voice_id", "ref_audio_path", "language"),
     "subtitles": ("language",),
     "selected_moderation": ("safe_mode", "nsfw_threshold", "nsfw_mode"),
-    "video": ("logo_path", "overlay_path", "remove_text", "remove_text_conf", "remove_text_radius", "burn_subtitles", "fps"),
+    "video": ("logo_path", "overlay_path", "remove_text", "remove_text_conf", "remove_text_radius", "burn_subtitles", "fps",
+              "crop_speech_bubbles"),
 }
 STAGE_OUTPUT_PATHS = {
     "image_crawl": ("images",),

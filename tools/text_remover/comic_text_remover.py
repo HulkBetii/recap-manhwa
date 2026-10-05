@@ -129,10 +129,12 @@ def segment_bubble_floodfill(gray_img, seed_point, max_area_ratio=0.20):
     temp_img = gray_img.copy()
     
     # Perform flood fill with intensity tolerance (loDiff, upDiff) to stop at bubble outline
+    # (255 << 8) sets the mask fill value: without it MASK_ONLY writes 1s, the "== 255" count below
+    # was always 0 and every bubble was rejected (callers silently fell back to rectangles).
     cv2.floodFill(
-        temp_img, ff_mask, (cx, cy), 255, 
-        loDiff=25, upDiff=25, 
-        flags=4 | cv2.FLOODFILL_MASK_ONLY
+        temp_img, ff_mask, (cx, cy), 255,
+        loDiff=25, upDiff=25,
+        flags=4 | cv2.FLOODFILL_MASK_ONLY | (255 << 8)
     )
     
     bubble_mask = ff_mask[1:-1, 1:-1]

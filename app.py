@@ -885,6 +885,8 @@ class CrawlRequest(BaseModel):
     enable_outro: bool = True
     # Re-runs reuse the previous pitch/outro/chapter/overlay drafts while they still pass; True drafts anew.
     regenerate_drafts: bool = False
+    # Frame panels without speech bubbles when the crop keeps faces and most of the art (bubble_crop.py).
+    crop_speech_bubbles: bool = True
     # Description navigation is printed only for real links supplied here (never synthesized).
     playlist_url: Optional[str] = None
     previous_part_url: Optional[str] = None
@@ -2863,6 +2865,7 @@ async def crawl(payload: CrawlRequest):
         "enable_premise_pitch": payload.enable_premise_pitch,
         "enable_outro": payload.enable_outro,
         "regenerate_drafts": payload.regenerate_drafts,
+        "crop_speech_bubbles": payload.crop_speech_bubbles,
         "playlist_url": payload.playlist_url,
         "previous_part_url": payload.previous_part_url,
         "next_part_url": payload.next_part_url,
