@@ -16,7 +16,9 @@ Rules (the user's hand crops: cat-anh.docx, 7 examples, plus 7 Tyrant panels jud
 - A large dark bubble inside the scene (>= INSIDE_BUBBLE_MIN_SHARE of the panel, Tyrant's demon) is cut
   away only when every character detected by Grounding DINO stays whole; small or white inside bubbles
   always stay.
-- Sound effects and other text drawn on the art are part of the picture (example 3).
+- Sound effects drawn on the art are part of the picture (example 3). Narration captions printed on the
+  art without a bubble (Tyrant 50: "AS I HOLD ROXANNE'S HAND...") are cut away like large inside bubbles:
+  only when every character stays whole.
 
 Detection: EasyOCR finds text lines; the bubble is the plain region behind the text on a binary
 "paper white" (or "ink black", for dark bubbles) mask. Binary masks replace a tolerance flood fill,
@@ -43,7 +45,9 @@ Box = Tuple[int, int, int, int]  # x1, y1, x2, y2
 # v5: dark void gutters, edge bubble fragments, large inside bubbles cut when characters stay whole.
 # v6: closed bubbles cover every text line overlapping them.
 # v7: dark bubble pieces at the image edge are cut, with a weaker OCR read for lines cut by the edge.
-BUBBLE_CROP_VERSION = 7
+# v8: lines near the edge count as cut, their bubble is looked up inward; captions on the art are cut
+#     when characters stay whole (leftovers found in the Tyrant 1-50 render).
+BUBBLE_CROP_VERSION = 8
 
 OCR_MIN_CONF = 0.3
 BUBBLE_MAX_AREA = 0.35          # an enclosed plain area larger than this share of the image is background
@@ -72,8 +76,13 @@ VOID_MIN_SHARE = 0.05          # an edge-touching ink-black area this large is e
 FRAGMENT_MIN_SHARE = 0.003      # white blob at the image edge: a bubble cut by the page split...
 FRAGMENT_MAX_SHARE = 0.25
 FRAGMENT_MAX_SPAN = 0.9         # ...unless it spans the whole image side (that is a gutter strip)
-FRAGMENT_MIN_OUTLINE = 0.5
-FRAGMENT_OCR_MIN_CONF = 0.2     # OCR confidence enough for a text line cut by the image edge      # share of its inner border drawn in dark outline
+FRAGMENT_MIN_OUTLINE = 0.5      # share of its inner border drawn in dark outline
+FRAGMENT_OCR_MIN_CONF = 0.2     # OCR confidence enough for a text line cut by the image edge
+CUT_LINE_MARGIN = 20            # a text line this close to the image edge is cut by the page split
+CAPTION_MIN_CONF = 0.6          # captions are cleanly lettered; sound effects rarely read this well
+CAPTION_MIN_LETTERS = 8         # sentences, not a single sound-effect word...
+CAPTION_MIN_WORDS = 2           # ...unless several words
+CAPTION_MAX_LINE_HEIGHT = 0.08  # of the image width: caption lettering is small, sound effects are big
 OUTLINE_MAX_GRAY = 90
 INSIDE_BUBBLE_MIN_SHARE = 0.10  # inside bubbles below this share of the panel always stay (user: 2-7% kept)
 PEOPLE_MODEL_ID = "IDEA-Research/grounding-dino-base"  # already cached locally (Safe Mode)
@@ -88,9 +97,11 @@ class Bubbles:
     open_mask: np.ndarray                              # white bubble regions joined with the gutter
     enclosed: List[Box] = field(default_factory=list)  # closed bubbles, padded bounding boxes
     dark: List[Box] = field(default_factory=list)      # the closed bubbles that are dark (ink-black inside)
+    captions: List[Box] = field(default_factory=list)  # narration lines printed on the art, no bubble
+    lines: List[Box] = field(default_factory=list)     # every text line read
 
     def any(self) -> bool:
-        return bool(self.enclosed) or bool(self.open_mask.any())
+        return bool(self.enclosed) or bool(self.captions) or bool(self.open_mask.any())
 
 
 def _components(binary: np.ndarray) -> Tuple[np.ndarray, set]:
@@ -140,25 +151,30 @@ def detect_bubbles(img_bgr: np.ndarray) -> Bubbles:
         results = reader.readtext(img_bgr)
     bubbles = Bubbles(open_mask=np.zeros((h, w), np.uint8))
     text_boxes: List[Box] = []
-    for bbox, _text, conf in results:
+    for bbox, text, conf in results:
         xs, ys = [p[0] for p in bbox], [p[1] for p in bbox]
         box = (max(0, int(min(xs))), max(0, int(min(ys))), min(w, int(max(xs))), min(h, int(max(ys))))
         # Lines cut by the page split read poorly ("YOUR GOAL?!" at 0.27): weaker reads at the image
         # edge only count for bubble pieces there.
-        cut_line = box[0] == 0 or box[1] == 0 or box[2] == w or box[3] == h
+        cut_line = _cut_side(box, (h, w))
         if conf < (FRAGMENT_OCR_MIN_CONF if cut_line else OCR_MIN_CONF):
             continue
         weak = conf < OCR_MIN_CONF
         text_boxes.append(box)
         min_fill = BUBBLE_MIN_TEXT_RATIO * max(1, (box[2] - box[0]) * (box[3] - box[1]))
+        in_bubble = False
         for index, (labels, edge_labels) in enumerate(layers):
             label = _region_around(labels, box)
+            if cut_line and index == 1:
+                # Glowing letters hide the dark interior around a cut line ("BE SERIOUS!"): look inward.
+                label = _region_around(labels, _inward(box, cut_line, (h, w))) or label
             if label is None:
                 continue
             region = labels == label
             area = int(np.count_nonzero(region))
             if area < min_fill:
                 continue  # only the inside of letters: a sound effect drawn on the art
+            in_bubble = True
             if label in edge_labels:
                 if index == 0 and _plain_lettering(gray, saturation, box):  # white bubble open to the gutter
                     bubbles.open_mask[region] = 1
@@ -181,9 +197,44 @@ def detect_bubbles(img_bgr: np.ndarray) -> Bubbles:
             if index == 1:
                 bubbles.dark.append(closed)
             break
+        if not in_bubble and _is_caption(text, conf, box, w):
+            bubbles.captions.append(box)
+    bubbles.lines = text_boxes
     _cover_text_lines(bubbles, text_boxes, (h, w))
     _mark_edge_fragments(gray, layers[0], bubbles.open_mask)
     return bubbles
+
+
+def _cut_side(box: Box, shape: Tuple[int, int]) -> Optional[str]:
+    """The image side a text line touches (within CUT_LINE_MARGIN), or None."""
+    h, w = shape
+    x1, y1, x2, y2 = box
+    for side, gap in (("top", y1), ("bottom", h - y2), ("left", x1), ("right", w - x2)):
+        if gap <= CUT_LINE_MARGIN:
+            return side
+    return None
+
+
+def _inward(box: Box, side: str, shape: Tuple[int, int]) -> Box:
+    """The strip just inside a cut text line, one line height deep, where its bubble's interior is."""
+    h, w = shape
+    x1, y1, x2, y2 = box
+    lh, lw = y2 - y1, x2 - x1
+    return {
+        "top": (x1, y2, x2, min(h, y2 + lh)), "bottom": (x1, max(0, y1 - lh), x2, y1),
+        "left": (x2, y1, min(w, x2 + lw), y2), "right": (max(0, x1 - lw), y1, x1, y2),
+    }[side]
+
+
+def _is_caption(text: str, conf: float, box: Box, width: int) -> bool:
+    """A narration line printed on the art: a clean read of a sentence in small lettering."""
+    words = [word for word in text.split() if any(ch.isalpha() for ch in word)]
+    letters = sum(ch.isalpha() for ch in text)
+    return (
+        conf >= CAPTION_MIN_CONF
+        and (len(words) >= CAPTION_MIN_WORDS or letters >= CAPTION_MIN_LETTERS)
+        and box[3] - box[1] <= CAPTION_MAX_LINE_HEIGHT * width
+    )
 
 
 def _cover_text_lines(bubbles: Bubbles, text_boxes: List[Box], shape: Tuple[int, int]) -> None:
@@ -391,6 +442,21 @@ def choose_crop(
     }
 
 
+def _cuts_through(bounds: List[int], line: Box) -> bool:
+    """True when the crop (x, y, w, h) keeps part of a text line but not all of it."""
+    x, y, w, h = bounds
+    ix = min(x + w, line[2]) - max(x, line[0])
+    iy = min(y + h, line[3]) - max(y, line[1])
+    if ix <= 0 or iy <= 0:
+        return False
+    return ix < line[2] - line[0] or iy < line[3] - line[1]
+
+
+def _contains_center(outer: Box, inner: Box) -> bool:
+    cx, cy = (inner[0] + inner[2]) / 2.0, (inner[1] + inner[3]) / 2.0
+    return outer[0] <= cx <= outer[2] and outer[1] <= cy <= outer[3]
+
+
 def bubble_free_crop(img_bgr: np.ndarray, bounds: Tuple[int, int, int, int]) -> Optional[dict]:
     """Crop of the panel `bounds` without the bubbles the user cuts away, or None to keep the panel whole."""
     bubbles = detect_bubbles(img_bgr)
@@ -408,6 +474,10 @@ def bubble_free_crop(img_bgr: np.ndarray, bounds: Tuple[int, int, int, int]) -> 
             # White inside bubbles always stay (the user kept even a 19% one, example 1), and text printed
             # on white objects (banknotes, signs) looks like one; only large dark bubbles are cut.
             inside_large.append(box)
+    inside_large += [
+        (max(0, x1 - BUBBLE_PAD), max(0, y1 - BUBBLE_PAD), x2 + BUBBLE_PAD, y2 + BUBBLE_PAD)
+        for x1, y1, x2, y2 in bubbles.captions
+    ]
     faces = detect_face_boxes(img_bgr)
 
     if inside_large:
@@ -415,8 +485,12 @@ def bubble_free_crop(img_bgr: np.ndarray, bounds: Tuple[int, int, int, int]) -> 
         obstacles = spill.copy()
         for x1, y1, x2, y2 in inside_large:
             obstacles[y1:y2, x1:x2] = 1
-        crop = choose_crop(img_bgr.shape[:2], panel, obstacles, faces, _detail_map(img_bgr, obstacles), keep_whole=people)
-        if crop:
+        # A face outside every detected character is a false hit (a cloud in Tyrant 50's sky blocked the crop).
+        people_faces = [f for f in faces if any(_contains_center(p, f) for p in people)] if people else faces
+        crop = choose_crop(img_bgr.shape[:2], panel, obstacles, people_faces, _detail_map(img_bgr, obstacles),
+                           keep_whole=people)
+        # A frame through a line of text is worse than the whole panel (system-message panels were sliced).
+        if crop and not any(_cuts_through(crop["bounds"], line) for line in bubbles.lines):
             return crop
 
     if not spill[py:py + ph, px:px + pw].any():

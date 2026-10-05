@@ -126,6 +126,35 @@ def test_bubble_box_covers_its_last_text_line():
     assert bubbles.enclosed == bubbles.dark == [(32, 432, 483, 705 + BUBBLE_PAD)]  # SFX far below untouched
 
 
+def test_line_near_the_edge_is_cut_and_its_bubble_is_looked_up_inward():
+    """Tyrant: "...HERE YOU ARE" ended 7px above the bottom; "BE SERIOUS!" touched the top."""
+    from bubble_crop import _cut_side, _inward
+    assert _cut_side((113, 729, 363, 769), (776, 505)) == "bottom"
+    assert _cut_side((348, 0, 570, 26), (343, 700)) == "top"
+    assert _cut_side((100, 300, 300, 340), (776, 505)) is None
+    assert _inward((348, 0, 570, 26), "top", (343, 700)) == (348, 26, 570, 52)
+    assert _inward((113, 729, 363, 769), "bottom", (776, 505)) == (113, 689, 363, 729)
+
+
+def test_caption_is_a_clean_sentence_in_small_letters():
+    from bubble_crop import _is_caption
+    assert _is_caption("ROXANNE'S HAND;", 0.87, (164, 265, 535, 316), 700)
+    assert _is_caption("AS I HOLD", 0.9, (253, 227, 451, 263), 700)
+    assert not _is_caption("WHOOSH", 0.95, (100, 100, 400, 160), 700)          # one sound-effect word
+    assert not _is_caption("AS I HOLD", 0.45, (253, 227, 451, 263), 700)       # unsure read
+    assert not _is_caption("BANG BANG", 0.9, (100, 100, 500, 220), 700)        # big lettering: SFX
+
+
+def test_a_frame_never_slices_a_text_line():
+    """Tyrant system-message panels were cut into a slice through their lines."""
+    from bubble_crop import _cuts_through
+    line = (100, 200, 400, 240)
+    assert _cuts_through([0, 0, 250, 500], line)       # half the line kept
+    assert _cuts_through([0, 220, 600, 300], line)     # top of the letters cut off
+    assert not _cuts_through([0, 0, 600, 500], line)   # whole line inside
+    assert not _cuts_through([0, 250, 600, 300], line)  # line left out entirely
+
+
 def test_full_width_gutter_is_not_a_fragment():
     from bubble_crop import _components, _mark_edge_fragments
     gray = np.full((H, W), 120, np.uint8)
