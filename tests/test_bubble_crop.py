@@ -90,3 +90,38 @@ def test_flood_fill_segments_a_bubble():
     cv2.putText(gray, "HI", (175, 215), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 0, 3)
     mask = segment_bubble_floodfill(gray, (150, 200))
     assert mask is not None and 15000 < np.count_nonzero(mask) < 30000
+
+
+def _bgr(gray):
+    return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+
+def test_dark_void_around_a_panel_is_empty_space():
+    """Tyrant "GLUG": black bubbles float in a black void above the drawn scene."""
+    from bubble_crop import _void_mask
+    gray = np.zeros((H, W), np.uint8)
+    gray[600:, :] = 140                      # the drawn scene (mid-grey art)
+    void = _void_mask(_bgr(gray))
+    assert void[:600].all() and not void[600:].any()
+
+
+def test_bubble_fragment_cut_by_the_page_split_is_marked():
+    """Tyrant money panel: half a bubble at the top edge, outlined in ink, without readable text."""
+    from bubble_crop import _components, _mark_edge_fragments
+    gray = np.full((H, W), 120, np.uint8)
+    cv2.ellipse(gray, (300, 0), (150, 60), 0, 0, 360, 255, -1)   # white bubble interior cut by the edge
+    cv2.ellipse(gray, (300, 0), (150, 60), 0, 0, 360, 0, 4)      # its ink outline
+    paper = gray >= 235
+    mask = np.zeros((H, W), np.uint8)
+    _mark_edge_fragments(gray, _components(paper), mask)
+    assert mask[5, 300] == 1 and mask[500, 300] == 0
+
+
+def test_full_width_gutter_is_not_a_fragment():
+    from bubble_crop import _components, _mark_edge_fragments
+    gray = np.full((H, W), 120, np.uint8)
+    gray[:80, :] = 255                       # white gutter strip across the whole top
+    gray[80:84, :] = 0                       # panel frame line
+    mask = np.zeros((H, W), np.uint8)
+    _mark_edge_fragments(gray, _components(gray >= 235), mask)
+    assert not mask.any()
