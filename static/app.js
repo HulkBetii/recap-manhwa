@@ -1516,6 +1516,9 @@ if (vlmLanguageSelect && ttsVoiceIdInput) {
         } else if (selectedLang === 'ja') {
             ttsVoiceIdInput.value = 'edge-tts_ja-JP-KeitaNeural';
             ttsVoiceIdInput.dispatchEvent(new Event('change'));
+        } else if (selectedLang === 'es') {
+            ttsVoiceIdInput.value = 'edge-tts_es-MX-JorgeNeural';
+            ttsVoiceIdInput.dispatchEvent(new Event('change'));
         } else if (selectedLang === 'en') {
             ttsVoiceIdInput.value = 'clone_andrew';
             ttsVoiceIdInput.dispatchEvent(new Event('change'));

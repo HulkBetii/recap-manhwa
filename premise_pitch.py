@@ -34,13 +34,13 @@ logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 2
 # ~150 spoken words/min in English -> 24-46s. Vietnamese counts syllables as words, so it runs longer.
-WORD_BOUNDS = {"en": (60, 115), "vi": (75, 150)}
+WORD_BOUNDS = {"en": (60, 115), "vi": (75, 150), "es": (60, 120)}
 DEFAULT_WORD_BOUNDS = (60, 130)
 GREETING_RE = re.compile(
-    r"\b(welcome|today we|in this video|in today's|let's dive|hey guys|what's up|chào mừng|hôm nay chúng ta)\b",
+    r"\b(welcome|today we|in this video|in today's|let's dive|hey guys|what's up|chào mừng|hôm nay chúng ta|hola|bienvenidos|bienvenido)\b",
     re.IGNORECASE,
 )
-LANGUAGE_NAMES = {"en": "English", "vi": "Vietnamese"}
+LANGUAGE_NAMES = {"en": "English", "vi": "Vietnamese", "es": "Spanish"}
 # Capitalized only because they open a sentence; never treated as names.
 SENTENCE_START_COMMON = {
     "when", "while", "within", "once", "now", "then", "soon", "still", "even", "yet", "but",

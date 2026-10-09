@@ -6,6 +6,8 @@ import os
 DEFAULT_AI33PRO_VOICE_ID = "elevenlabs_tnSpp4vdxKPjI9w0GnoV"
 DEFAULT_VI_VOICE = "jessa - easygoing and effortless"
 DEFAULT_VI_VOICE_ID = "clone"
+DEFAULT_ES_VOICE = "Jorge - Mexican Dynamic Storyteller"
+DEFAULT_ES_VOICE_ID = "es-MX-JorgeNeural"
 
 
 AI33PRO_VOICE_PREFIXES = (

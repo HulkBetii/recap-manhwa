@@ -199,25 +199,81 @@ class ArcClimaxMiner:
         }
 
     @staticmethod
+    def compute_dhash(img: Image.Image, hash_size: int = 8) -> np.ndarray:
+        """Computes difference hash (dHash) for visual deduplication."""
+        resized = img.convert("L").resize((hash_size + 1, hash_size), Image.Resampling.BILINEAR)
+        pixels = np.array(resized)
+        return pixels[:, 1:] > pixels[:, :-1]
+
+    @staticmethod
+    def hamming_distance(h1: np.ndarray, h2: np.ndarray) -> int:
+        """Calculates Hamming distance between two boolean dHash arrays."""
+        return int(np.count_nonzero(h1 != h2))
+
+    _ocr_reader = None
+
+    @classmethod
     def select_top_climax_images(
+        cls,
         download_dir: str,
         climax_episode: int,
         num_images: int = 3,
-        min_point_threshold: int = 75
+        min_point_threshold: int = 75,
+        excluded_hashes: Optional[List[np.ndarray]] = None,
+        check_ocr_junk: bool = True,
     ) -> List[Dict[str, Any]]:
-        img_dir = os.path.join(download_dir, f"episode_{climax_episode}", "images")
-        if not os.path.exists(img_dir):
-            raise FileNotFoundError(f"Images directory not found: {img_dir}")
+        from moderation_utils import contains_junk_or_credit_keywords
 
-        image_files = [
+        ep_dir = os.path.join(download_dir, f"episode_{climax_episode}")
+        pdf_dir = os.path.join(ep_dir, "images_pdf")
+        blur_dir = os.path.join(ep_dir, "images_blur")
+        raw_images_dir = os.path.join(ep_dir, "images")
+        if os.path.isdir(pdf_dir) and os.listdir(pdf_dir):
+            img_dir = pdf_dir
+        elif os.path.isdir(blur_dir) and os.listdir(blur_dir):
+            img_dir = blur_dir
+        elif os.path.isdir(raw_images_dir):
+            img_dir = raw_images_dir
+        else:
+            raise FileNotFoundError(f"No usable images directory found in: {ep_dir}")
+
+        image_files = sorted([
             f for f in os.listdir(img_dir)
             if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
-        ]
+        ])
         if not image_files:
             raise FileNotFoundError(f"No image files found in: {img_dir}")
 
+        # Heuristic filtering: In webtoons/manhwas, files[0] (001.jpg) is almost always
+        # the chapter title card or cover page, and files[-1] is often the scanlation recruit/credit banner.
+        candidate_files = []
+        for idx, f in enumerate(image_files):
+            f_lower = f.lower()
+            if any(term in f_lower for term in ("cover", "credit", "banner", "title", "outro", "recruit", "000.")):
+                continue
+            if len(image_files) >= 3:
+                # Exclude first and last image in the chapter
+                if idx == 0 or idx == len(image_files) - 1:
+                    continue
+            img_path = os.path.join(img_dir, f)
+            try:
+                with Image.open(img_path) as im_chk:
+                    w_c, h_c = im_chk.size
+                    # Bỏ qua thumbnail web, icon hoặc ảnh rác có kích thước quá nhỏ (< 300px)
+                    if w_c < 300 or h_c < 300 or (w_c * h_c < 150000):
+                        continue
+            except Exception:
+                continue
+            candidate_files.append(f)
+
+        if not candidate_files:
+            candidate_files = [
+                f for f in image_files
+                if not any(term in f.lower() for term in ("cover", "credit", "banner", "title", "outro", "recruit"))
+            ] or image_files
+
         scored_images = []
-        for f in image_files:
+        for f in candidate_files:
             img_path = os.path.join(img_dir, f)
             try:
                 with Image.open(img_path) as img:
@@ -230,6 +286,7 @@ class ArcClimaxMiner:
                         white_ratio = float(np.mean(np_gray > 240))
                         # Heavily penalize panels with large white text boxes or empty gutters
                         composite = (score * 0.5 + action_score * 0.3 + char_score * 0.2) * (1.0 - min(0.9, white_ratio * 1.5))
+                        dhash = cls.compute_dhash(img)
                         scored_images.append({
                             "filename": f,
                             "path": img_path,
@@ -237,7 +294,8 @@ class ArcClimaxMiner:
                             "action_score": action_score,
                             "char_score": char_score,
                             "white_ratio": white_ratio,
-                            "composite": composite
+                            "composite": composite,
+                            "dhash": dhash,
                         })
             except Exception:
                 continue
@@ -246,7 +304,7 @@ class ArcClimaxMiner:
 
         if len(scored_images) < num_images:
             scored_images.clear()
-            for f in image_files:
+            for f in candidate_files:
                 img_path = os.path.join(img_dir, f)
                 try:
                     with Image.open(img_path) as img:
@@ -255,18 +313,61 @@ class ArcClimaxMiner:
                             np_gray = np.array(img.convert("L"))
                             white_ratio = float(np.mean(np_gray > 240))
                             composite = (score * 0.5) * (1.0 - min(0.9, white_ratio * 1.5))
+                            dhash = cls.compute_dhash(img)
                             scored_images.append({
                                 "filename": f,
                                 "path": img_path,
                                 "score": score,
                                 "white_ratio": white_ratio,
-                                "composite": composite
+                                "composite": composite,
+                                "dhash": dhash,
                             })
                 except Exception:
                     continue
             scored_images.sort(key=lambda x: x["composite"], reverse=True)
 
-        return scored_images[:num_images]
+        # EasyOCR reader instance for junk/credit rejection on top candidates
+        ocr_reader = None
+        if check_ocr_junk:
+            try:
+                import easyocr
+                if cls._ocr_reader is None:
+                    cls._ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+                ocr_reader = cls._ocr_reader
+            except Exception:
+                ocr_reader = None
+
+        picked_images = []
+        active_hashes = list(excluded_hashes or [])
+
+        for item in scored_images:
+            if len(picked_images) >= num_images:
+                break
+
+            # 1. Perceptual Hash Deduplication (Hamming distance < 12 means > 81% visual similarity)
+            cand_hash = item["dhash"]
+            is_dup = False
+            for prev_h in active_hashes:
+                if cls.hamming_distance(cand_hash, prev_h) < 12:
+                    is_dup = True
+                    break
+            if is_dup:
+                continue
+
+            # 2. OCR Scanlation / Credit / Banner check
+            if ocr_reader is not None:
+                try:
+                    ocr_res = ocr_reader.readtext(item["path"], detail=0)
+                    joined = " ".join(ocr_res)
+                    if contains_junk_or_credit_keywords(joined):
+                        continue
+                except Exception:
+                    pass
+
+            picked_images.append(item)
+            active_hashes.append(cand_hash)
+
+        return picked_images
 
 
 class HookArchetype(str, Enum):
@@ -429,6 +530,35 @@ class DynamicHookDirector:
                     f"たった一振りの剣撃が、災害級の巨大怪物を一瞬で両断する。 "
                     f"現在、{p_ja}は終末世界の絶対的覇者として君臨している。 "
                     f"だが、世界が彼にひれ伏す前…この最初の一日に、一体何が起きたというのか？"
+                )
+
+        elif lang in ("es", "spanish"):
+            p_es = p_name if p_name else "nuestro protagonista"
+            if archetype == HookArchetype.ABSURD_HIGH_CONCEPT:
+                return (
+                    f"Mientras miles de millones se desesperan por las sobras, {p_es} ha hackeado el sistema global para monopolizar todos los recursos en este mundo apocalíptico. "
+                    f"No es una historia de salvación, sino de dominación total. ¿Cómo comenzó realmente esta locura?"
+                )
+            elif archetype == HookArchetype.VENGEANCE_RETRIBUTION:
+                return (
+                    f"Los traidores que empujaron a {p_es} al abismo ahora ruegan de rodillas por una misericordia que nunca llegará. "
+                    f"El juicio ha comenzado. Pero antes de ser una bestia de venganza... ¿qué secreto oscuro lo cambió todo?"
+                )
+            elif archetype == HookArchetype.TICKING_BOMB_CRISIS:
+                return (
+                    f"A solo diez segundos de que la horda aniquile el último refugio humano, {p_es} se lanza al vacío para desafiar a la muerte. "
+                    f"Nadie creía que sobreviviría. Entonces, ¿qué milagro imposible ocurrió justo antes del final?"
+                )
+            elif archetype == HookArchetype.OPEN_LOOP_PARADOX:
+                return (
+                    f"De una zona de muerte donde un ejército de élite fue masacrado en segundos, {p_es} salió sin un rasguño, con un poder que desafía la naturaleza. "
+                    f"Una paradoja que nadie puede explicar. ¿Qué despertó realmente dentro de él ese primer día?"
+                )
+            else:  # OUTRAGEOUS_FLEX
+                return (
+                    f"Con un solo ataque sin esfuerzo, los monstruos más aterradores son reducidos a polvo en un instante. "
+                    f"Hoy, {p_es} reina como la leyenda absoluta del páramo. "
+                    f"Pero antes de que todos cayeran a sus pies... ¿qué tragedia ocurrió el primer día?"
                 )
 
         else:  # English (Default)
@@ -683,6 +813,9 @@ class MicroIntroRenderer:
                 actual_voice = "edge-tts_ko-KR-InJoonNeural"
             elif language.lower() in ("ja", "japanese"):
                 actual_voice = "edge-tts_ja-JP-KeitaNeural"
+            elif language.lower() in ("es", "spanish"):
+                import config
+                actual_voice = getattr(config, "DEFAULT_ES_VOICE_ID", "edge-tts_es-MX-JorgeNeural")
             else:
                 import config
                 actual_voice = getattr(config, "DEFAULT_EN_VOICE_ID", "clone_andrew")

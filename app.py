@@ -2820,6 +2820,12 @@ async def crawl(payload: CrawlRequest):
             v_id = default_vi
         else:
             v_id = normalize_tts_voice_mode(payload.voice_id)
+    elif lang in ("es", "spanish"):
+        default_es = getattr(app_cfg, "DEFAULT_ES_VOICE_ID", "es-MX-JorgeNeural")
+        if not payload.voice_id or payload.voice_id in ("clone_andrew", "ai33pro", "auto", "default"):
+            v_id = default_es
+        else:
+            v_id = normalize_tts_voice_mode(payload.voice_id)
     else:
         v_id = normalize_tts_voice_mode(payload.voice_id)
 
@@ -3325,7 +3331,66 @@ GIỚI HẠN ĐỘ DÀI SEGMENT (MAX 18 WORDS PER SEGMENT):
 - Mỗi segment tối đa 18 từ. Câu quá dài → TÁCH làm 2 segment riêng biệt.
 - Segment ngắn, súc tích ưu tiên hơn segment dài rườm rà.
 """
+    elif lang_key in {"es", "spanish"}:
+        language_rules = f"""
+REGLAS DE NARRACIÓN EN ESPAÑOL LATINO (ESTÁNDAR RECAP DE ALTA RETENCIÓN):
+- Escribe como un narrador de élite de YouTube en Español Latino (Neutro), con el estilo dinámico de los mejores canales (Mozu Manhwa, Manhwa Egoísta, ArkinG).
+- Tono: 80% tensión dramática y supervivencia inmersiva + 20% "Sarcasmo Latino" inteligente, pragmático y burlón hacia los enemigos y traidores.
+- Cero saludos ni rodeos: PROHIBIDO decir "Hola a todos", "Bienvenidos", "Hoy veremos", "En este video". Entra DIRECTAMENTE a la acción de la primera viñeta.
+- Conectores hablados naturales: 'Mira esto,', 'Resulta que,', 'Para colmo,', 'Y adivina qué,', 'Pero espera un segundo,', 'Mientras tanto, al otro lado de la ciudad...'.
+
+﻿VERBOS ACTIVOS DE ALTO IMPACTO Y LÉXICO CINEMATOGRÁFICO:
+- Derrotas y Dominación: 'lo hace trizas', 'lo manda directo al lobby', 'lo borra del mapa', 'limpia el suelo con ellos', 'humilla sin despeinarse', 'no le tiembla el pulso', 'lo neutraliza en un parpadeo'.
+- Prohibida la voz pasiva aburrida: Nunca digas 'fue visto caminando hacia' -> Di 'avanza decidido y lo noquea de un solo golpe.'
+
+REGLAS DE SEGURIDAD (MONETIZACIÓN Y RETENCIÓN):
+- [ANTI-GORE]: PROHIBIDO usar palabras de violencia extrema como "Masacre" o "Carnicería". Usa sinónimos aptos para YouTube como "Caos", "Eliminación total", o "Destrucción".
+- [ANTI-NSFW]: Omite descripciones sexuales o de desnudarse. Si la trama obliga a revisar mordeduras, escribe "revisa rápidamente si hay heridas" sin mencionar prendas.
+- [ANTI-ABURRIMIENTO / DEAD AIR]: PROHIBIDO escribir más de 3 oraciones seguidas de pura exposición, diálogo o pensamiento. DEBES insertar una acción física (recargar un arma, mirar fijamente, correr, golpear) entre los diálogos para mantener el ritmo acelerado.
+
+LAS 5 REGLAS DE ORO DE LA NARRACIÓN:
+
+
+LAS 5 REGLAS DE ORO DE LA NARRACIÓN:
+
+1. PERSONALIDAD Y SARCASMO (El narrador tiene opinión):
+   No eres un lector de libros de texto aburrido. Eres un sobreviviente cínico y perspicaz.
+   Cada frase debe tener una REACCIÓN, JUICIO o BURLA sobre lo que ocurre. Nunca te limites a narrar hechos secos.
+
+2. VARIACIÓN DE RITMO (Cero monotonía):
+   Alterna longitudes de frases para crear impacto:
+   - Cada 2-3 frases descriptivas largas (15-20 palabras) -> METE 1 frase ultra-corta (3-6 palabras).
+   - Frases ultra-cortas = veredictos o giros: 'Se acabó.', 'Ni de broma.', 'Premio gordo.', 'Error fatal.', 'Dinero fácil.'
+   - Patrón: Larga -> Larga -> CORTA. -> Larga -> ¿PREGUNTA RETÓRICA? -> Larga.
+   - NUNCA comiences 3 frases consecutivas con la misma estructura gramatical.
+
+3. YUXTAPOSICIÓN DE CONTRASTE (Dopamine Trigger #1):
+   Para escenas de poder, refugio, comida o combate, SIEMPRE usa la fórmula de contraste:
+   "¿Afuera / Los enemigos? [miseria / pánico / caos / arrogancia]. ¿Adentro / El protagonista? [calma absoluta / festín / poder abrumador / preparación perfecta]."
+   Ejemplo: "¿Afuera? La ciudad entera se mataba por un trozo de pan rancio. ¿Adentro? Él disfrutaba de aire acondicionado, Wi-Fi de alta velocidad y comida de sobra para tres años."
+
+4. MOSTRAR, NO EXPLICAR (Show Don't Tell):
+   PROHIBIDO decir 'demostrando que...', 'lo que demostró su habilidad...', 'dejando en claro...'.
+   Describe el detalle visual concreto: manos temblorosas, sudor frío, una mirada gélida que ya vio demasiada sangre.
+
+5. MICRO-CLIFFHANGER Y RETENCIÓN (Enganche continuo):
+   - Cada 3 segmentos inserta una pregunta retórica: "¿Iba a correr? Ni loco. ¿Qué hace en su lugar?"
+   - CRÍTICO: La ÚLTIMA frase del episodio DEBE ser un micro-cliffhanger abierto que obligue a ver el siguiente capítulo (ej: "Pero lo que nadie sospechaba es que la verdadera pesadilla apenas comenzaba.").
+
+TERMINOLOGÍA OFICIAL DE MANHWA Y SUPERVIVENCIA EN ESPAÑOL:
+- Cazador (Hunter), Rango S / Rango E, Mazmorra (Dungeon), Portal (Gate);
+- Despertar (Awakening), Sistema (System), Ventana de estado (Status Window), Subir de nivel (Level Up);
+- Regresión / Regresor (Regression / Regressor), Reencarnado, Almacén espacial / Anillo dimensional;
+- Protagonista Roto / OP (Overpowered).
+
+SEGURIDAD Y MONETIZACIÓN DE YOUTUBE:
+- Evita palabras censurables de violencia gráfica extrema: usa términos dinámicos y seguros como 'eliminado', 'despachado', 'aniquilado', 'neutralizado', 'mandado al otro mundo'.
+
+LÍMITE POR SEGMENTO (MÁXIMO 18 PALABRAS):
+- Cada segmento debe ser contundente y tener MÁXIMO 18 palabras en total. Frases más largas se dividen en 2 segmentos.
+"""
     else:
+
         language_rules = f"""
 LANGUAGE & US MANHWA/WEBTOON CULTURE RULES:
 - Write like a top-tier US YouTube Manhwa Recap storyteller (in the signature style of Manhwa Fresh, Plot Armor, Manga Recaps, and Manhwa Clan).
@@ -3472,11 +3537,27 @@ MAX 18 WORDS PER SEGMENT:
 [12:75%, 13:25%] - A mutated beast lunges straight at them, but {_mc_ex} simply sidesteps and folds it in half with one clean slash.#
 [15:70%, 16:30%] - {_mc_ex} packs the emergency gear and double-checks the bunker supplies one last time.#
 24 - But just as they catch their breath, an ominous red system alert warns that the real nightmare has only begun.#"""
+    elif lang_key in {"es", "spanish"}:
+        prompt_examples = f"""[4:30%, 5:70%] - El presidente transmite el sombrío mensaje mientras los ciudadanos quedan completamente congelados por el terror.#
+[12:75%, 13:25%] - Una bestia mutante se abalanza hacia ellos, pero {_mc_ex} simplemente da un paso al costado y la parte en dos de un solo tajo.#
+[15:70%, 16:30%] - {_mc_ex} empaca los suministros de emergencia y asegura la compuerta del refugio una última vez.#
+24 - Pero justo cuando intentan recuperar el aliento, una siniestra alerta roja del sistema advierte que la verdadera pesadilla apenas comienza.#"""
     else:
         prompt_examples = f"""[4:30%, 5:70%] - Tổng thống cúi đầu trên truyền hình khiến toàn dân bàng hoàng chết lặng.#
 [12:75%, 13:25%] - Một con quái vật đột biến lao thẳng tới, nhưng {_mc_ex} chỉ nhẹ nhàng né sang một bên rồi chém đứt cánh tay nó trong chớp mắt.#
 [15:70%, 16:30%] - {_mc_ex} nhanh chóng gom đồ sinh tồn, khóa chặt cánh cửa hầm trú ẩn an toàn.#
 24 - Thế nhưng vừa mới kịp thở phào, một dòng cảnh báo đỏ rực từ hệ thống bất ngờ hiện lên, báo hiệu cơn ác mộng thực sự mới chỉ bắt đầu.#"""
+
+    # Dynamic role and persona adaptation based on target language
+    if lang_key in {"es", "spanish"}:
+        _role_style = "You are an elite YouTube Manhwa Recap storyteller and scriptwriter in Spanish/LATAM (in the signature style of Mozu Manhwa, Manhwa Egoísta, and ArkinG 2.0)."
+        _persona_summary = "the high-retention 'Sarcasmo Latino & In Media Res' standard (80% immersive tension and survival drama + 20% witty, cynical commentary mocking enemies and arrogant villains)"
+    elif lang_key in {"vi", "vietnamese"}:
+        _role_style = "You are an elite YouTube Manhwa Recap storyteller and scriptwriter for Vietnamese audiences."
+        _persona_summary = "the 'Sarcastic Bro-Commentary' standard (80% immersive tension + 20% witty, pragmatic human commentary)"
+    else:
+        _role_style = "You are an elite YouTube Manhwa Recap storyteller and scriptwriter (in the style of Manhwa Fresh, Plot Armor, Manga Recaps)."
+        _persona_summary = "the 'Sarcastic Bro-Commentary' standard (80% immersive tension + 20% witty, pragmatic human commentary)"
 
     # Series Bible: authoritative cast shared by every episode, even when episodes run in parallel
     cast_bible_section = f"\n{cast_bible.strip()}\n" if cast_bible and cast_bible.strip() else ""
@@ -3500,11 +3581,11 @@ SETUP COMPRESSION (EPISODES 1-2 ONLY - RETENTION CRITICAL):
     return f"""
 ROLE:
 
-You are an elite YouTube Manhwa Recap storyteller and scriptwriter (in the style of Manhwa Fresh, Plot Armor, Manga Recaps).
+{_role_style}
 
 Your job is to analyze the provided comic pages and create a high-retention,
 binge-worthy story recap script in {lang_name} for YouTube audiences using
-the "Sarcastic Bro-Commentary" standard (80% immersive tension + 20% witty, pragmatic human commentary).
+{_persona_summary}.
 
 The goal is to captivate the audience with natural spoken narration,
 authentic human-like pacing, and relatable deadpan observations.

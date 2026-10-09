@@ -496,10 +496,16 @@ class StoryMemory:
 
         recent_summaries = []
         start_ep = max(1, current_ep - 3)
+        
+        ep_prefix = "Episodio" if self.language in ("es", "spanish") else "Tập" if self.language in ("vi", "vietnamese") else "第" if self.language in ("ja", "japanese") else "에피소드" if self.language in ("ko", "korean") else "Ep"
+        
         for e in range(start_ep, prev_ep):
             e_info = self.episodes.get(str(e))
             if e_info and e_info.get("summary"):
-                recent_summaries.append(f"Tập {e}: {e_info['summary']}")
+                if self.language in ("ja", "japanese"):
+                    recent_summaries.append(f"{ep_prefix}{e}話: {e_info['summary']}")
+                else:
+                    recent_summaries.append(f"{ep_prefix} {e}: {e_info['summary']}")
 
         macro_ctx = " | ".join(recent_summaries) if recent_summaries else ""
 

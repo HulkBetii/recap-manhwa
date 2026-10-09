@@ -603,6 +603,19 @@ class Stage2_AsyncImageCrawling(BaseStage):
         is_valir = "valirscans.org" in parsed.netloc.lower()
         is_magapoke = "pocket.shonenmagazine.com" in parsed.netloc.lower()
         is_mgread = "mgread.io" in parsed.netloc.lower()
+
+        # Check if all episodes already have downloaded images (local pre-download cache)
+        if download_dir and os.path.exists(download_dir):
+            all_episodes_have_images = True
+            for ep in range(from_ep, to_ep + 1):
+                ep_images_dir = os.path.join(download_dir, f"episode_{ep}", "images")
+                if not os.path.exists(ep_images_dir) or len([f for f in os.listdir(ep_images_dir) if f.lower().endswith(('.jpg', '.png', '.webp'))]) == 0:
+                    all_episodes_have_images = False
+                    break
+            if all_episodes_have_images:
+                await context.log(f"Tất cả {to_ep - from_ep + 1} tập đã có sẵn ảnh hợp lệ trong thư mục. Bỏ qua tải lại ảnh.", "success")
+                await context.update_stage_progress(self.name, 100.0)
+                return True
         
         if is_naver:
             query = urllib.parse.parse_qs(parsed.query)

@@ -367,6 +367,19 @@ class VisualSemanticScorer:
         # These panels have high semantic occupancy + high edge/gradient detail but low character_presence
         # because YuNet finds no face and skin-tone is absent. They carry important narrative context
         # and must NOT be filtered by the char_p < 25 threshold.
+        # Check for title/credit banner characteristics (top/bottom uniform dark or colored band with text)
+        has_credit_banner_block = False
+        if calc_h > 400 and calc_w > 300:
+            top_15 = gray[:int(calc_h * 0.15), :]
+            bot_15 = gray[int(calc_h * 0.85):, :]
+            for band in (top_15, bot_15):
+                band_dark = float(np.mean(band < 35))
+                band_canny = cv2.Canny(band, 40, 120)
+                band_edge = float(np.mean(band_canny > 0))
+                if band_dark > 0.60 and band_edge > 0.025:
+                    has_credit_banner_block = True
+                    break
+
         is_establishing_shot = bool(
             num_faces == 0
             and semantic_similarity >= 62.0   # rich non-background content required
@@ -378,6 +391,7 @@ class VisualSemanticScorer:
             and not is_mostly_bubble
             and not is_solid_or_gutter
             and not is_tiny_slice
+            and not has_credit_banner_block
         )
 
         is_meaningless = bool(

@@ -118,6 +118,11 @@ DEFAULT_JA_VOICE_ID    = os.getenv("DEFAULT_JA_VOICE_ID",    "ja-JP-KeitaNeural"
 DEFAULT_JA_VOICE_RATE  = os.getenv("DEFAULT_JA_VOICE_RATE",  "+0%")
 DEFAULT_JA_VOICE_PITCH = os.getenv("DEFAULT_JA_VOICE_PITCH", "+0Hz")
 
+# Spanish / LATAM (market: LATAM Traición & Apocalipsis)
+DEFAULT_ES_VOICE_ID    = os.getenv("DEFAULT_ES_VOICE_ID",    "es-MX-JorgeNeural")
+DEFAULT_ES_VOICE_RATE  = os.getenv("DEFAULT_ES_VOICE_RATE",  "+10%")
+DEFAULT_ES_VOICE_PITCH = os.getenv("DEFAULT_ES_VOICE_PITCH", "+0Hz")
+
 # ─── Speech Bubble Overflow Crop (Stage 2b) ─────────────────────────────────
 # Detect & crop speech bubbles that bleed past the panel edge.
 # All values can be overridden per-run via task.payload with the same key names.

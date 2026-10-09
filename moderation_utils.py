@@ -76,7 +76,31 @@ JUNK_TEXT_KEYWORDS = (
     "webtoon.com",
     "tapas.io",
     "tappytoon",
+    "vol.",
+    "vol",
+    "volume",
+    "website",
+    "manga",
+    "manhwa",
+    "webtoon",
+    "read more",
+    "read read more",
+    "herozscans",
+    "dreammanga",
+    "원작",
+    "만화",
+    "글",
+    "그림",
+    "recruitment",
+    "staff",
 )
+
+def contains_junk_or_credit_keywords(text: str) -> bool:
+    """Returns True if raw or OCR text contains scanlation, credit, or cover junk keywords."""
+    if not text:
+        return False
+    lower_t = text.lower()
+    return any(kw in lower_t for kw in JUNK_TEXT_KEYWORDS)
 
 
 def list_image_files(directory: str | Path) -> list[str]:
@@ -203,11 +227,20 @@ def is_junk_or_title_page(
     # 1. OCR text check if provided
     if ocr_texts:
         joined_text = " ".join(t.lower() for t in ocr_texts if t).strip()
+        DEFINITIVE_CREDIT_KEYWORDS = {
+            "discord", "scanlation", "scans", "translator", "translation", "translated",
+            "proofread", "proofreader", "donate", "donating", "patreon", "kofi", "ko-fi",
+            "herozscans", "dreammanga", "support us", "read on", "read the full", "buy raw",
+            "tapas.io", "webtoon.com", "tappytoon", "website:", "recruitment", "staff",
+            "원작", "만화", "글", "그림"
+        }
         for kw in JUNK_TEXT_KEYWORDS:
             if kw in joined_text:
+                if kw in DEFINITIVE_CREDIT_KEYWORDS:
+                    return True, f"definitive_credit_junk_{kw}"
                 canny = cv2.Canny(gray, 50, 150)
                 edge_ratio = float(np.mean(canny > 0))
-                if edge_ratio < 0.05:
+                if edge_ratio < 0.08:
                     return True, f"junk_keyword_{kw}"
 
     is_blank, reason = is_blank_or_solid_page(img_bgr, bg_val=bg_val, tol=tol)

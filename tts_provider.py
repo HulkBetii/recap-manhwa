@@ -633,12 +633,16 @@ async def generate_tts(
     # 2. Direct EdgeTTS Mode. Bare voice names ("ko-KR-InJoonNeural", the KR/JA config defaults) are
     # EdgeTTS voices too: OmniVoice rejects them as unsupported "instruct" text.
     if v_id == "edge-tts" or v_id.startswith("edge-tts_") or EDGE_VOICE_NAME_RE.match(v_id):
-        edge_voice = "en-US-ChristopherNeural"
+        default_fallback_edge = "es-MX-JorgeNeural" if language in ("es", "spanish") else "en-US-ChristopherNeural"
+        edge_voice = default_fallback_edge
         if v_id.startswith("edge-tts_"):
             edge_voice = v_id.split("_", 1)[1]
         elif EDGE_VOICE_NAME_RE.match(v_id):
             edge_voice = v_id
-        if edge_voice == "ko-KR-InJoonNeural" and rate == "+0%" and pitch == "+0Hz":
+        if edge_voice in ("es-MX-JorgeNeural", "es-ES-AlvaroNeural") and rate == "+0%" and pitch == "+0Hz":
+            rate = "+10%"
+            pitch = "+0Hz"
+        elif edge_voice == "ko-KR-InJoonNeural" and rate == "+0%" and pitch == "+0Hz":
             rate = "+12%"
             pitch = "-2Hz"
         elif edge_voice in ("ja-JP-KeitaNeural", "ja-JP-DaichiNeural") and rate == "+0%" and pitch == "+0Hz":
@@ -652,7 +656,9 @@ async def generate_tts(
         if ok:
             return True
         logger.warning("AI33Pro failed or quota reached (402). Falling back to EdgeTTS...")
-        return await generate_edge_tts(text, output_audio_path, output_srt_path, rate=rate, pitch=pitch)
+        fallback_voice = "es-MX-JorgeNeural" if language in ("es", "spanish") else "en-US-ChristopherNeural"
+        fallback_rate = "+10%" if language in ("es", "spanish") and rate == "+0%" else rate
+        return await generate_edge_tts(text, output_audio_path, output_srt_path, voice_name=fallback_voice, rate=fallback_rate, pitch=pitch)
 
     try:
         model = get_omnivoice_model()

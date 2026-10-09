@@ -159,6 +159,11 @@ class Stage8_LocalTTS(BaseStage):
             voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else default_vi_voice
             rate = getattr(config, "DEFAULT_VI_VOICE_RATE", "+0%")
             pitch = getattr(config, "DEFAULT_VI_VOICE_PITCH", "+0Hz")
+        elif language in ("es", "spanish"):
+            _default = getattr(_tts_cfg, "DEFAULT_ES_VOICE_ID", "es-MX-JorgeNeural")
+            voice_id = raw_voice_id if raw_voice_id and raw_voice_id not in ("ai33pro", "auto", "default") else _default
+            rate = getattr(_tts_cfg, "DEFAULT_ES_VOICE_RATE", "+10%")
+            pitch = getattr(_tts_cfg, "DEFAULT_ES_VOICE_PITCH", "+0Hz")
         else:
             default_voice = "auto"
             voice_id = normalize_tts_voice_mode(raw_voice_id or default_voice, default=default_voice)
@@ -2782,7 +2787,14 @@ class Stage11_FinalVideoAssembly(BaseStage):
             from arc_intro_engine import ArcClimaxMiner
             select_fn = ArcClimaxMiner.select_top_climax_images
         span = to_ep - from_ep + 1
-        candidates = list(range(from_ep, from_ep + max(1, math.ceil(span * 2 / 3))))
+        if span > 1:
+            # Skip the first episode: prevents spoiling/repeating episode 1 scenes in the intro
+            start_ep = from_ep + 1
+            end_ep = min(to_ep, from_ep + max(1, math.ceil(span * 2 / 3)))
+            candidates = list(range(start_ep, end_ep + 1))
+        else:
+            candidates = [from_ep]
+
         n = min(cls.PITCH_IMAGE_EPISODES, len(candidates))
         if n <= 1:
             episodes = candidates[:1]
@@ -2790,13 +2802,40 @@ class Stage11_FinalVideoAssembly(BaseStage):
             episodes = sorted({candidates[round(i * (len(candidates) - 1) / (n - 1))] for i in range(n)})
         per_episode = math.ceil(count / len(episodes))
         paths = []
+        all_hashes = []
         for ep in episodes:
             try:
-                picked = select_fn(download_dir, ep, num_images=per_episode)
+                picked = select_fn(download_dir, ep, num_images=per_episode, excluded_hashes=all_hashes)
+                for img in picked:
+                    if "dhash" in img:
+                        all_hashes.append(img["dhash"])
                 # Best panels are chosen by score but shown in page order: the pitch narrates in sequence.
                 paths.extend(sorted((img["path"] for img in picked), key=os.path.basename))
-            except FileNotFoundError as err:
-                logger.warning(f"Premise pitch: no usable panels in episode {ep}: {err}")
+            except (FileNotFoundError, TypeError) as err:
+                # Fallback if select_fn has older signature without excluded_hashes
+                try:
+                    picked = select_fn(download_dir, ep, num_images=per_episode)
+                    paths.extend(sorted((img["path"] for img in picked), key=os.path.basename))
+                except Exception as inner_err:
+                    logger.warning(f"Premise pitch: no usable panels in episode {ep}: {inner_err}")
+
+        # If strict deduplication left fewer images than count, backfill from other candidate episodes
+        if len(paths) < count and len(candidates) > len(episodes):
+            for ep in candidates:
+                if len(paths) >= count:
+                    break
+                if ep in episodes:
+                    continue
+                try:
+                    needed = count - len(paths)
+                    extra = select_fn(download_dir, ep, num_images=needed, excluded_hashes=all_hashes)
+                    for img in extra:
+                        if "dhash" in img:
+                            all_hashes.append(img["dhash"])
+                    paths.extend(sorted((img["path"] for img in extra), key=os.path.basename))
+                except Exception:
+                    continue
+
         return paths[:count]
 
     OUTRO_IMAGE_COUNT = 5

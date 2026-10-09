@@ -77,7 +77,14 @@ def build_overlay_prompt(sheet: HookSheet, title: str, concepts: Sequence[Dict[s
     numbers = "\n".join(f"- {f.phrase}" for f in sheet.numeric_facts) or "- (none)"
     beats = "\n".join(f"- {b}" for b in sheet.story_beats) or "- (none)"
     scenes = "\n".join(f'- "{c["id"]}": {c["scene"]}' for c in map(concept_brief, concepts))
-    return f"""You write the big overlay text for YouTube thumbnails of an English manhwa recap.
+    
+    lang_name = "English"
+    if sheet.language in ("es", "spanish"):
+        lang_name = "Spanish"
+    elif sheet.language in ("vi", "vietnamese"):
+        lang_name = "Vietnamese"
+        
+    return f"""You write the big overlay text for YouTube thumbnails of an {lang_name} manhwa recap.
 
 VIDEO TITLE (do NOT repeat its words): "{strip_suffix(title)}"
 
@@ -98,6 +105,7 @@ Rules: complete phrases only (never cut words), only facts from the list, no cha
 no words already in the title, no power ranks or genre claims the facts do not show.
 Each option must be about what ITS scene shows: use at least one word naming the scene's subject
 (e.g. the creature, object or companion in the scene description), never a different story moment.
+Write the overlay text in {lang_name}.
 
 Return ONLY a JSON object: {{"<scene id>": [{{"main": "...", "sub": "..."}}, ...], ...}}
 """

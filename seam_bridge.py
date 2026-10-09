@@ -42,7 +42,7 @@ RECAP_LOOKBACK_RE = re.compile(
     r"ở tập trước|tập trước|lần trước)\b",
     re.IGNORECASE,
 )
-LANGUAGE_NAMES = {"en": "English", "vi": "Vietnamese"}
+LANGUAGE_NAMES = {"en": "English", "vi": "Vietnamese", "es": "Spanish"}
 
 LlmCall = Callable[[str], Awaitable[Optional[str]]]
 

@@ -41,42 +41,46 @@ class OutroType(str, Enum):
 
 MAX_ATTEMPTS = 2
 # ~150 spoken words/min (TTS runs at +6%) -> about 20-26s in English; Vietnamese counts syllables.
-WORD_BOUNDS = {"en": (50, 70), "vi": (60, 90)}
+WORD_BOUNDS = {"en": (50, 70), "vi": (60, 90), "es": (50, 75)}
 LAST_LINES_COUNT = 3              # narration lines treated as the cliffhanger
 CLIFFHANGER_NGRAM = 8             # this many consecutive words shared with the cliffhanger = a copy
 MAX_CTAS = 1
-LANGUAGE_NAMES = {"en": "English", "vi": "Vietnamese"}
+LANGUAGE_NAMES = {"en": "English", "vi": "Vietnamese", "es": "Spanish"}
 
 CTA_RE = re.compile(
     r"\b(subscrib\w*|playlist|comment below|leave a comment|like button|hit the like|leave a like|"
-    r"next part|đăng ký|danh sách phát|phần tiếp theo)\b",
+    r"next part|đăng ký|danh sách phát|phần tiếp theo|suscríb\w*|lista de reproducción|deja un comentario|"
+    r"dale like|me gusta|siguiente parte|próxima parte)\b",
     re.IGNORECASE,
 )
-PLAYLIST_RE = re.compile(r"\b(playlist|danh sách phát)\b", re.IGNORECASE)
-NEXT_PART_RE = re.compile(r"\b(next part|part two|part 2|phần tiếp theo|phần 2)\b", re.IGNORECASE)
+PLAYLIST_RE = re.compile(r"\b(playlist|danh sách phát|lista de reproducción)\b", re.IGNORECASE)
+NEXT_PART_RE = re.compile(r"\b(next part|part two|part 2|phần tiếp theo|phần 2|siguiente parte|próxima parte|parte dos|parte 2)\b", re.IGNORECASE)
 # Claims that the story is over; only a FINALE may make them.
 ENDING_CLAIM_RE = re.compile(
     r"\b(the end|finale|final chapter|last chapter|completed?|full story|complete story|ending|"
-    r"hết truyện|kết thúc truyện|chương cuối|hoàn thành|trọn bộ|đại kết cục)\b",
+    r"hết truyện|kết thúc truyện|chương cuối|hoàn thành|trọn bộ|đại kết cục|"
+    r"el fin|final|último capítulo|historia completa|completado|terminado)\b",
     re.IGNORECASE,
 )
 REQUIRED_SIGNAL = {
-    OutroType.FINALE: re.compile(r"\b(end|ending|final|finale|last|kết|cuối)\b", re.IGNORECASE),
+    OutroType.FINALE: re.compile(r"\b(end|ending|final|finale|last|kết|cuối|fin|último)\b", re.IGNORECASE),
     OutroType.CONTINUES: re.compile(
         r"\b(continu\w*|still being released|not over|far from over|ongoing|new chapters?|còn tiếp|"
-        r"chưa kết thúc|vẫn đang ra|chương mới)\b",
+        r"chưa kết thúc|vẫn đang ra|chương mới|continúa|sigue|no ha terminado|lejos de terminar|en emisión|nuevos capítulos)\b",
         re.IGNORECASE,
     ),
-    OutroType.HIATUS: re.compile(r"\b(break|hiatus|paused?|tạm nghỉ|tạm dừng)\b", re.IGNORECASE),
+    OutroType.HIATUS: re.compile(r"\b(break|hiatus|paused?|tạm nghỉ|tạm dừng|pausa|descanso)\b", re.IGNORECASE),
 }
 # Closings address the viewer ("Thank you...", "You can find..."); these openers are never names.
 OUTRO_COMMON_OPENERS = frozenset({
     "thank", "thanks", "you", "we", "our", "your", "see", "stay", "until",
     # Call-to-action verbs open the last sentence ("Subscribe for more..."); a Veteran dry run lost a draft to it.
     "subscribe", "make", "check", "watch", "join", "hit", "catch", "follow", "don't",
+    "gracias", "tú", "nosotros", "nuestro", "tu", "hasta",
+    "suscríbete", "haz", "revisa", "mira", "únete", "sigue", "no"
 })
-PREDICTION_SUBJECTS = r"(he|she|they|anh ấy|cậu ấy|hắn|cô ấy|họ)"
-PREDICTION_VERBS = r"(will|'ll|is going to|are going to|is about to|are about to|sẽ|sắp)"
+PREDICTION_SUBJECTS = r"(he|she|they|anh ấy|cậu ấy|hắn|cô ấy|họ|él|ella|ellos)"
+PREDICTION_VERBS = r"(will|'ll|is going to|are going to|is about to|are about to|sẽ|sắp|va a|van a|está a punto de)"
 
 TEMPLATE_OUTROS: Dict[str, Dict[str, Dict[str, str]]] = {
     "en": {
@@ -139,6 +143,36 @@ TEMPLATE_OUTROS: Dict[str, Dict[str, Dict[str, str]]] = {
             ),
         },
     },
+    "es": {
+        OutroType.CONTINUES.value: {
+            "body": (
+                "Y así es como queda la historia por ahora. El cómic aún se está publicando, así que su "
+                "viaje está lejos de terminar, y las batallas más difíciles podrían estar aún por delante. Gracias por "
+                "acompañarnos en este resumen en cada capítulo."
+            ),
+        },
+        OutroType.HIATUS.value: {
+            "body": (
+                "Y así es como queda la historia por ahora. El cómic se encuentra actualmente en pausa, por lo que su "
+                "viaje llega hasta aquí hasta que el autor regrese. Gracias por acompañarnos en este resumen "
+                "en cada capítulo, esperamos que la historia regrese pronto."
+            ),
+        },
+        OutroType.FINALE.value: {
+            "body": (
+                "Y este es el final de la historia. Desde el primer capítulo hasta la última página, cada "
+                "decisión que tomó lo llevó a este desenlace. Gracias por acompañarnos en este resumen hasta el "
+                "capítulo final de su viaje."
+            ),
+        },
+        OutroType.NEUTRAL.value: {
+            "body": (
+                "Y aquí es donde nos detenemos en este resumen. Ha recorrido un largo camino desde el primer capítulo, "
+                "y el mundo a su alrededor sigue lleno de peligros. Gracias por acompañarnos en este resumen y "
+                "seguir su viaje hasta aquí."
+            ),
+        },
+    },
 }
 # One call to action at most, chosen from the real navigation links.
 TEMPLATE_CTAS = {
@@ -151,6 +185,11 @@ TEMPLATE_CTAS = {
         "next_part": "Phần tiếp theo của câu chuyện có ở đường dẫn ngay bên dưới video.",
         "playlist": "Toàn bộ câu chuyện đến lúc này có trong danh sách phát bên dưới.",
         "default": "Nếu thấy hay, hãy đăng ký kênh để không bỏ lỡ bản tóm tắt sinh tồn tiếp theo.",
+    },
+    "es": {
+        "next_part": "La siguiente parte de la historia está enlazada justo debajo de este video.",
+        "playlist": "Puedes encontrar toda la historia hasta ahora en la lista de reproducción enlazada abajo.",
+        "default": "Si te ha gustado, suscríbete para no perderte el próximo resumen de supervivencia.",
     },
 }
 

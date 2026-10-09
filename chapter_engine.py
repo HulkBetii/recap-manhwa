@@ -106,10 +106,14 @@ def build_arc_inputs(
     return arcs
 
 
-def build_chapter_prompt(arcs: Sequence[ArcInput], character_names: Sequence[str]) -> str:
+def build_chapter_prompt(arcs: Sequence[ArcInput], character_names: Sequence[str], language: str = "en") -> str:
     blocks = "\n\n".join(f'ARC "{a.key}" (episodes {a.start_ep}-{a.end_ep}):\n{a.digest}' for a in arcs)
     cast = ", ".join(character_names) or "(none confirmed)"
-    return f"""You name YouTube video chapters for an English (US) manhwa recap.
+    
+    lang_lower = language.lower()
+    lang_name = "Spanish (LATAM)" if lang_lower in ("es", "spanish") else "Vietnamese" if lang_lower in ("vi", "vietnamese") else "Japanese" if lang_lower in ("ja", "japanese") else "English (US)"
+    
+    return f"""You name YouTube video chapters for an {lang_name} manhwa recap.
 
 Confirmed character names (the only names you may use): {cast}
 
@@ -154,12 +158,13 @@ async def generate_llm_chapter_options(
     arcs: Sequence[ArcInput],
     character_names: Sequence[str],
     llm_text_call: Callable[[str], Awaitable[Optional[str]]],
+    language: str = "en",
 ) -> Dict[str, List[str]]:
     """One LLM call for all arcs. Returns {} on failure so callers fall back deterministically."""
     if not arcs:
         return {}
     try:
-        raw = await llm_text_call(build_chapter_prompt(arcs, character_names))
+        raw = await llm_text_call(build_chapter_prompt(arcs, character_names, language))
     except Exception as err:
         logger.warning("Chapter LLM call failed: %s", err)
         return {}
@@ -256,14 +261,21 @@ class ChapterNamingAudit(BaseModel):
     rejected: List[ChapterNameCheck] = Field(default_factory=list)
 
 
-def _ep_label(start_ep: int, end_ep: int) -> str:
-    return f"Ep {start_ep}" if start_ep == end_ep else f"Ep {start_ep}–{end_ep}"
+def _ep_label(start_ep: int, end_ep: int, language: str = "en") -> str:
+    lang_lower = language.lower()
+    ep_prefix = "Episodio" if lang_lower in ("es", "spanish") else "Tập" if lang_lower in ("vi", "vietnamese") else "第" if lang_lower in ("ja", "japanese") else "에피소드" if lang_lower in ("ko", "korean") else "Ep"
+    
+    if lang_lower in ("ja", "japanese"):
+        return f"{ep_prefix}{start_ep}話" if start_ep == end_ep else f"{ep_prefix}{start_ep}–{end_ep}話"
+    
+    return f"{ep_prefix} {start_ep}" if start_ep == end_ep else f"{ep_prefix} {start_ep}–{end_ep}"
 
 
 def apply_chapter_names(
     narrative_chapters: Sequence[Dict[str, Any]],
     options_by_arc: Dict[str, List[str]],
     validator: ChapterNameValidator,
+    language: str = "en",
 ) -> tuple[List[Dict[str, Any]], ChapterNamingAudit]:
     """
     Picks, per arc, the first valid name among: LLM options, the existing theme.
@@ -290,7 +302,9 @@ def apply_chapter_names(
             audit.rejected.append(check)
 
         if chosen is None:
-            chosen, chosen_source = f"Part {i + 1}", "fallback"
+            lang_lower = language.lower()
+            part_str = "Parte" if lang_lower in ("es", "spanish") else "Phần" if lang_lower in ("vi", "vietnamese") else "パート" if lang_lower in ("ja", "japanese") else "파트" if lang_lower in ("ko", "korean") else "Part"
+            chosen, chosen_source = f"{part_str} {i + 1}", "fallback"
         if chosen_source == "llm":
             audit.llm_named += 1
         elif chosen_source == "existing":
@@ -301,7 +315,7 @@ def apply_chapter_names(
         accepted.append(chosen)
         updated = dict(ch)
         updated["theme"] = chosen
-        updated["title"] = f"{chosen} ({_ep_label(start_ep, end_ep)})"
+        updated["title"] = f"{chosen} ({_ep_label(start_ep, end_ep, language)})"
         updated["naming_source"] = chosen_source
         updated["evidence"] = [{"assertion": "grounded_words", "words": evidence}] if evidence else []
         result.append(updated)

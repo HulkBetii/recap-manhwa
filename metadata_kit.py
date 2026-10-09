@@ -106,6 +106,34 @@ def _count_passed(checks: List[Dict[str, Any]], source: str) -> Tuple[int, int]:
     return sum(1 for c in mine if c.get("passed")), len(mine)
 
 
+async def generate_shorts_llm_metadata(comic_title: str, hook_sheet: Any, llm_call: Optional[TextLlmCall]) -> str:
+    """Drafts a catchy YouTube Shorts metadata kit (Title and Description) using the LLM."""
+    if not llm_call:
+        return ""
+        
+    prompt = f"""
+Eres un experto SEO de YouTube Shorts. Escribe el Titulo y la Descripcion para un Short sobre un manhwa/comic.
+El manhwa se llama "{comic_title}".
+El video corto trata de un momento épico o traición.
+Reglas:
+1. TITULO: Debe ser MUY llamativo, clickbait pero real. MÁXIMO 60 caracteres. Debe incluir "#shorts #manhwa".
+2. DESCRIPCION: Breve. Incluye el texto "¡Mira el resumen completo en el enlace relacionado abajo! 👇" y tags como #manhwanarrado #zombis #apocalipsis #venganza.
+Devuelve el resultado en el siguiente formato exacto:
+TITULO:
+<titulo>
+
+DESCRIPCION:
+<descripcion>
+"""
+    try:
+        raw = await llm_call(prompt)
+        if raw:
+            return raw.strip()
+    except Exception:
+        pass
+    return "TITULO:\n¡La traición más brutal en el apocalipsis! #shorts #manhwa\n\nDESCRIPCION:\n¡Mira el resumen completo en el enlace relacionado abajo! 👇\n#manhwanarrado #apocalipsis #zombis #venganza"
+
+
 async def generate_youtube_kit(
     *,
     download_dir: str,
@@ -213,6 +241,9 @@ async def generate_youtube_kit(
         story_status=story_status,
     )
 
+    shorts_kit = await generate_shorts_llm_metadata(comic_title, hook_sheet, llm_call)
+    yt_meta["formatted_shorts_kit"] = shorts_kit
+
     title_engine_audit = yt_meta["prepublish_audit"]["claim_audit"].get("title_engine", {})
     checks = title_engine_audit.get("checks", [])
     llm_ok, llm_total = _count_passed(checks, "llm")
@@ -257,6 +288,11 @@ def write_kit_text(output_dir: str, yt_meta: Dict[str, Any]) -> str:
     kit_path = os.path.join(output_dir, KIT_FILENAME)
     with open(kit_path, "w", encoding="utf-8") as f:
         f.write(yt_meta.get("formatted_kit", ""))
+    shorts_text = yt_meta.get("formatted_shorts_kit")
+    if shorts_text:
+        shorts_path = os.path.join(output_dir, "youtube_shorts_kit.txt")
+        with open(shorts_path, "w", encoding="utf-8") as f:
+            f.write(shorts_text)
     return kit_path
 
 
@@ -275,6 +311,7 @@ def prepare_upload_folder(output_dir: str, folder_name: str, yt_meta: Dict[str, 
         names["video_filename"]: video_src,
         names.get("srt_filename"): os.path.join(output_dir, f"{folder_name}.srt"),
         names.get("kit_filename"): os.path.join(output_dir, KIT_FILENAME),
+        "youtube_shorts_kit.txt": os.path.join(output_dir, "youtube_shorts_kit.txt"),
     }
     sources = {name: path for name, path in sources.items() if name and os.path.isfile(path)}
 

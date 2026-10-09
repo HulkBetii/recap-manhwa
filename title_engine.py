@@ -72,6 +72,12 @@ NICHE_KEYWORDS = [
     "end of the world", "doomsday", "survival", "survive", "survives", "survived", "survivor",
     "survivors", "bunker", "shelter", "frozen", "freeze", "froze", "wasteland", "collapse",
     "extinction", "catastrophe", "disaster", "monster", "monsters", "tower", "dungeon", "regress",
+    # Spanish / LATAM
+    "apocalipsis", "apocalíptico", "apocaliptico", "zombi", "zombis", "infectado", "infectados",
+    "muertos vivientes", "fin del mundo", "supervivencia", "sobrevivir", "sobrevive", "sobrevivió",
+    "sobrevivio", "sobreviviente", "sobrevivientes", "refugio", "búnker", "bunker", "congelado",
+    "regresión", "regresion", "regresó", "regreso", "catástrofe", "catastrofe", "desastre",
+    "monstruo", "monstruos", "murio", "murió", "traición", "traicion", "traicionado",
 ]
 
 # Words a title may use without narration evidence (grammar, pronouns, niche umbrella terms).
@@ -104,9 +110,9 @@ STOPWORDS = {
 
 NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 NUMERIC_FACT_RE = re.compile(
-    r"\b(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(%|percent\b|x\b)?\s*([A-Za-z][A-Za-z\-]{2,})?"
+    r"\b(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(%|percent\b|x\b)?\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\-]{2,})?"
 )
-WORD_RE = re.compile(r"[A-Za-z][A-Za-z']*")
+WORD_RE = re.compile(r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ']*")
 
 SUB_NICHE_SIGNALS: Dict[str, List[str]] = {
     "zombie outbreak": ["zombie", "infected", "undead", "horde"],
@@ -330,6 +336,43 @@ def build_title_prompt(sheet: HookSheet, count: int = LLM_TITLE_COUNT) -> str:
             "\n8. At least half of the hooks must state the core premise from the OFFICIAL PREMISE (the protagonist's "
             "defining power, situation or plan), not a side detail from one scene."
         )
+
+    if getattr(sheet, "language", "en") in ("es", "spanish"):
+        premise_rule_es = (
+            "\n8. Al menos la mitad de los títulos deben reflejar la premisa central del manhwa "
+            "(el poder, refugio, regresión o plan del protagonista), no un detalle secundario."
+        ) if sheet.synopsis else ""
+        return f"""You write high-CTR YouTube titles in SPANISH for a Latin American (LATAM) apocalypse/survival manhwa recap channel (Manhwa Resumen).
+
+STORY FACTS (the ONLY facts you may use):
+{premise}- Setting: {sheet.setting or "(unknown)"}
+- Sub-niche: {niches}
+- Numbers central to the story (repeated, early, or official); the only numbers you may use:
+{numbers}
+- Story beats:
+{beats}
+
+Write {count} different title hooks in SPANISH for this video.
+
+PROVEN FORMULA (top LATAM manhwa recap channels):
+[situación extrema / traición] + [palabra clave de apocalipsis/zombis/regresión] + [recurso / refugio / habilidad] + [remate dramático]
+Examples of the FORMAT only (do not copy facts, write 100% in SPANISH):
+- "Fue TRAICIONADO en el Fin del Mundo... Pero REGRESÓ con un Refugio Infinito"
+- "¡El Mundo MURIÓ Por Los Zombis, Pero Él Regresó Para Sobrevivir!"
+- "Lo Dejaron MORIR en el Apocalipsis Zombi... Pero Despertó una Fortaleza Secreta"
+
+HARD RULES:
+1. Write 100% in natural Latin American SPANISH. Max {HOOK_MAX_CHARS} characters per hook. Do NOT add "| Manhwa Resumen" (it is appended automatically).
+2. Put an apocalypse/zombie/survival/regression keyword (apocalipsis, zombis, regresó, sobrevivió, fin del mundo) within the first {NICHE_KEYWORD_WINDOW} characters.
+3. Every claim must be true to the STORY FACTS. Numbers may ONLY come from the numbers list above.
+4. No character names and no comic title. Refer to the protagonist as "Él" or "el protagonista".
+5. At most {MAX_CAPS_WORDS} words in ALL CAPS (for dramatic emphasis, e.g. TRAICIONADO, MURIÓ, REGRESÓ).
+6. No power-rank or genre words the facts do not support.
+7. Cover three angles across the list: underdog contrast / traición, concrete resource / refugio, threat / horda de zombis.{premise_rule_es}
+
+Return ONLY a JSON array of {count} strings in SPANISH, no Markdown.
+"""
+
     return f"""You write YouTube titles for an English (US) apocalypse/survival manhwa recap channel.
 
 STORY FACTS (the ONLY facts you may use):
@@ -403,8 +446,13 @@ async def generate_llm_hooks(sheet: HookSheet, llm_text_call: Callable[[str], Aw
 # =============================================================================
 
 def strip_suffix(title: str) -> str:
-    """Removes a trailing '| Manhwa Recap' / '- Manhwa Recap' to get the hook."""
-    return re.sub(r"\s*[\|\-–—]\s*manhwa recap\s*$", "", title.strip(), flags=re.IGNORECASE).strip()
+    """Removes a trailing '| Manhwa Recap' / '- Manhwa Recap' / '| Manhwa Resumen' to get the hook."""
+    return re.sub(
+        r"\s*[\|\-–—]\s*(?:manhwa\s+recap|manhwa\s+resumen|manhwa\s+narrado)\s*$",
+        "",
+        title.strip(),
+        flags=re.IGNORECASE,
+    ).strip()
 
 
 def content_tokens(text: str) -> set[str]:
@@ -476,7 +524,8 @@ class TitleValidator:
 
     def check(self, hook: str, source: TitleSource) -> TitleCheck:
         hook = re.sub(r"\s+", " ", strip_suffix(hook)).strip()
-        title = f"{hook}{TITLE_SUFFIX}"
+        suffix = " | Manhwa Resumen" if getattr(self.sheet, "language", "en") in ("es", "spanish") else TITLE_SUFFIX
+        title = f"{hook}{suffix}"
         reasons: List[str] = []
 
         if len(hook) > HOOK_MAX_CHARS:
