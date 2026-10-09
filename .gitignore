@@ -12,7 +12,10 @@ yolov8n.pt
 cookies.json
 cookies/
 cache/
-runtime/
+runtime/jobs/
+runtime/extracted_frames/
+runtime/*.log
+runtime/__pycache__/
 .cache/
 *.log
 .agents/
@@ -36,6 +39,7 @@ output/
 *.srt
 *.mp3
 *.wav
+!static/sfx_time_shift_whoosh.wav
 review_*/
 review_samples/
 audit_results_*.json
