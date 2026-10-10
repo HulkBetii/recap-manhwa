@@ -239,26 +239,26 @@ async def run_pipeline(force_clean: bool = False):
         print(f"📦 YouTube Upload Kit sẵn sàng tại: {output_kit}", flush=True)
     print("=" * 60, flush=True)
 
-    # 13. Tự động cắt và tạo Shorts phễu
+    # 13. Tự động cắt và tạo Shorts phễu (3 Shorts/tuần)
     upload_dir = os.path.join(download_dir, "output", "upload")
     if os.path.exists(upload_dir):
-        mp4_files = [f for f in os.listdir(upload_dir) if f.endswith(".mp4") and not f.endswith("_SHORTS.mp4")]
+        mp4_files = [f for f in os.listdir(upload_dir) if f.endswith(".mp4") and "_SHORTS" not in f]
         srt_files = [f for f in os.listdir(upload_dir) if f.endswith(".srt")]
         if mp4_files and srt_files:
             master_mp4 = os.path.join(upload_dir, mp4_files[0])
             master_srt = os.path.join(upload_dir, srt_files[0])
-            shorts_out = os.path.join(upload_dir, mp4_files[0].replace(".mp4", "_SHORTS.mp4"))
-            print(f"\n🎬 [SHORTS] Đang tự động cắt & tạo YouTube Shorts từ {master_mp4}...", flush=True)
+            print(f"\n🎬 [SHORTS] Đang tự động cắt & tạo Bộ 3 YouTube Shorts phễu từ {master_mp4}...", flush=True)
             try:
                 cmd = [
                     sys.executable,
                     os.path.join(PROJECT_DIR, "runtime", "generate_shorts_funnel.py"),
                     "--video", master_mp4,
                     "--srt", master_srt,
-                    "--output", shorts_out,
+                    "--output-dir", upload_dir,
+                    "--comic-title", payload["comic_title"],
                 ]
                 subprocess.run(cmd, check=True)
-                print(f"✔ [SHORTS] Đã tạo thành công YouTube Shorts: {shorts_out}", flush=True)
+                print(f"✔ [SHORTS] Đã tạo thành công Bộ 3 YouTube Shorts và youtube_shorts_kit.txt trong: {upload_dir}", flush=True)
             except Exception as ex:
                 print(f"⚠ [SHORTS] Lỗi sinh Shorts: {ex}", flush=True)
 
